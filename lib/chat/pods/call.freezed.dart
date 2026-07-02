@@ -12,9 +12,9 @@ part of 'call.dart';
 // dart format off
 T _$identity<T>(T value) => value;
 /// @nodoc
-mixin _$CallState implements DiagnosticableTreeMixin {
+mixin _$CallState {
 
- bool get isConnected; bool get isMicrophoneEnabled; bool get isCameraEnabled; bool get isScreenSharing; bool get isSpeakerphone; Duration get duration; DateTime? get joinedAt; ViewMode get viewMode; int get participantSyncVersion; String? get error;
+ bool get isConnected; bool get isReconnecting; bool get isMicrophoneEnabled; bool get isCameraEnabled; bool get isScreenSharing; bool get isSpeakerphone; Duration get duration; DateTime? get joinedAt; ViewMode get viewMode; int get participantSyncVersion; int get reconnectAttempt; bool get hasJoined; String? get error;
 /// Create a copy of CallState
 /// with the given fields replaced by the non-null parameter values.
 @JsonKey(includeFromJson: false, includeToJson: false)
@@ -22,25 +22,19 @@ mixin _$CallState implements DiagnosticableTreeMixin {
 $CallStateCopyWith<CallState> get copyWith => _$CallStateCopyWithImpl<CallState>(this as CallState, _$identity);
 
 
-@override
-void debugFillProperties(DiagnosticPropertiesBuilder properties) {
-  properties
-    ..add(DiagnosticsProperty('type', 'CallState'))
-    ..add(DiagnosticsProperty('isConnected', isConnected))..add(DiagnosticsProperty('isMicrophoneEnabled', isMicrophoneEnabled))..add(DiagnosticsProperty('isCameraEnabled', isCameraEnabled))..add(DiagnosticsProperty('isScreenSharing', isScreenSharing))..add(DiagnosticsProperty('isSpeakerphone', isSpeakerphone))..add(DiagnosticsProperty('duration', duration))..add(DiagnosticsProperty('joinedAt', joinedAt))..add(DiagnosticsProperty('viewMode', viewMode))..add(DiagnosticsProperty('participantSyncVersion', participantSyncVersion))..add(DiagnosticsProperty('error', error));
-}
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is CallState&&(identical(other.isConnected, isConnected) || other.isConnected == isConnected)&&(identical(other.isMicrophoneEnabled, isMicrophoneEnabled) || other.isMicrophoneEnabled == isMicrophoneEnabled)&&(identical(other.isCameraEnabled, isCameraEnabled) || other.isCameraEnabled == isCameraEnabled)&&(identical(other.isScreenSharing, isScreenSharing) || other.isScreenSharing == isScreenSharing)&&(identical(other.isSpeakerphone, isSpeakerphone) || other.isSpeakerphone == isSpeakerphone)&&(identical(other.duration, duration) || other.duration == duration)&&(identical(other.joinedAt, joinedAt) || other.joinedAt == joinedAt)&&(identical(other.viewMode, viewMode) || other.viewMode == viewMode)&&(identical(other.participantSyncVersion, participantSyncVersion) || other.participantSyncVersion == participantSyncVersion)&&(identical(other.error, error) || other.error == error));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is CallState&&(identical(other.isConnected, isConnected) || other.isConnected == isConnected)&&(identical(other.isReconnecting, isReconnecting) || other.isReconnecting == isReconnecting)&&(identical(other.isMicrophoneEnabled, isMicrophoneEnabled) || other.isMicrophoneEnabled == isMicrophoneEnabled)&&(identical(other.isCameraEnabled, isCameraEnabled) || other.isCameraEnabled == isCameraEnabled)&&(identical(other.isScreenSharing, isScreenSharing) || other.isScreenSharing == isScreenSharing)&&(identical(other.isSpeakerphone, isSpeakerphone) || other.isSpeakerphone == isSpeakerphone)&&(identical(other.duration, duration) || other.duration == duration)&&(identical(other.joinedAt, joinedAt) || other.joinedAt == joinedAt)&&(identical(other.viewMode, viewMode) || other.viewMode == viewMode)&&(identical(other.participantSyncVersion, participantSyncVersion) || other.participantSyncVersion == participantSyncVersion)&&(identical(other.reconnectAttempt, reconnectAttempt) || other.reconnectAttempt == reconnectAttempt)&&(identical(other.hasJoined, hasJoined) || other.hasJoined == hasJoined)&&(identical(other.error, error) || other.error == error));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,isConnected,isMicrophoneEnabled,isCameraEnabled,isScreenSharing,isSpeakerphone,duration,joinedAt,viewMode,participantSyncVersion,error);
+int get hashCode => Object.hash(runtimeType,isConnected,isReconnecting,isMicrophoneEnabled,isCameraEnabled,isScreenSharing,isSpeakerphone,duration,joinedAt,viewMode,participantSyncVersion,reconnectAttempt,hasJoined,error);
 
 @override
-String toString({ DiagnosticLevel minLevel = DiagnosticLevel.info }) {
-  return 'CallState(isConnected: $isConnected, isMicrophoneEnabled: $isMicrophoneEnabled, isCameraEnabled: $isCameraEnabled, isScreenSharing: $isScreenSharing, isSpeakerphone: $isSpeakerphone, duration: $duration, joinedAt: $joinedAt, viewMode: $viewMode, participantSyncVersion: $participantSyncVersion, error: $error)';
+String toString() {
+  return 'CallState(isConnected: $isConnected, isReconnecting: $isReconnecting, isMicrophoneEnabled: $isMicrophoneEnabled, isCameraEnabled: $isCameraEnabled, isScreenSharing: $isScreenSharing, isSpeakerphone: $isSpeakerphone, duration: $duration, joinedAt: $joinedAt, viewMode: $viewMode, participantSyncVersion: $participantSyncVersion, reconnectAttempt: $reconnectAttempt, hasJoined: $hasJoined, error: $error)';
 }
 
 
@@ -51,7 +45,7 @@ abstract mixin class $CallStateCopyWith<$Res>  {
   factory $CallStateCopyWith(CallState value, $Res Function(CallState) _then) = _$CallStateCopyWithImpl;
 @useResult
 $Res call({
- bool isConnected, bool isMicrophoneEnabled, bool isCameraEnabled, bool isScreenSharing, bool isSpeakerphone, Duration duration, DateTime? joinedAt, ViewMode viewMode, int participantSyncVersion, String? error
+ bool isConnected, bool isReconnecting, bool isMicrophoneEnabled, bool isCameraEnabled, bool isScreenSharing, bool isSpeakerphone, Duration duration, DateTime? joinedAt, ViewMode viewMode, int participantSyncVersion, int reconnectAttempt, bool hasJoined, String? error
 });
 
 
@@ -68,9 +62,10 @@ class _$CallStateCopyWithImpl<$Res>
 
 /// Create a copy of CallState
 /// with the given fields replaced by the non-null parameter values.
-@pragma('vm:prefer-inline') @override $Res call({Object? isConnected = null,Object? isMicrophoneEnabled = null,Object? isCameraEnabled = null,Object? isScreenSharing = null,Object? isSpeakerphone = null,Object? duration = null,Object? joinedAt = freezed,Object? viewMode = null,Object? participantSyncVersion = null,Object? error = freezed,}) {
+@pragma('vm:prefer-inline') @override $Res call({Object? isConnected = null,Object? isReconnecting = null,Object? isMicrophoneEnabled = null,Object? isCameraEnabled = null,Object? isScreenSharing = null,Object? isSpeakerphone = null,Object? duration = null,Object? joinedAt = freezed,Object? viewMode = null,Object? participantSyncVersion = null,Object? reconnectAttempt = null,Object? hasJoined = null,Object? error = freezed,}) {
   return _then(_self.copyWith(
 isConnected: null == isConnected ? _self.isConnected : isConnected // ignore: cast_nullable_to_non_nullable
+as bool,isReconnecting: null == isReconnecting ? _self.isReconnecting : isReconnecting // ignore: cast_nullable_to_non_nullable
 as bool,isMicrophoneEnabled: null == isMicrophoneEnabled ? _self.isMicrophoneEnabled : isMicrophoneEnabled // ignore: cast_nullable_to_non_nullable
 as bool,isCameraEnabled: null == isCameraEnabled ? _self.isCameraEnabled : isCameraEnabled // ignore: cast_nullable_to_non_nullable
 as bool,isScreenSharing: null == isScreenSharing ? _self.isScreenSharing : isScreenSharing // ignore: cast_nullable_to_non_nullable
@@ -79,7 +74,9 @@ as bool,duration: null == duration ? _self.duration : duration // ignore: cast_n
 as Duration,joinedAt: freezed == joinedAt ? _self.joinedAt : joinedAt // ignore: cast_nullable_to_non_nullable
 as DateTime?,viewMode: null == viewMode ? _self.viewMode : viewMode // ignore: cast_nullable_to_non_nullable
 as ViewMode,participantSyncVersion: null == participantSyncVersion ? _self.participantSyncVersion : participantSyncVersion // ignore: cast_nullable_to_non_nullable
-as int,error: freezed == error ? _self.error : error // ignore: cast_nullable_to_non_nullable
+as int,reconnectAttempt: null == reconnectAttempt ? _self.reconnectAttempt : reconnectAttempt // ignore: cast_nullable_to_non_nullable
+as int,hasJoined: null == hasJoined ? _self.hasJoined : hasJoined // ignore: cast_nullable_to_non_nullable
+as bool,error: freezed == error ? _self.error : error // ignore: cast_nullable_to_non_nullable
 as String?,
   ));
 }
@@ -162,10 +159,10 @@ return $default(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( bool isConnected,  bool isMicrophoneEnabled,  bool isCameraEnabled,  bool isScreenSharing,  bool isSpeakerphone,  Duration duration,  DateTime? joinedAt,  ViewMode viewMode,  int participantSyncVersion,  String? error)?  $default,{required TResult orElse(),}) {final _that = this;
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( bool isConnected,  bool isReconnecting,  bool isMicrophoneEnabled,  bool isCameraEnabled,  bool isScreenSharing,  bool isSpeakerphone,  Duration duration,  DateTime? joinedAt,  ViewMode viewMode,  int participantSyncVersion,  int reconnectAttempt,  bool hasJoined,  String? error)?  $default,{required TResult orElse(),}) {final _that = this;
 switch (_that) {
 case _CallState() when $default != null:
-return $default(_that.isConnected,_that.isMicrophoneEnabled,_that.isCameraEnabled,_that.isScreenSharing,_that.isSpeakerphone,_that.duration,_that.joinedAt,_that.viewMode,_that.participantSyncVersion,_that.error);case _:
+return $default(_that.isConnected,_that.isReconnecting,_that.isMicrophoneEnabled,_that.isCameraEnabled,_that.isScreenSharing,_that.isSpeakerphone,_that.duration,_that.joinedAt,_that.viewMode,_that.participantSyncVersion,_that.reconnectAttempt,_that.hasJoined,_that.error);case _:
   return orElse();
 
 }
@@ -183,10 +180,10 @@ return $default(_that.isConnected,_that.isMicrophoneEnabled,_that.isCameraEnable
 /// }
 /// ```
 
-@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( bool isConnected,  bool isMicrophoneEnabled,  bool isCameraEnabled,  bool isScreenSharing,  bool isSpeakerphone,  Duration duration,  DateTime? joinedAt,  ViewMode viewMode,  int participantSyncVersion,  String? error)  $default,) {final _that = this;
+@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( bool isConnected,  bool isReconnecting,  bool isMicrophoneEnabled,  bool isCameraEnabled,  bool isScreenSharing,  bool isSpeakerphone,  Duration duration,  DateTime? joinedAt,  ViewMode viewMode,  int participantSyncVersion,  int reconnectAttempt,  bool hasJoined,  String? error)  $default,) {final _that = this;
 switch (_that) {
 case _CallState():
-return $default(_that.isConnected,_that.isMicrophoneEnabled,_that.isCameraEnabled,_that.isScreenSharing,_that.isSpeakerphone,_that.duration,_that.joinedAt,_that.viewMode,_that.participantSyncVersion,_that.error);}
+return $default(_that.isConnected,_that.isReconnecting,_that.isMicrophoneEnabled,_that.isCameraEnabled,_that.isScreenSharing,_that.isSpeakerphone,_that.duration,_that.joinedAt,_that.viewMode,_that.participantSyncVersion,_that.reconnectAttempt,_that.hasJoined,_that.error);}
 }
 /// A variant of `when` that fallback to returning `null`
 ///
@@ -200,10 +197,10 @@ return $default(_that.isConnected,_that.isMicrophoneEnabled,_that.isCameraEnable
 /// }
 /// ```
 
-@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( bool isConnected,  bool isMicrophoneEnabled,  bool isCameraEnabled,  bool isScreenSharing,  bool isSpeakerphone,  Duration duration,  DateTime? joinedAt,  ViewMode viewMode,  int participantSyncVersion,  String? error)?  $default,) {final _that = this;
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( bool isConnected,  bool isReconnecting,  bool isMicrophoneEnabled,  bool isCameraEnabled,  bool isScreenSharing,  bool isSpeakerphone,  Duration duration,  DateTime? joinedAt,  ViewMode viewMode,  int participantSyncVersion,  int reconnectAttempt,  bool hasJoined,  String? error)?  $default,) {final _that = this;
 switch (_that) {
 case _CallState() when $default != null:
-return $default(_that.isConnected,_that.isMicrophoneEnabled,_that.isCameraEnabled,_that.isScreenSharing,_that.isSpeakerphone,_that.duration,_that.joinedAt,_that.viewMode,_that.participantSyncVersion,_that.error);case _:
+return $default(_that.isConnected,_that.isReconnecting,_that.isMicrophoneEnabled,_that.isCameraEnabled,_that.isScreenSharing,_that.isSpeakerphone,_that.duration,_that.joinedAt,_that.viewMode,_that.participantSyncVersion,_that.reconnectAttempt,_that.hasJoined,_that.error);case _:
   return null;
 
 }
@@ -214,11 +211,12 @@ return $default(_that.isConnected,_that.isMicrophoneEnabled,_that.isCameraEnable
 /// @nodoc
 
 
-class _CallState with DiagnosticableTreeMixin implements CallState {
-  const _CallState({required this.isConnected, required this.isMicrophoneEnabled, required this.isCameraEnabled, required this.isScreenSharing, required this.isSpeakerphone, this.duration = const Duration(seconds: 0), this.joinedAt, this.viewMode = ViewMode.grid, this.participantSyncVersion = 0, this.error});
+class _CallState implements CallState {
+  const _CallState({required this.isConnected, this.isReconnecting = false, required this.isMicrophoneEnabled, required this.isCameraEnabled, required this.isScreenSharing, required this.isSpeakerphone, this.duration = const Duration(seconds: 0), this.joinedAt, this.viewMode = ViewMode.grid, this.participantSyncVersion = 0, this.reconnectAttempt = 0, this.hasJoined = false, this.error});
   
 
 @override final  bool isConnected;
+@override@JsonKey() final  bool isReconnecting;
 @override final  bool isMicrophoneEnabled;
 @override final  bool isCameraEnabled;
 @override final  bool isScreenSharing;
@@ -227,6 +225,8 @@ class _CallState with DiagnosticableTreeMixin implements CallState {
 @override final  DateTime? joinedAt;
 @override@JsonKey() final  ViewMode viewMode;
 @override@JsonKey() final  int participantSyncVersion;
+@override@JsonKey() final  int reconnectAttempt;
+@override@JsonKey() final  bool hasJoined;
 @override final  String? error;
 
 /// Create a copy of CallState
@@ -236,25 +236,19 @@ class _CallState with DiagnosticableTreeMixin implements CallState {
 _$CallStateCopyWith<_CallState> get copyWith => __$CallStateCopyWithImpl<_CallState>(this, _$identity);
 
 
-@override
-void debugFillProperties(DiagnosticPropertiesBuilder properties) {
-  properties
-    ..add(DiagnosticsProperty('type', 'CallState'))
-    ..add(DiagnosticsProperty('isConnected', isConnected))..add(DiagnosticsProperty('isMicrophoneEnabled', isMicrophoneEnabled))..add(DiagnosticsProperty('isCameraEnabled', isCameraEnabled))..add(DiagnosticsProperty('isScreenSharing', isScreenSharing))..add(DiagnosticsProperty('isSpeakerphone', isSpeakerphone))..add(DiagnosticsProperty('duration', duration))..add(DiagnosticsProperty('joinedAt', joinedAt))..add(DiagnosticsProperty('viewMode', viewMode))..add(DiagnosticsProperty('participantSyncVersion', participantSyncVersion))..add(DiagnosticsProperty('error', error));
-}
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is _CallState&&(identical(other.isConnected, isConnected) || other.isConnected == isConnected)&&(identical(other.isMicrophoneEnabled, isMicrophoneEnabled) || other.isMicrophoneEnabled == isMicrophoneEnabled)&&(identical(other.isCameraEnabled, isCameraEnabled) || other.isCameraEnabled == isCameraEnabled)&&(identical(other.isScreenSharing, isScreenSharing) || other.isScreenSharing == isScreenSharing)&&(identical(other.isSpeakerphone, isSpeakerphone) || other.isSpeakerphone == isSpeakerphone)&&(identical(other.duration, duration) || other.duration == duration)&&(identical(other.joinedAt, joinedAt) || other.joinedAt == joinedAt)&&(identical(other.viewMode, viewMode) || other.viewMode == viewMode)&&(identical(other.participantSyncVersion, participantSyncVersion) || other.participantSyncVersion == participantSyncVersion)&&(identical(other.error, error) || other.error == error));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is _CallState&&(identical(other.isConnected, isConnected) || other.isConnected == isConnected)&&(identical(other.isReconnecting, isReconnecting) || other.isReconnecting == isReconnecting)&&(identical(other.isMicrophoneEnabled, isMicrophoneEnabled) || other.isMicrophoneEnabled == isMicrophoneEnabled)&&(identical(other.isCameraEnabled, isCameraEnabled) || other.isCameraEnabled == isCameraEnabled)&&(identical(other.isScreenSharing, isScreenSharing) || other.isScreenSharing == isScreenSharing)&&(identical(other.isSpeakerphone, isSpeakerphone) || other.isSpeakerphone == isSpeakerphone)&&(identical(other.duration, duration) || other.duration == duration)&&(identical(other.joinedAt, joinedAt) || other.joinedAt == joinedAt)&&(identical(other.viewMode, viewMode) || other.viewMode == viewMode)&&(identical(other.participantSyncVersion, participantSyncVersion) || other.participantSyncVersion == participantSyncVersion)&&(identical(other.reconnectAttempt, reconnectAttempt) || other.reconnectAttempt == reconnectAttempt)&&(identical(other.hasJoined, hasJoined) || other.hasJoined == hasJoined)&&(identical(other.error, error) || other.error == error));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,isConnected,isMicrophoneEnabled,isCameraEnabled,isScreenSharing,isSpeakerphone,duration,joinedAt,viewMode,participantSyncVersion,error);
+int get hashCode => Object.hash(runtimeType,isConnected,isReconnecting,isMicrophoneEnabled,isCameraEnabled,isScreenSharing,isSpeakerphone,duration,joinedAt,viewMode,participantSyncVersion,reconnectAttempt,hasJoined,error);
 
 @override
-String toString({ DiagnosticLevel minLevel = DiagnosticLevel.info }) {
-  return 'CallState(isConnected: $isConnected, isMicrophoneEnabled: $isMicrophoneEnabled, isCameraEnabled: $isCameraEnabled, isScreenSharing: $isScreenSharing, isSpeakerphone: $isSpeakerphone, duration: $duration, joinedAt: $joinedAt, viewMode: $viewMode, participantSyncVersion: $participantSyncVersion, error: $error)';
+String toString() {
+  return 'CallState(isConnected: $isConnected, isReconnecting: $isReconnecting, isMicrophoneEnabled: $isMicrophoneEnabled, isCameraEnabled: $isCameraEnabled, isScreenSharing: $isScreenSharing, isSpeakerphone: $isSpeakerphone, duration: $duration, joinedAt: $joinedAt, viewMode: $viewMode, participantSyncVersion: $participantSyncVersion, reconnectAttempt: $reconnectAttempt, hasJoined: $hasJoined, error: $error)';
 }
 
 
@@ -265,7 +259,7 @@ abstract mixin class _$CallStateCopyWith<$Res> implements $CallStateCopyWith<$Re
   factory _$CallStateCopyWith(_CallState value, $Res Function(_CallState) _then) = __$CallStateCopyWithImpl;
 @override @useResult
 $Res call({
- bool isConnected, bool isMicrophoneEnabled, bool isCameraEnabled, bool isScreenSharing, bool isSpeakerphone, Duration duration, DateTime? joinedAt, ViewMode viewMode, int participantSyncVersion, String? error
+ bool isConnected, bool isReconnecting, bool isMicrophoneEnabled, bool isCameraEnabled, bool isScreenSharing, bool isSpeakerphone, Duration duration, DateTime? joinedAt, ViewMode viewMode, int participantSyncVersion, int reconnectAttempt, bool hasJoined, String? error
 });
 
 
@@ -282,9 +276,10 @@ class __$CallStateCopyWithImpl<$Res>
 
 /// Create a copy of CallState
 /// with the given fields replaced by the non-null parameter values.
-@override @pragma('vm:prefer-inline') $Res call({Object? isConnected = null,Object? isMicrophoneEnabled = null,Object? isCameraEnabled = null,Object? isScreenSharing = null,Object? isSpeakerphone = null,Object? duration = null,Object? joinedAt = freezed,Object? viewMode = null,Object? participantSyncVersion = null,Object? error = freezed,}) {
+@override @pragma('vm:prefer-inline') $Res call({Object? isConnected = null,Object? isReconnecting = null,Object? isMicrophoneEnabled = null,Object? isCameraEnabled = null,Object? isScreenSharing = null,Object? isSpeakerphone = null,Object? duration = null,Object? joinedAt = freezed,Object? viewMode = null,Object? participantSyncVersion = null,Object? reconnectAttempt = null,Object? hasJoined = null,Object? error = freezed,}) {
   return _then(_CallState(
 isConnected: null == isConnected ? _self.isConnected : isConnected // ignore: cast_nullable_to_non_nullable
+as bool,isReconnecting: null == isReconnecting ? _self.isReconnecting : isReconnecting // ignore: cast_nullable_to_non_nullable
 as bool,isMicrophoneEnabled: null == isMicrophoneEnabled ? _self.isMicrophoneEnabled : isMicrophoneEnabled // ignore: cast_nullable_to_non_nullable
 as bool,isCameraEnabled: null == isCameraEnabled ? _self.isCameraEnabled : isCameraEnabled // ignore: cast_nullable_to_non_nullable
 as bool,isScreenSharing: null == isScreenSharing ? _self.isScreenSharing : isScreenSharing // ignore: cast_nullable_to_non_nullable
@@ -293,7 +288,9 @@ as bool,duration: null == duration ? _self.duration : duration // ignore: cast_n
 as Duration,joinedAt: freezed == joinedAt ? _self.joinedAt : joinedAt // ignore: cast_nullable_to_non_nullable
 as DateTime?,viewMode: null == viewMode ? _self.viewMode : viewMode // ignore: cast_nullable_to_non_nullable
 as ViewMode,participantSyncVersion: null == participantSyncVersion ? _self.participantSyncVersion : participantSyncVersion // ignore: cast_nullable_to_non_nullable
-as int,error: freezed == error ? _self.error : error // ignore: cast_nullable_to_non_nullable
+as int,reconnectAttempt: null == reconnectAttempt ? _self.reconnectAttempt : reconnectAttempt // ignore: cast_nullable_to_non_nullable
+as int,hasJoined: null == hasJoined ? _self.hasJoined : hasJoined // ignore: cast_nullable_to_non_nullable
+as bool,error: freezed == error ? _self.error : error // ignore: cast_nullable_to_non_nullable
 as String?,
   ));
 }
@@ -302,7 +299,7 @@ as String?,
 }
 
 /// @nodoc
-mixin _$CallParticipantLive implements DiagnosticableTreeMixin {
+mixin _$CallParticipantLive {
 
  CallParticipant get participant; lk.Participant get remoteParticipant;
 /// Create a copy of CallParticipantLive
@@ -312,12 +309,6 @@ mixin _$CallParticipantLive implements DiagnosticableTreeMixin {
 $CallParticipantLiveCopyWith<CallParticipantLive> get copyWith => _$CallParticipantLiveCopyWithImpl<CallParticipantLive>(this as CallParticipantLive, _$identity);
 
 
-@override
-void debugFillProperties(DiagnosticPropertiesBuilder properties) {
-  properties
-    ..add(DiagnosticsProperty('type', 'CallParticipantLive'))
-    ..add(DiagnosticsProperty('participant', participant))..add(DiagnosticsProperty('remoteParticipant', remoteParticipant));
-}
 
 @override
 bool operator ==(Object other) {
@@ -329,7 +320,7 @@ bool operator ==(Object other) {
 int get hashCode => Object.hash(runtimeType,participant,remoteParticipant);
 
 @override
-String toString({ DiagnosticLevel minLevel = DiagnosticLevel.info }) {
+String toString() {
   return 'CallParticipantLive(participant: $participant, remoteParticipant: $remoteParticipant)';
 }
 
@@ -505,7 +496,7 @@ return $default(_that.participant,_that.remoteParticipant);case _:
 /// @nodoc
 
 
-class _CallParticipantLive extends CallParticipantLive with DiagnosticableTreeMixin {
+class _CallParticipantLive extends CallParticipantLive {
   const _CallParticipantLive({required this.participant, required this.remoteParticipant}): super._();
   
 
@@ -519,12 +510,6 @@ class _CallParticipantLive extends CallParticipantLive with DiagnosticableTreeMi
 _$CallParticipantLiveCopyWith<_CallParticipantLive> get copyWith => __$CallParticipantLiveCopyWithImpl<_CallParticipantLive>(this, _$identity);
 
 
-@override
-void debugFillProperties(DiagnosticPropertiesBuilder properties) {
-  properties
-    ..add(DiagnosticsProperty('type', 'CallParticipantLive'))
-    ..add(DiagnosticsProperty('participant', participant))..add(DiagnosticsProperty('remoteParticipant', remoteParticipant));
-}
 
 @override
 bool operator ==(Object other) {
@@ -536,7 +521,7 @@ bool operator ==(Object other) {
 int get hashCode => Object.hash(runtimeType,participant,remoteParticipant);
 
 @override
-String toString({ DiagnosticLevel minLevel = DiagnosticLevel.info }) {
+String toString() {
   return 'CallParticipantLive(participant: $participant, remoteParticipant: $remoteParticipant)';
 }
 

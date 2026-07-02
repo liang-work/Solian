@@ -19,6 +19,7 @@ sealed class CustomApp with _$CustomApp {
     CustomAppLinks? links,
     @Default([]) List<CustomAppSecret> secrets,
     @Default('') String publisherId,
+    String? paymentWalletId,
   }) = _CustomApp;
 
   factory CustomApp.fromJson(Map<String, dynamic> json) =>
@@ -48,6 +49,7 @@ sealed class CustomAppOauthConfig with _$CustomAppOauthConfig {
     List<String> allowedGrantTypes,
     @Default(true) bool requirePkce,
     @Default(false) bool allowOfflineAccess,
+    @Default(false) bool isPublicClient,
   }) = _CustomAppOauthConfig;
 
   factory CustomAppOauthConfig.fromJson(Map<String, dynamic> json) =>
@@ -58,7 +60,7 @@ sealed class CustomAppOauthConfig with _$CustomAppOauthConfig {
 sealed class CustomAppSecret with _$CustomAppSecret {
   const factory CustomAppSecret({
     @Default('') String id,
-    @Default('') String secret,
+    String? secret,
     String? description,
     DateTime? expiredAt,
     @Default(false) bool isOidc,

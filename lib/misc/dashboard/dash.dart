@@ -1,22 +1,23 @@
 import 'dart:math' as math;
 import 'dart:async';
+import 'dart:ui';
 
+import 'package:auto_route/auto_route.dart';
 import 'package:desktop_drop/desktop_drop.dart';
 import 'package:easy_localization/easy_localization.dart';
-import 'package:auto_route/auto_route.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_hooks/flutter_hooks.dart';
 import 'package:gap/gap.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
+import 'package:island_ui_foundation/island_ui_foundation.dart'
+    show HoverEdgeAction;
 import 'package:island/accounts/widgets/account/account_name.dart';
-import 'package:island/accounts/widgets/account/fortune_graph.dart';
 import 'package:island/accounts/widgets/account/friends_overview.dart';
 import 'package:island/chat/pods/chat_room.dart';
 import 'package:island/chat/pods/chat_summary.dart';
 import 'package:island/accounts/event_calendar.dart';
 import 'package:island/accounts/account_pod.dart';
-import 'package:island/accounts/widgets/account/event_countdown_sheet.dart';
 import 'package:island/chat/widgets/chat_room_list_tile.dart';
 import 'package:island/core/services/event_bus.dart';
 import 'package:island/core/services/responsive.dart';
@@ -24,6 +25,7 @@ import 'package:island/notifications/notification.dart';
 import 'package:island/posts/widgets/compose/post_featured.dart';
 import 'package:island/route.gr.dart';
 import 'package:island/shared/widgets/app_scaffold.dart';
+import 'package:island/shared/widgets/attention_modal.dart';
 import 'package:island/shared/widgets/confuse_spinner.dart';
 import 'package:island/notifications/notification_tile.dart';
 import 'package:island/accounts/check_in.dart';
@@ -58,20 +60,7 @@ class DashboardRenderer {
       case 'checkIn':
         return CheckInWidget(margin: EdgeInsets.zero);
       case 'fortuneGraph':
-        return Card(
-          margin: EdgeInsets.zero,
-          child: FortuneGraphWidget(
-            events: ref.watch(
-              eventCalendarProvider(
-                EventCalendarQuery(
-                  uname: 'me',
-                  year: DateTime.now().year,
-                  month: DateTime.now().month,
-                ),
-              ),
-            ),
-          ),
-        );
+        return const TodayOracleCard();
       case 'fortuneCard':
         return FortuneCard(unlimited: true);
       case 'postFeatured':
@@ -100,20 +89,7 @@ class DashboardRenderer {
             spacing: 16,
             children: [
               CheckInWidget(margin: EdgeInsets.zero),
-              Card(
-                margin: EdgeInsets.zero,
-                child: FortuneGraphWidget(
-                  events: ref.watch(
-                    eventCalendarProvider(
-                      EventCalendarQuery(
-                        uname: 'me',
-                        year: DateTime.now().year,
-                        month: DateTime.now().month,
-                      ),
-                    ),
-                  ),
-                ),
-              ),
+              const TodayOracleCard(),
               Expanded(child: FortuneCard()),
             ],
           ),
@@ -133,12 +109,11 @@ class DashboardRenderer {
       case 'socialColumn':
         return SizedBox(
           width: 400,
-          child: Column(
-            spacing: 16,
-            children: [
-              FriendsOverviewWidget(),
-              Expanded(child: NotificationsCard()),
-            ],
+          child: SingleChildScrollView(
+            child: Column(
+              spacing: 16,
+              children: [FriendsOverviewWidget(), NotificationsCard()],
+            ),
           ),
         );
       case 'chatsColumn':
@@ -168,6 +143,9 @@ class DashboardGrid extends HookConsumerWidget {
 
     final dragging = useState(false);
 
+    // Check if user is authenticated
+    final isAuthenticated = userInfo.value != null;
+
     return DropTarget(
       onDragDone: (detail) {
         dragging.value = false;
@@ -190,80 +168,88 @@ class DashboardGrid extends HookConsumerWidget {
                   ? math.min(640, MediaQuery.sizeOf(context).height * 0.65)
                   : MediaQuery.sizeOf(context).height,
             ),
-            padding: isWide
-                ? EdgeInsets.only(top: devicePadding.top)
-                : EdgeInsets.only(top: 24 + devicePadding.top),
-            child: Column(
-              spacing: 16,
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                // Clock card spans full width (only if enabled in settings)
-                if (isWide &&
-                    (appSettings.dashboardConfig?.showClockAndCountdown ??
-                        true))
-                  ClockCard().padding(horizontal: 24)
-                else if (!isWide)
-                  Row(
+            padding: isAuthenticated
+                ? (isWide
+                      ? EdgeInsets.only(top: devicePadding.top)
+                      : EdgeInsets.only(top: 24 + devicePadding.top))
+                : EdgeInsets.zero,
+            child: isAuthenticated
+                ? Column(
+                    spacing: 16,
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      const Gap(8),
-                      if (appSettings.dashboardConfig?.showClockAndCountdown ??
-                          true)
-                        Expanded(child: ClockCard(compact: true)),
-                      if (appSettings.dashboardConfig?.showSearchBar ?? true)
-                        IconButton(
-                          onPressed: () {
-                            eventBus.fire(CommandPaletteTriggerEvent());
-                          },
-                          icon: const Icon(Symbols.search),
-                          tooltip: 'searchAnything'.tr(),
+                      // Clock card spans full width (only if enabled in settings)
+                      if (isWide &&
+                          (appSettings.dashboardConfig?.showClockAndCountdown ??
+                              true))
+                        ClockCard().padding(horizontal: 24)
+                      else if (!isWide)
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            const Gap(8),
+                            if (appSettings
+                                    .dashboardConfig
+                                    ?.showClockAndCountdown ??
+                                true)
+                              Expanded(child: ClockCard(compact: true)),
+                            if (appSettings.dashboardConfig?.showSearchBar ??
+                                true)
+                              IconButton(
+                                onPressed: () {
+                                  eventBus.fire(CommandPaletteTriggerEvent());
+                                },
+                                icon: const Icon(Symbols.search),
+                                tooltip: 'searchAnything'.tr(),
+                              ),
+                          ],
+                        ).padding(horizontal: 24),
+                      // Row with two cards side by side (only if enabled in settings)
+                      if (isWide &&
+                          (appSettings.dashboardConfig?.showSearchBar ?? true))
+                        Padding(
+                          padding: EdgeInsets.symmetric(
+                            horizontal: isWide ? 24 : 16,
+                          ),
+                          child: SearchBar(
+                            hintText: 'searchAnything'.tr(),
+                            constraints: const BoxConstraints(minHeight: 56),
+                            leading: const Icon(
+                              Symbols.search,
+                            ).padding(horizontal: 24),
+                            readOnly: true,
+                            onTap: () {
+                              eventBus.fire(CommandPaletteTriggerEvent());
+                            },
+                          ),
                         ),
+                      Expanded(
+                        child:
+                            (isWide
+                                    ? _HoverHorizontalScrollArea(
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 24,
+                                        ),
+                                        child: _DashboardGridWide(),
+                                      )
+                                    : SingleChildScrollView(
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 16,
+                                        ),
+                                        scrollDirection: Axis.vertical,
+                                        child: _DashboardGridNarrow(),
+                                      ))
+                                .clipRRect(
+                                  topLeft: isWide ? 0 : 12,
+                                  topRight: isWide ? 0 : 12,
+                                ),
+                      ),
                     ],
-                  ).padding(horizontal: 24),
-                // Row with two cards side by side (only if enabled in settings)
-                if (isWide &&
-                    (appSettings.dashboardConfig?.showSearchBar ?? true))
-                  Padding(
-                    padding: EdgeInsets.symmetric(horizontal: isWide ? 24 : 16),
-                    child: SearchBar(
-                      hintText: 'searchAnything'.tr(),
-                      constraints: const BoxConstraints(minHeight: 56),
-                      leading: const Icon(
-                        Symbols.search,
-                      ).padding(horizontal: 24),
-                      readOnly: true,
-                      onTap: () {
-                        eventBus.fire(CommandPaletteTriggerEvent());
-                      },
-                    ),
-                  ),
-                if (userInfo.value != null)
-                  Expanded(
-                    child:
-                        SingleChildScrollView(
-                          padding: isWide
-                              ? const EdgeInsets.symmetric(horizontal: 24)
-                              : const EdgeInsets.symmetric(horizontal: 16),
-                          scrollDirection: isWide
-                              ? Axis.horizontal
-                              : Axis.vertical,
-                          child: isWide
-                              ? _DashboardGridWide()
-                              : _DashboardGridNarrow(),
-                        ).clipRRect(
-                          topLeft: isWide ? 0 : 12,
-                          topRight: isWide ? 0 : 12,
-                        ),
                   )
-                else
-                  Center(
-                    child: _UnauthorizedCard(isWide: isWide),
-                  ).padding(horizontal: isWide ? 24 : 16),
-              ],
-            ),
+                : Center(child: _UnauthorizedCard(isWide: isWide)),
           ),
           // Customize button (positioned for wide screens only)
-          if (isWide)
+          if (isWide && isAuthenticated)
             Positioned(
               bottom: 16,
               right: 16,
@@ -367,6 +353,117 @@ class _DashboardGridWide extends HookConsumerWidget {
   }
 }
 
+class _HoverHorizontalScrollArea extends HookWidget {
+  final Widget child;
+  final EdgeInsetsGeometry? padding;
+
+  const _HoverHorizontalScrollArea({required this.child, this.padding});
+
+  @override
+  Widget build(BuildContext context) {
+    final controller = useScrollController();
+    final isHovered = useState(false);
+    final canScrollLeft = useState(false);
+    final canScrollRight = useState(false);
+
+    void updateScrollState() {
+      if (!controller.hasClients) {
+        canScrollLeft.value = false;
+        canScrollRight.value = false;
+        return;
+      }
+
+      final position = controller.position;
+      canScrollLeft.value = position.pixels > 0;
+      canScrollRight.value = position.pixels < position.maxScrollExtent;
+    }
+
+    useEffect(() {
+      void listener() => updateScrollState();
+
+      controller.addListener(listener);
+      WidgetsBinding.instance.addPostFrameCallback((_) => updateScrollState());
+
+      return () => controller.removeListener(listener);
+    }, [controller, child, padding]);
+
+    Future<void> scrollBy(double direction) async {
+      if (!controller.hasClients) return;
+      final position = controller.position;
+      final delta = math.max(position.viewportDimension * 0.8, 280.0);
+      final target = (position.pixels + delta * direction).clamp(
+        0.0,
+        position.maxScrollExtent,
+      );
+      await controller.animateTo(
+        target,
+        duration: const Duration(milliseconds: 220),
+        curve: Curves.easeOutCubic,
+      );
+    }
+
+    final scrollBehavior = ScrollConfiguration.of(context).copyWith(
+      dragDevices: {PointerDeviceKind.touch, PointerDeviceKind.trackpad},
+    );
+
+    return MouseRegion(
+      onEnter: (_) => isHovered.value = true,
+      onExit: (_) => isHovered.value = false,
+      child: Stack(
+        children: [
+          Positioned.fill(
+            child: ScrollConfiguration(
+              behavior: scrollBehavior,
+              child: SingleChildScrollView(
+                controller: controller,
+                padding: padding,
+                scrollDirection: Axis.horizontal,
+                child: child,
+              ),
+            ),
+          ),
+          Positioned(
+            left: 12,
+            top: 0,
+            bottom: 0,
+            child: Center(
+              child: HoverEdgeAction(
+                axis: Axis.horizontal,
+                leading: true,
+                isVisible: isHovered.value && canScrollLeft.value,
+                onTap: () => scrollBy(-1),
+                child: const Icon(
+                  Symbols.chevron_left,
+                  color: Colors.white,
+                  size: 20,
+                ),
+              ),
+            ),
+          ),
+          Positioned(
+            right: 12,
+            top: 0,
+            bottom: 0,
+            child: Center(
+              child: HoverEdgeAction(
+                axis: Axis.horizontal,
+                leading: false,
+                isVisible: isHovered.value && canScrollRight.value,
+                onTap: () => scrollBy(1),
+                child: const Icon(
+                  Symbols.chevron_right,
+                  color: Colors.white,
+                  size: 20,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _DashboardGridNarrow extends HookConsumerWidget {
   const _DashboardGridNarrow();
 
@@ -445,7 +542,22 @@ class ClockCard extends HookConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final time = useState(DateTime.now());
     final timer = useRef<Timer?>(null);
-    final countdowns = ref.watch(eventCountdownsProvider(take: 5));
+    final appSettings = ref.watch(appSettingsProvider);
+    final userInfo = ref.watch(userInfoProvider);
+
+    // Only fetch countdowns if user is authenticated
+    final isAuthenticated = userInfo.value != null;
+    final query = isAuthenticated
+        ? EventCountdownQuery(
+            username: 'me',
+            includeNotableDays:
+                appSettings.dashboardConfig?.countdownIncludeNotableDays ??
+                true,
+          )
+        : null;
+    final countdowns = query != null
+        ? ref.watch(eventCountdownListProvider(query))
+        : null;
 
     // Determine icon based on time of day
     final int hour = time.value.hour;
@@ -469,12 +581,7 @@ class ClockCard extends HookConsumerWidget {
       ),
       child: InkWell(
         onTap: () {
-          showModalBottomSheet(
-            context: context,
-            isScrollControlled: true,
-            useRootNavigator: true,
-            builder: (context) => const EventCountdownSheet(),
-          );
+          context.router.push(EventHubRoute(name: 'me'));
         },
         child: Padding(
           padding: compact
@@ -523,23 +630,27 @@ class ClockCard extends HookConsumerWidget {
                             ),
                           ],
                         ),
-                        SingleChildScrollView(
-                          scrollDirection: Axis.horizontal,
-                          child: Row(
-                            spacing: 5,
-                            children: [
-                              countdowns.when(
-                                data: (items) => items.isEmpty
-                                    ? Text('countdownEmpty').tr().fontSize(12)
-                                    : _buildCountdownText(context, items.first),
-                                error: (err, _) =>
-                                    Text(err.toString()).fontSize(12),
-                                loading: () =>
-                                    const Text('loading').tr().fontSize(12),
-                              ),
-                            ],
+                        if (isAuthenticated && countdowns != null)
+                          SingleChildScrollView(
+                            scrollDirection: Axis.horizontal,
+                            child: Row(
+                              spacing: 5,
+                              children: [
+                                countdowns.when(
+                                  data: (state) => state.items.isEmpty
+                                      ? Text('countdownEmpty').tr().fontSize(12)
+                                      : _buildCountdownText(
+                                          context,
+                                          state.items.first,
+                                        ),
+                                  error: (err, _) =>
+                                      Text(err.toString()).fontSize(12),
+                                  loading: () =>
+                                      const Text('loading').tr().fontSize(12),
+                                ),
+                              ],
+                            ),
                           ),
-                        ),
                       ],
                     ),
                   ),
@@ -627,12 +738,12 @@ class NotificationsCard extends HookConsumerWidget {
       child: InkWell(
         borderRadius: BorderRadius.all(Radius.circular(12)),
         onTap: () {
-          // Show notification sheet similar to explore.dart
-          showModalBottomSheet(
-            context: context,
-            isScrollControlled: true,
-            useRootNavigator: true,
-            builder: (context) => const NotificationSheet(),
+          showAttentionModal(
+            id: 'notifications',
+            replaceIfExists: true,
+            barrierDismissible: true,
+            builder: (context, dismiss) =>
+                NotificationModal(onDismiss: dismiss),
           );
         },
         child: Column(
@@ -759,7 +870,7 @@ class ChatListCard extends HookConsumerWidget {
               error: (error, stack) => Center(child: Text('Error: $error')),
               data: (rooms) {
                 if (rooms.isEmpty) {
-                  return const Center(child: Text('No chat rooms available'));
+                  return Center(child: Text('noChatRoomsAvailable'.tr()));
                 }
                 // Take only the first 5 rooms
                 final recentRooms = rooms.take(5).toList();
@@ -769,10 +880,7 @@ class ChatListCard extends HookConsumerWidget {
                       room: room,
                       isDirect: room.type == 1,
                       onTap: () {
-                        context.router.pushAll([
-                          const ChatListRoute(),
-                          ChatRoomRoute(id: room.id),
-                        ]);
+                        context.router.navigate(ChatRoomRoute(id: room.id));
                       },
                     );
                   }).toList(),
@@ -834,49 +942,288 @@ class FortuneCard extends HookConsumerWidget {
   }
 }
 
+class TodayOracleCard extends ConsumerWidget {
+  const TodayOracleCard({super.key});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final todayResult = ref.watch(checkInResultTodayProvider);
+    final theme = Theme.of(context);
+
+    return Card(
+      margin: EdgeInsets.zero,
+      child: todayResult.when(
+        loading: () => Center(
+          child: ConfuseSpinner(
+            size: 36,
+            speed: 6,
+            color: theme.colorScheme.onSurfaceVariant.withOpacity(0.65),
+          ),
+        ).padding(vertical: 16),
+        error: (error, _) => Padding(
+          padding: const EdgeInsets.all(16),
+          child: Text(
+            error.toString(),
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+        data: (result) {
+          final report = result?.fortuneReport;
+
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Icon(
+                    Symbols.temple_buddhist,
+                    size: 20,
+                    color: theme.colorScheme.primary,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'checkInTodayOracle'.tr(),
+                      style: theme.textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                  IconButton(
+                    icon: const Icon(Symbols.calendar_month, size: 20),
+                    visualDensity: const VisualDensity(
+                      horizontal: -4,
+                      vertical: -4,
+                    ),
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(),
+                    onPressed: () {
+                      context.router.push(EventHubRoute(name: 'me'));
+                    },
+                  ),
+                ],
+              ).padding(horizontal: 16, vertical: 12),
+              if (result == null)
+                Text(
+                  'checkInViewTemple'.tr(),
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                ).padding(horizontal: 16, bottom: 16)
+              else ...[
+                Text(
+                  'checkInResultLevel${result.level}'.tr(),
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: theme.colorScheme.primary,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ).padding(horizontal: 16),
+                if (report != null) ...[
+                  const SizedBox(height: 12),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      _OracleMetaChip(
+                        icon: Symbols.palette,
+                        text: report.luckyColor,
+                      ),
+                      _OracleMetaChip(
+                        icon: Symbols.schedule,
+                        text: report.luckyTime,
+                      ),
+                      _OracleMetaChip(
+                        icon: Symbols.explore,
+                        text: report.luckyDirection,
+                      ),
+                    ],
+                  ).padding(horizontal: 12),
+                  if (result.tips.isNotEmpty) ...[
+                    const SizedBox(height: 12),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      child: Row(
+                        children: [
+                          if (result.tips.any((t) => t.isPositive)) ...[
+                            Icon(
+                              Symbols.thumb_up,
+                              size: 14,
+                              color: theme.colorScheme.primary,
+                            ),
+                            const SizedBox(width: 6),
+                            Expanded(
+                              child: Text(
+                                result.tips
+                                    .where((t) => t.isPositive)
+                                    .map((t) => t.title)
+                                    .join(' · '),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: theme.textTheme.bodySmall,
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                    if (result.tips.any((t) => !t.isPositive))
+                      Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 4,
+                        ),
+                        child: Row(
+                          children: [
+                            Icon(
+                              Symbols.thumb_down,
+                              size: 14,
+                              color: theme.colorScheme.error,
+                            ),
+                            const SizedBox(width: 6),
+                            Expanded(
+                              child: Text(
+                                result.tips
+                                    .where((t) => !t.isPositive)
+                                    .map((t) => t.title)
+                                    .join(' · '),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: theme.textTheme.bodySmall,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                  ],
+                  const SizedBox(height: 12),
+                  _OracleActionRow(
+                    icon: Symbols.task_alt,
+                    text: report.luckyAction,
+                    color: theme.colorScheme.primary,
+                  ).padding(horizontal: 16),
+                  const SizedBox(height: 8),
+                  _OracleActionRow(
+                    icon: Symbols.block,
+                    text: report.avoidAction,
+                    color: theme.colorScheme.error,
+                  ).padding(horizontal: 16),
+                ],
+                const SizedBox(height: 16),
+              ],
+            ],
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _OracleMetaChip extends StatelessWidget {
+  final IconData icon;
+  final String text;
+
+  const _OracleMetaChip({required this.icon, required this.text});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 14, color: theme.colorScheme.primary),
+          const SizedBox(width: 6),
+          Text(text, style: theme.textTheme.bodySmall),
+        ],
+      ),
+    );
+  }
+}
+
+class _OracleActionRow extends StatelessWidget {
+  final IconData icon;
+  final String text;
+  final Color color;
+
+  const _OracleActionRow({
+    required this.icon,
+    required this.text,
+    required this.color,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Icon(icon, size: 16, color: color),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(
+            text,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: theme.textTheme.bodySmall?.copyWith(height: 1.4),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
 class _UnauthorizedCard extends HookConsumerWidget {
   final bool isWide;
   const _UnauthorizedCard({required this.isWide});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
+
     return Card(
       margin: EdgeInsets.zero,
+      elevation: 0,
+      color: colorScheme.surface,
       child: Padding(
         padding: EdgeInsets.symmetric(
           horizontal: isWide ? 48 : 32,
-          vertical: 32,
+          vertical: isWide ? 40 : 32,
         ),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           crossAxisAlignment: CrossAxisAlignment.center,
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Gap(16),
-            const SizedBox(width: double.infinity),
-            Icon(
-              Symbols.dashboard_rounded,
-              size: 64,
-              color: Theme.of(context).colorScheme.primary,
-              fill: 1,
-            ),
-            const Gap(16),
+            Icon(Symbols.person, size: 64, color: colorScheme.onSurfaceVariant),
+            const Gap(24),
             Text(
-              'Welcome to\nthe Solar Network',
-              style: Theme.of(
-                context,
-              ).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold),
-              textAlign: TextAlign.center,
-            ),
-            const Gap(8),
-            Text(
-              'Login to access your personalized dashboard with friends, notifications, chats, and more!',
-              style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              'welcomeToSolarNetwork'.tr(),
+              style: textTheme.headlineSmall?.copyWith(
+                fontWeight: FontWeight.w600,
+                color: colorScheme.onSurface,
               ),
               textAlign: TextAlign.center,
             ),
             const Gap(12),
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 320),
+              child: Text(
+                'Login to access your personalized dashboard with friends, notifications, chats, and more!',
+                style: textTheme.bodyMedium?.copyWith(
+                  color: colorScheme.onSurfaceVariant,
+                  height: 1.5,
+                ),
+                textAlign: TextAlign.center,
+              ),
+            ),
+            const Gap(32),
             FilledButton.icon(
               onPressed: () {
                 showModalBottomSheet(
@@ -886,8 +1233,17 @@ class _UnauthorizedCard extends HookConsumerWidget {
                   builder: (context) => const LoginModal(),
                 );
               },
-              icon: const Icon(Symbols.login),
-              label: Text('login').tr(),
+              icon: const Icon(Symbols.login, size: 20),
+              label: Text('login'.tr()),
+              style: FilledButton.styleFrom(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 32,
+                  vertical: 16,
+                ),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
             ),
           ],
         ),

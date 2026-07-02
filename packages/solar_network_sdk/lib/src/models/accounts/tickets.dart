@@ -23,6 +23,7 @@ sealed class SnTicket with _$SnTicket {
     DateTime? deletedAt,
     @Default([]) List<SnTicketMessage> messages,
     @Default([]) List<String> fileIds,
+    @Default([]) List<String?> resources,
   }) = _SnTicket;
 
   factory SnTicket.fromJson(Map<String, dynamic> json) =>
@@ -40,7 +41,7 @@ sealed class SnTicketMessage with _$SnTicketMessage {
     required DateTime createdAt,
     required DateTime updatedAt,
     DateTime? deletedAt,
-    required List<SnCloudFile> files,
+    required List<SnCloudFileReference> files,
   }) = _SnTicketMessage;
 
   factory SnTicketMessage.fromJson(Map<String, dynamic> json) =>

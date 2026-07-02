@@ -1,68 +1,52 @@
-import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
+import 'package:hooks_riverpod/hooks_riverpod.dart';
 import 'package:island/accounts/badge.dart';
 import 'package:solar_network_sdk/solar_network_sdk.dart';
 
-class BadgeList extends StatelessWidget {
+class BadgeList extends ConsumerWidget {
   final List<SnAccountBadge> badges;
   const BadgeList({super.key, required this.badges});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final manifest = ref.watch(badgeManifestMapProvider);
     return Wrap(
       spacing: 8,
       runSpacing: 8,
-      children: badges.map((badge) => BadgeItem(badge: badge)).toList(),
+      children: badges
+          .map((badge) => BadgeItem(badge: badge, manifest: manifest))
+          .toList(),
     );
   }
 }
 
-Color _getSponsorColor(int level) {
-  // Level 0 = red, level 36+ = golden
-  // Interpolate from red to golden based on level
-  final clampedLevel = level.clamp(0, 36);
-  final t = clampedLevel / 36.0;
-
-  // Red to Golden (goldenrod - more orange-gold, less yellow)
-  const redColor = Colors.red;
-  const goldenColor = Color(0xFFDAA520); // Goldenrod
-
-  return Color.lerp(redColor, goldenColor, t)!;
-}
-
 class BadgeItem extends StatelessWidget {
   final SnAccountBadge badge;
-  const BadgeItem({super.key, required this.badge});
+  final Map<String, BadgeManifestEntry> manifest;
+
+  const BadgeItem({super.key, required this.badge, this.manifest = const {}});
 
   @override
   Widget build(BuildContext context) {
-    final template = kBadgeTemplates[badge.type];
-    final name = template?.name.tr() ?? badge.label ?? 'unknown'.tr();
-    final templateDesc = template?.description.tr();
-    final badgeCaption = badge.caption;
-    final description = [
-      if (templateDesc != null && templateDesc.isNotEmpty) templateDesc,
-      if (badgeCaption != null && badgeCaption.isNotEmpty) badgeCaption,
-    ].join('\n');
-
-    // Determine badge color - special handling for sponsor badges
-    Color badgeColor;
-    if (badge.type == 'sponsor') {
-      final level = int.tryParse(badge.meta['level'] as String? ?? '0') ?? 0;
-      badgeColor = _getSponsorColor(level);
-    } else {
-      badgeColor = template?.color ?? Colors.blue;
-    }
+    final name = getBadgeName(badge, manifest: manifest);
+    final description = getBadgeDescription(badge, manifest: manifest);
+    final badgeColor = getBadgeColor(badge, manifest: manifest);
+    final iconUrl = getBadgeIconUrl(badge, manifest: manifest);
 
     return Tooltip(
-      message: '$name\n$description',
+      message: description != null ? '$name\n$description' : name,
       child: Container(
         padding: const EdgeInsets.all(4),
         decoration: BoxDecoration(
           color: badgeColor.withOpacity(0.2),
           shape: BoxShape.circle,
         ),
-        child: Icon(template?.icon ?? Icons.stars, color: badgeColor, size: 20),
+        child: CachedBadgeIcon(
+          iconUrl: iconUrl,
+          color: badgeColor,
+          fallbackIcon: kBadgeTemplates[badge.type]?.icon ?? Icons.stars,
+          size: 20,
+        ),
       ),
     );
   }

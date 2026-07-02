@@ -14,10 +14,13 @@ import 'package:island/accounts/widgets/activitypub/actor_profile.dart';
 import 'package:island/core/config.dart';
 import 'package:island/core/network.dart';
 import 'package:island/core/services/time.dart';
+import 'package:island/posts/widgets/compose/post_interactions.dart';
 import 'package:island/posts/widgets/compose/post_replies_sheet.dart';
+import 'package:island/realms/widgets/realm_label.dart';
 import 'package:island/route.gr.dart';
 import 'package:island/shared/widgets/alert.dart';
 import 'package:island/core/widgets/content/cloud_file_collection.dart';
+import 'package:island/shared/widgets/content/image.dart';
 import 'package:island/drive/widgets/cloud_files.dart';
 import 'package:island/core/widgets/embeds/embed_list.dart';
 import 'package:island/shared/widgets/content/markdown.dart';
@@ -37,6 +40,273 @@ String _convertContentToMarkdown(SnPost post) {
     return html2md.convert(post.content!);
   }
   return post.content ?? '';
+}
+
+IDisplayableCloudFile? _getThumbnailAttachment(SnPost post) {
+  final thumbnailId = post.meta?['thumbnail'] as String?;
+  if (thumbnailId == null) return null;
+  try {
+    return post.attachments.firstWhere((a) => a.id == thumbnailId);
+  } catch (_) {
+    return null;
+  }
+}
+
+List<dynamic> _getPostEmbeds(SnPost post) {
+  final embeds = post.meta?['embeds'];
+  return embeds is List ? embeds : const <dynamic>[];
+}
+
+bool _urlsMatch(String? left, String? right) {
+  if (left == null || right == null) return false;
+  final leftUri = Uri.tryParse(left.trim());
+  final rightUri = Uri.tryParse(right.trim());
+  if (leftUri == null || rightUri == null) return left.trim() == right.trim();
+
+  String normalizePath(Uri uri) {
+    final path = uri.path.endsWith('/') && uri.path.length > 1
+        ? uri.path.substring(0, uri.path.length - 1)
+        : uri.path;
+    return path.isEmpty ? '/' : path;
+  }
+
+  return leftUri.scheme == rightUri.scheme &&
+      leftUri.host == rightUri.host &&
+      leftUri.port == rightUri.port &&
+      normalizePath(leftUri) == normalizePath(rightUri) &&
+      leftUri.query == rightUri.query;
+}
+
+SnScrappedLink? _getBlogLinkPreview(SnPost post) {
+  if (post.type != 2) return null;
+
+  for (final embed in _getPostEmbeds(post)) {
+    if (embed is! Map || embed['type'] != 'link') continue;
+    final url = embed['url']?.toString();
+    if (_urlsMatch(url, post.content)) {
+      try {
+        return SnScrappedLink.fromJson(Map<String, dynamic>.from(embed));
+      } catch (_) {
+        return null;
+      }
+    }
+  }
+
+  return null;
+}
+
+List<dynamic> _getVisibleEmbeds(SnPost post) {
+  final embeds = _getPostEmbeds(post);
+  if (post.type != 2 || (post.content?.isEmpty ?? true)) return embeds;
+
+  return embeds.where((embed) {
+    if (embed is! Map || embed['type'] != 'link') return true;
+    return !_urlsMatch(embed['url']?.toString(), post.content);
+  }).toList();
+}
+
+bool _shouldClampRegularPostBody(String content) {
+  final normalized = content.trim();
+  if (normalized.length > 420) return true;
+
+  final lines = '\n'.allMatches(normalized).length + 1;
+  return lines > 8;
+}
+
+String _truncateRegularPostBody(String content) {
+  final normalized = content.trim();
+  const maxChars = 420;
+  const maxLines = 8;
+
+  var end = normalized.length;
+  if (normalized.length > maxChars) {
+    end = maxChars;
+  }
+
+  var lineCount = 0;
+  for (var i = 0; i < math.min(end, normalized.length); i++) {
+    if (normalized[i] == '\n') {
+      lineCount++;
+      if (lineCount >= maxLines) {
+        end = i;
+        break;
+      }
+    }
+  }
+
+  final truncated = normalized.substring(0, end).trimRight();
+  if (truncated.length == normalized.length) return normalized;
+
+  return '$truncated...';
+}
+
+Widget _buildArticlePreviewCard(
+  BuildContext context,
+  SnPost post, {
+  EdgeInsetsGeometry padding = const EdgeInsets.only(top: 4),
+}) {
+  final thumbnail = _getThumbnailAttachment(post);
+
+  return Container(
+    padding: padding,
+    decoration: BoxDecoration(
+      color: Theme.of(context).colorScheme.surfaceContainerHigh,
+      border: Border.all(
+        color: Theme.of(context).dividerColor.withOpacity(0.5),
+      ),
+      borderRadius: const BorderRadius.all(Radius.circular(8)),
+    ),
+    child: Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (thumbnail != null)
+          ClipRRect(
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(8)),
+            child: CloudFileWidget(item: thumbnail),
+          ),
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Align(
+              alignment: Alignment.centerLeft,
+              child: Badge(
+                label: const Text('postArticle').tr(),
+                backgroundColor: Theme.of(context).colorScheme.primary,
+                textColor: Theme.of(context).colorScheme.onPrimary,
+              ),
+            ),
+            const Gap(4),
+            if (post.title?.isNotEmpty ?? false)
+              Text(
+                post.title!,
+                style: Theme.of(
+                  context,
+                ).textTheme.titleMedium!.copyWith(fontWeight: FontWeight.bold),
+              ),
+            if (post.description?.isNotEmpty ?? false)
+              Text(
+                post.description!,
+                style: Theme.of(context).textTheme.bodyMedium,
+              ),
+          ],
+        ).padding(horizontal: 16, vertical: 12),
+      ],
+    ),
+  );
+}
+
+Widget _buildBlogPreviewCard(
+  BuildContext context,
+  SnPost post, {
+  EdgeInsetsGeometry padding = const EdgeInsets.only(top: 4),
+}) {
+  final preview = _getBlogLinkPreview(post);
+  final uri = Uri.tryParse(preview?.url ?? post.content ?? '');
+  final host = uri?.host ?? '';
+  final imageUrl = preview?.imageUrl;
+  final hasPreviewImage =
+      imageUrl != null &&
+      imageUrl.isNotEmpty &&
+      imageUrl != preview?.faviconUrl;
+  final title = post.title?.isNotEmpty ?? false ? post.title! : preview?.title;
+  final description = post.description?.isNotEmpty ?? false
+      ? post.description!
+      : preview?.description;
+  final faviconUrl = preview?.faviconUrl;
+
+  return Container(
+    padding: padding,
+    decoration: BoxDecoration(
+      color: Theme.of(context).colorScheme.surfaceContainerHigh,
+      border: Border.all(
+        color: Theme.of(context).dividerColor.withOpacity(0.5),
+      ),
+      borderRadius: const BorderRadius.all(Radius.circular(8)),
+    ),
+    child: Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (hasPreviewImage)
+          ClipRRect(
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(8)),
+            child: SizedBox(
+              height: 180,
+              child: UniversalImage(
+                uri: imageUrl,
+                fit: BoxFit.cover,
+                useFallbackImage: false,
+              ),
+            ),
+          ),
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              children: [
+                Badge(
+                  label: const Text('postBlog').tr(),
+                  backgroundColor: Theme.of(context).colorScheme.tertiary,
+                  textColor: Theme.of(context).colorScheme.onTertiary,
+                ),
+                const Spacer(),
+                Icon(
+                  Symbols.open_in_new,
+                  size: 16,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+              ],
+            ),
+            const Gap(4),
+            if (title?.isNotEmpty ?? false)
+              Text(
+                title!,
+                style: Theme.of(context)
+                    .textTheme
+                    .titleMedium!
+                    .copyWith(fontWeight: FontWeight.bold),
+              ),
+            if (description?.isNotEmpty ?? false)
+              Text(
+                description!,
+                style: Theme.of(context).textTheme.bodyMedium,
+              ),
+            if (host.isNotEmpty)
+              Row(
+                children: [
+                  if (faviconUrl?.isNotEmpty ?? false) ...[
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(2),
+                      child: UniversalImage(
+                        uri: faviconUrl!,
+                        width: 14,
+                        height: 14,
+                        fit: BoxFit.cover,
+                        useFallbackImage: false,
+                      ),
+                    ),
+                    const Gap(6),
+                  ],
+                  Expanded(
+                    child: Text(
+                      host,
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            color: Theme.of(
+                              context,
+                            ).colorScheme.onSurfaceVariant,
+                          ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
+              ),
+          ],
+        ).padding(horizontal: 16, vertical: 12),
+      ],
+    ),
+  );
 }
 
 class RepliesState {
@@ -91,6 +361,66 @@ class ThreadedReplyNode {
       parentId: json['parent_id'] as String?,
     );
   }
+}
+
+class PostThreadData {
+  final List<ThreadedReplyNode> ancestors;
+  final ThreadedReplyNode current;
+  final List<ThreadedReplyNode> descendants;
+  final bool hasMore;
+
+  const PostThreadData({
+    required this.ancestors,
+    required this.current,
+    required this.descendants,
+    this.hasMore = false,
+  });
+
+  factory PostThreadData.fromJson(Map<String, dynamic> json) {
+    return PostThreadData(
+      ancestors:
+          (json['ancestors'] as List<dynamic>?)
+              ?.map(
+                (e) => ThreadedReplyNode.fromJson(e as Map<String, dynamic>),
+              )
+              .toList() ??
+          [],
+      current: ThreadedReplyNode.fromJson(
+        json['current'] as Map<String, dynamic>,
+      ),
+      descendants:
+          (json['descendants'] as List<dynamic>?)
+              ?.map(
+                (e) => ThreadedReplyNode.fromJson(e as Map<String, dynamic>),
+              )
+              .toList() ??
+          [],
+      hasMore: json['has_more'] as bool? ?? false,
+    );
+  }
+
+  List<ThreadedReplyNode> get allNodes => [
+    ...ancestors,
+    current,
+    ...descendants,
+  ];
+}
+
+Map<String?, List<ThreadedReplyNode>> buildThreadChildrenMap(
+  Iterable<ThreadedReplyNode> nodes, {
+  String? hiddenParentId,
+  String? hiddenNodeId,
+  String? hiddenNodeParentId,
+}) {
+  final childrenByParentId = <String?, List<ThreadedReplyNode>>{};
+  for (final node in nodes) {
+    if (node.post.id == hiddenNodeId) continue;
+    final parentId = node.parentId == hiddenParentId
+        ? hiddenNodeParentId
+        : (node.parentId == hiddenNodeId ? hiddenNodeParentId : node.parentId);
+    childrenByParentId.putIfAbsent(parentId, () => []).add(node);
+  }
+  return childrenByParentId;
 }
 
 @riverpod
@@ -165,6 +495,10 @@ class PostVisibilityHelpers {
         return Symbols.link_off;
       case 3:
         return Symbols.lock;
+      case 4:
+        return Symbols.favorite;
+      case 5:
+        return Symbols.public;
       default:
         return Symbols.public;
     }
@@ -178,6 +512,10 @@ class PostVisibilityHelpers {
         return 'postVisibilityUnlisted';
       case 3:
         return 'postVisibilityPrivate';
+      case 4:
+        return 'postVisibilityCloseFriends';
+      case 5:
+        return 'postVisibilityQuitePublic';
       default:
         return 'postVisibilityPublic';
     }
@@ -191,6 +529,7 @@ class PostReplyPreview extends HookConsumerWidget {
   final bool isAutoload;
   final double? itemMaxWidth;
   final VoidCallback? onOpen;
+  final void Function(String)? onPostTap;
   const PostReplyPreview({
     super.key,
     required this.parent,
@@ -199,6 +538,7 @@ class PostReplyPreview extends HookConsumerWidget {
     this.isAutoload = true,
     this.itemMaxWidth,
     this.onOpen,
+    this.onPostTap,
   });
 
   Widget _buildProfilePicture(
@@ -225,7 +565,7 @@ class PostReplyPreview extends HookConsumerWidget {
   /// Builds a compact attachment preview list for inline display
   Widget _buildAttachmentPreview(
     BuildContext context,
-    List<SnCloudFile> attachments,
+    List<IDisplayableCloudFile> attachments,
   ) {
     const maxVisible = 3;
     final visibleAttachments = attachments.take(maxVisible).toList();
@@ -246,11 +586,11 @@ class PostReplyPreview extends HookConsumerWidget {
   /// Builds a small thumbnail for a single attachment
   Widget _buildAttachmentThumbnail(
     BuildContext context,
-    SnCloudFile attachment,
+    IDisplayableCloudFile attachment,
   ) {
-    final isImage = attachment.mimeType?.startsWith('image') ?? false;
-    final isVideo = attachment.mimeType?.startsWith('video') ?? false;
-    final isAudio = attachment.mimeType?.startsWith('audio') ?? false;
+    final isImage = attachment.mimeType.startsWith('image');
+    final isVideo = attachment.mimeType.startsWith('video');
+    final isAudio = attachment.mimeType.startsWith('audio');
 
     Widget content;
     if (isImage) {
@@ -292,7 +632,7 @@ class PostReplyPreview extends HookConsumerWidget {
   /// Builds an icon-based representation for non-image files
   Widget _buildFileTypeIcon(
     BuildContext context,
-    SnCloudFile attachment, {
+    IDisplayableCloudFile attachment, {
     IconData? icon,
   }) {
     final fileIcon = icon ?? _getFileIcon(attachment.mimeType);
@@ -376,9 +716,9 @@ class PostReplyPreview extends HookConsumerWidget {
 
     if (visibleReactions.isEmpty) return const SizedBox.shrink();
 
-    return Row(
-      mainAxisSize: MainAxisSize.min,
+    return Wrap(
       spacing: 4,
+      runSpacing: 4,
       children: [
         for (final entry in visibleReactions)
           _buildCompactReactionChip(context, ref, entry.key, entry.value),
@@ -395,6 +735,7 @@ class PostReplyPreview extends HookConsumerWidget {
     String symbol,
     int count,
   ) {
+    final theme = Theme.of(context);
     final reactionInfo = kReactionTemplates[symbol];
     final hasSticker = _getReactionImageAvailable(symbol);
     final isCustom = symbol.contains('+');
@@ -407,48 +748,47 @@ class PostReplyPreview extends HookConsumerWidget {
         borderRadius: BorderRadius.circular(2),
         child: Image.network(
           '$serverUrl/sphere/stickers/lookup/$symbol/open',
-          width: 14,
-          height: 14,
+          width: 16,
+          height: 16,
           fit: BoxFit.contain,
           errorBuilder: (context, error, stackTrace) =>
-              const Text('🏷️', style: TextStyle(fontSize: 10)),
+              const Text('🏷️', style: TextStyle(fontSize: 11)),
         ),
       );
     } else if (hasSticker) {
       icon = Image.asset(
-        'assets/images/stickers/$symbol.png',
-        width: 14,
-        height: 14,
+        'assets/images/stickers/$symbol.webp',
+        width: 16,
+        height: 16,
         fit: BoxFit.contain,
       );
     } else {
       // Fall back to emoji icon
       icon = Text(
         reactionInfo?.icon ?? '❓',
-        style: const TextStyle(fontSize: 10),
+        style: const TextStyle(fontSize: 12, height: 1),
       );
     }
 
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
       decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surfaceContainerHighest,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: Theme.of(context).dividerColor.withOpacity(0.3),
-        ),
+        color: theme.colorScheme.surfaceContainerHigh,
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: theme.dividerColor.withOpacity(0.25)),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
-        spacing: 3,
+        spacing: 4,
         children: [
           icon,
           Text(
             count.toString(),
             style: TextStyle(
               fontSize: 11,
-              fontWeight: FontWeight.w500,
-              color: Theme.of(context).colorScheme.onSurfaceVariant,
+              fontWeight: FontWeight.w600,
+              color: theme.colorScheme.onSurfaceVariant,
+              height: 1,
             ),
           ),
         ],
@@ -458,21 +798,22 @@ class PostReplyPreview extends HookConsumerWidget {
 
   /// Builds a badge showing remaining reaction count
   Widget _buildRemainingReactionsBadge(BuildContext context, int count) {
+    final theme = Theme.of(context);
+
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
       decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surfaceContainerHighest,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: Theme.of(context).dividerColor.withOpacity(0.3),
-        ),
+        color: theme.colorScheme.surfaceContainerHigh,
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: theme.dividerColor.withOpacity(0.25)),
       ),
       child: Text(
         '+$count',
         style: TextStyle(
           fontSize: 11,
-          fontWeight: FontWeight.w500,
-          color: Theme.of(context).colorScheme.onSurfaceVariant,
+          fontWeight: FontWeight.w600,
+          color: theme.colorScheme.onSurfaceVariant,
+          height: 1,
         ),
       ),
     );
@@ -481,14 +822,7 @@ class PostReplyPreview extends HookConsumerWidget {
   /// Checks if reaction has a sticker image asset
   /// Based on kAvailableStickers in post_reaction_sheet.dart
   bool _getReactionImageAvailable(String symbol) {
-    return {
-      'angry',
-      'clap',
-      'confuse',
-      'pray',
-      'thumb_up',
-      'party',
-    }.contains(symbol);
+    return kAvailableStickers.contains(symbol);
   }
 
   @override
@@ -580,7 +914,11 @@ class PostReplyPreview extends HookConsumerWidget {
             ),
             onTap: () {
               onOpen?.call();
-              context.router.push(PostDetailRoute(id: post.id));
+              if (onPostTap != null) {
+                onPostTap!(post.id);
+              } else {
+                context.router.push(PostDetailRoute(id: post.id));
+              }
             },
           ),
           for (final child in children)
@@ -666,7 +1004,7 @@ class PostReplyPreview extends HookConsumerWidget {
                             child: _buildAttachmentPreview(
                               context,
                               data.value!.attachments,
-                            ),
+                            ).padding(bottom: 4),
                           )
                         else
                           Expanded(
@@ -823,6 +1161,8 @@ class ReferencedPostWidget extends HookConsumerWidget {
   final bool isInteractive;
   final EdgeInsets renderingPadding;
   final bool isCollapsible;
+  final bool hideOverlay;
+  final void Function(String)? onPostTap;
 
   const ReferencedPostWidget({
     super.key,
@@ -830,6 +1170,8 @@ class ReferencedPostWidget extends HookConsumerWidget {
     this.isInteractive = true,
     this.renderingPadding = EdgeInsets.zero,
     this.isCollapsible = true,
+    this.hideOverlay = false,
+    this.onPostTap,
   });
 
   @override
@@ -896,6 +1238,7 @@ class ReferencedPostWidget extends HookConsumerWidget {
                 showLowerLine: true,
                 renderingPadding: EdgeInsets.zero,
                 isInteractive: isInteractive,
+                hideOverlay: hideOverlay,
               ),
             if (isGone)
               Row(
@@ -940,76 +1283,80 @@ class ReferencedPostWidget extends HookConsumerWidget {
                     const Gap(12),
                     // Referenced post content using PostHeader
                     Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          // Content
-                          if (referencePost.content?.isNotEmpty ?? false)
-                            MarkdownTextContent(
-                              content: _convertContentToMarkdown(referencePost),
-                              textStyle: const TextStyle(fontSize: 14),
-                              isSelectable: false,
-                              linesMargin: referencePost.type == 0
-                                  ? const EdgeInsets.only(bottom: 4)
-                                  : null,
-                              attachments: referencePost.attachments,
-                              noMentionChip: referencePost.fediverseUri != null,
-                            ).padding(top: 8),
-                          if (referencePost.title?.isNotEmpty ?? false)
-                            Text(
-                              referencePost.title!,
-                              style: TextStyle(
-                                fontWeight: FontWeight.bold,
-                                fontSize: 13,
-                                color: Theme.of(context).colorScheme.onSurface,
-                              ),
-                            ).padding(top: 8, bottom: 4),
-                          if (referencePost.description?.isNotEmpty ?? false)
-                            Text(
-                              referencePost.description!,
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: Theme.of(
-                                  context,
-                                ).colorScheme.onSurfaceVariant,
-                              ),
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
-                            ).padding(bottom: 4),
-                          if (referencePost.isTruncated)
-                            const PostTruncateHint(
-                              isCompact: true,
-                              margin: EdgeInsets.only(top: 4, bottom: 4),
+                      child: referencePost.type == 1
+                          ? _buildArticlePreviewCard(context, referencePost)
+                          : referencePost.type == 2
+                              ? _buildBlogPreviewCard(context, referencePost)
+                              : Builder(
+                              builder: (context) {
+                                final referenceContent =
+                                    _convertContentToMarkdown(referencePost);
+                                final shouldTruncateReferenceBody =
+                                    (referencePost.content?.isNotEmpty ?? false) &&
+                                    _shouldClampRegularPostBody(referenceContent);
+                                final referencePreviewContent =
+                                    shouldTruncateReferenceBody
+                                    ? _truncateRegularPostBody(referenceContent)
+                                    : (referencePost.isTruncated
+                                          ? '$referenceContent...'
+                                          : referenceContent);
+
+                                return Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    if (referencePost.title?.isNotEmpty ?? false)
+                                      Text(
+                                        referencePost.title!,
+                                        style: TextStyle(
+                                          fontWeight: FontWeight.bold,
+                                          fontSize: 13,
+                                          color: Theme.of(
+                                            context,
+                                          ).colorScheme.onSurface,
+                                        ),
+                                      ).padding(top: 8, bottom: 4),
+                                    if (referencePost.description?.isNotEmpty ??
+                                        false)
+                                      Text(
+                                        referencePost.description!,
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          color: Theme.of(
+                                            context,
+                                          ).colorScheme.onSurfaceVariant,
+                                        ),
+                                        maxLines: 2,
+                                        overflow: TextOverflow.ellipsis,
+                                      ).padding(bottom: 4),
+                                    if (referencePost.content?.isNotEmpty ?? false)
+                                      MarkdownTextContent(
+                                        content: referencePreviewContent,
+                                        textStyle: const TextStyle(fontSize: 14),
+                                        isSelectable: false,
+                                        linesMargin: referencePost.type == 0
+                                            ? const EdgeInsets.only(bottom: 4)
+                                            : null,
+                                        attachments: referencePost.attachments,
+                                        noMentionChip:
+                                            referencePost.fediverseUri != null,
+                                      ).padding(top: 4),
+                                    if (referencePost.isTruncated ||
+                                        shouldTruncateReferenceBody)
+                                      const PostTruncateHint(
+                                        isCompact: true,
+                                        margin: EdgeInsets.only(top: 4, bottom: 4),
+                                      ),
+                                    if (referencePost.attachments.isNotEmpty)
+                                      CloudFileList(
+                                        files: referencePost.attachments,
+                                        padding: const EdgeInsets.only(top: 8),
+                                        maxHeight: 240,
+                                        disableZoomIn: true,
+                                      ),
+                                  ],
+                                );
+                              },
                             ),
-                          // Attachments indicator
-                          if (referencePost.attachments.isNotEmpty &&
-                              referencePost.type != 1)
-                            Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Icon(
-                                  Symbols.attach_file,
-                                  size: 12,
-                                  color: Theme.of(
-                                    context,
-                                  ).colorScheme.secondary,
-                                ),
-                                const SizedBox(width: 4),
-                                Text(
-                                  'postHasAttachments'.plural(
-                                    referencePost.attachments.length,
-                                  ),
-                                  style: TextStyle(
-                                    color: Theme.of(
-                                      context,
-                                    ).colorScheme.secondary,
-                                    fontSize: 12,
-                                  ),
-                                ),
-                              ],
-                            ).padding(top: 4),
-                        ],
-                      ),
                     ),
                   ],
                 ),
@@ -1033,7 +1380,13 @@ class ReferencedPostWidget extends HookConsumerWidget {
     }
 
     return GestureDetector(
-      onTap: () => context.router.push(PostDetailRoute(id: referencePost.id)),
+      onTap: () {
+        if (onPostTap != null) {
+          onPostTap!(referencePost.id);
+        } else {
+          context.router.push(PostDetailRoute(id: referencePost.id));
+        }
+      },
       child: content,
     );
   }
@@ -1090,7 +1443,10 @@ class PostHeader extends HookConsumerWidget {
   String _getDisplayName(SnPost post) {
     // Handle publisher case
     if (post.publisher != null) {
-      return post.publisher!.nick;
+      final publisher = post.publisher!;
+      return publisher.realmNick?.trim().isNotEmpty == true
+          ? publisher.realmNick!.trim()
+          : publisher.nick;
     }
     // Handle actor case
     if (post.actor != null) {
@@ -1129,6 +1485,10 @@ class PostHeader extends HookConsumerWidget {
 
   SnVerificationMark? _getVerification(SnPost post) {
     return post.publisher?.verification;
+  }
+
+  SnRealmLabel? _getRealmLabel(SnPost post) {
+    return post.publisher?.realmLabel;
   }
 
   Widget _buildHandleChip(BuildContext context, SnPost post) {
@@ -1275,6 +1635,11 @@ class PostHeader extends HookConsumerWidget {
                                 overflow: TextOverflow.ellipsis,
                               ).bold(),
                       ),
+                      if (_getRealmLabel(item) != null)
+                        RealmLabelWidget(
+                          label: _getRealmLabel(item)!,
+                          fontSize: 9,
+                        ),
                       if (_getVerification(item) != null)
                         VerificationMark(
                           mark: _getVerification(item)!,
@@ -1321,10 +1686,13 @@ class PostHeader extends HookConsumerWidget {
                   ),
                   Text(
                     !isFullPost && isRelativeTime
-                        ? (item.publishedAt ?? item.createdAt)!.formatRelative(
-                            context,
-                          )
-                        : (item.publishedAt ?? item.createdAt)!.formatSystem(),
+                        ? (item.publishedAt ?? item.createdAt)?.formatRelative(
+                                context,
+                              ) ??
+                              ''
+                        : (item.publishedAt ?? item.createdAt)
+                                  ?.formatSystem() ??
+                              '',
                   ).fontSize(10),
                 ],
               ),
@@ -1369,6 +1737,24 @@ class PostBody extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final metadataChildren = <Widget>[];
+    final visibleEmbeds = _getVisibleEmbeds(item);
+    final useCompactArticlePreview =
+        item.type == 1 && (!isFullPost || item.forwardedPostId != null);
+    final useCompactBlogPreview =
+        item.type == 2 && (!isFullPost || item.forwardedPostId != null);
+    final resolvedContent = _convertContentToMarkdown(item);
+    final shouldClampRegularBody =
+        !isFullPost &&
+        item.type == 0 &&
+        (item.content?.isNotEmpty ?? false) &&
+        _shouldClampRegularPostBody(resolvedContent);
+    final previewContent = shouldClampRegularBody
+        ? _truncateRegularPostBody(resolvedContent)
+        : (item.isTruncated ? '$resolvedContent...' : resolvedContent);
+    final baseTextStyle = TextStyle(
+      fontSize:
+          Theme.of(context).textTheme.bodyMedium!.fontSize! * (textScale ?? 1),
+    );
 
     if (item.debugRank != null && kDebugMode) {
       metadataChildren.add(
@@ -1525,70 +1911,33 @@ class PostBody extends ConsumerWidget {
       );
     }
 
-    SnCloudFile? getThumbnailAttachment() {
-      final thumbnailId = item.meta?['thumbnail'] as String?;
-      if (thumbnailId == null) return null;
-      try {
-        return item.attachments.firstWhere((a) => a.id == thumbnailId);
-      } catch (_) {
-        return null;
-      }
-    }
-
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        if (!isFullPost && item.type == 1)
-          Container(
-            decoration: BoxDecoration(
-              color: Theme.of(context).colorScheme.surfaceContainerHigh,
-              border: Border.all(
-                color: Theme.of(context).dividerColor.withOpacity(0.5),
-              ),
-              borderRadius: const BorderRadius.all(Radius.circular(8)),
-            ),
-            margin: EdgeInsets.only(
+        if (useCompactArticlePreview)
+          Padding(
+            padding: EdgeInsets.only(
               top: 4,
               left: renderingPadding.horizontal,
-              right: renderingPadding.vertical,
+              right: renderingPadding.horizontal,
             ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                if (getThumbnailAttachment() != null)
-                  ClipRRect(
-                    borderRadius: const BorderRadius.vertical(
-                      top: Radius.circular(8),
-                    ),
-                    child: CloudFileWidget(item: getThumbnailAttachment()!),
-                  ),
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    Align(
-                      alignment: Alignment.centerLeft,
-                      child: Badge(
-                        label: const Text('postArticle').tr(),
-                        backgroundColor: Theme.of(context).colorScheme.primary,
-                        textColor: Theme.of(context).colorScheme.onPrimary,
-                      ),
-                    ),
-                    const Gap(4),
-                    if (item.title != null)
-                      Text(
-                        item.title!,
-                        style: Theme.of(context).textTheme.titleMedium!
-                            .copyWith(fontWeight: FontWeight.bold),
-                      ),
-                    if (item.description?.isNotEmpty ?? false)
-                      Text(
-                        item.description!,
-                        style: Theme.of(context).textTheme.bodyMedium,
-                      ),
-                  ],
-                ).padding(horizontal: 16, vertical: 12),
-              ],
+            child: _buildArticlePreviewCard(
+              context,
+              item,
+              padding: EdgeInsets.zero,
+            ),
+          )
+        else if (useCompactBlogPreview)
+          Padding(
+            padding: EdgeInsets.only(
+              top: 4,
+              left: renderingPadding.horizontal,
+              right: renderingPadding.horizontal,
+            ),
+            child: _buildBlogPreviewCard(
+              context,
+              item,
+              padding: EdgeInsets.zero,
             ),
           )
         else if ((item.content?.isNotEmpty ?? false) ||
@@ -1621,17 +1970,11 @@ class PostBody extends ConsumerWidget {
                     ],
                   ).padding(bottom: 4),
                 MarkdownTextContent(
-                  linesMargin: item.type == 1 && isFullPost
+                  linesMargin: item.type == 1 && !useCompactArticlePreview
                       ? const EdgeInsets.symmetric(vertical: 8)
                       : const EdgeInsets.symmetric(vertical: 4),
-                  textStyle: TextStyle(
-                    fontSize:
-                        Theme.of(context).textTheme.bodyMedium!.fontSize! *
-                        (textScale ?? 1),
-                  ),
-                  content: item.isTruncated
-                      ? '${_convertContentToMarkdown(item)}...'
-                      : _convertContentToMarkdown(item),
+                  textStyle: baseTextStyle,
+                  content: previewContent,
                   isSelectable: isTextSelectable,
                   attachments: item.attachments,
                   noMentionChip: item.fediverseUri != null,
@@ -1640,7 +1983,7 @@ class PostBody extends ConsumerWidget {
               ],
             ),
           ),
-        if (item.isTruncated && item.type != 1)
+        if ((item.isTruncated && item.type != 1 && item.type != 2) || shouldClampRegularBody)
           PostTruncateHint(
             isCompact: true,
             withArrow: isInteractive,
@@ -1651,9 +1994,10 @@ class PostBody extends ConsumerWidget {
               right: renderingPadding.horizontal,
             ),
           ),
-        if (item.attachments.isNotEmpty && item.type != 1 && !hideAttachments)
+        if (item.attachments.isNotEmpty && item.type != 1 && item.type != 2 && !hideAttachments)
           CloudFileList(
             files: item.attachments,
+            sourcePost: item,
             isColumn: !isInteractive,
             padding: EdgeInsets.symmetric(
               horizontal: renderingPadding.horizontal,
@@ -1667,9 +2011,9 @@ class PostBody extends ConsumerWidget {
             spacing: 2,
             children: metadataChildren,
           ).padding(horizontal: renderingPadding.horizontal + 4, top: 4),
-        if (item.meta?['embeds'] != null)
+        if (visibleEmbeds.isNotEmpty)
           EmbedListWidget(
-            embeds: item.meta!['embeds'] as List<dynamic>,
+            embeds: visibleEmbeds,
             isInteractive: isInteractive,
             isFullPost: isFullPost,
             renderingPadding: renderingPadding,

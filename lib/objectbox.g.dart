@@ -524,6 +524,140 @@ final _entities = <obx_int.ModelEntity>[
     relations: <obx_int.ModelRelation>[],
     backlinks: <obx_int.ModelBacklink>[],
   ),
+  obx_int.ModelEntity(
+    id: const obx_int.IdUid(6, 3095537178895020388),
+    name: 'RelationshipEntity',
+    lastPropertyId: const obx_int.IdUid(13, 2272909316396195841),
+    flags: 0,
+    properties: <obx_int.ModelProperty>[
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(1, 33170740635239537),
+        name: 'obxId',
+        type: 6,
+        flags: 1,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(2, 8655195372325808404),
+        name: 'uid',
+        type: 9,
+        flags: 2080,
+        indexId: const obx_int.IdUid(12, 5499958355336951758),
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(3, 4612520929292836377),
+        name: 'accountId',
+        type: 9,
+        flags: 2048,
+        indexId: const obx_int.IdUid(13, 7936182901814801105),
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(4, 1039120802118728946),
+        name: 'relatedId',
+        type: 9,
+        flags: 2048,
+        indexId: const obx_int.IdUid(14, 2002931559330577197),
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(5, 3470876242082734402),
+        name: 'status',
+        type: 6,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(6, 7248247478171813371),
+        name: 'expiredAtMs',
+        type: 6,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(7, 8257425303057326518),
+        name: 'degradeToStatus',
+        type: 6,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(8, 3131520818702576005),
+        name: 'accountJson',
+        type: 9,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(9, 8187894956261248070),
+        name: 'relatedJson',
+        type: 9,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(10, 5875761167174381619),
+        name: 'createdAtMs',
+        type: 6,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(11, 2137392777443781357),
+        name: 'updatedAtMs',
+        type: 6,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(12, 1234810662163375352),
+        name: 'deletedAtMs',
+        type: 6,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(13, 2272909316396195841),
+        name: 'alias',
+        type: 9,
+        flags: 0,
+      ),
+    ],
+    relations: <obx_int.ModelRelation>[],
+    backlinks: <obx_int.ModelBacklink>[],
+  ),
+  obx_int.ModelEntity(
+    id: const obx_int.IdUid(7, 4633006183410813102),
+    name: 'StickerLookupEntity',
+    lastPropertyId: const obx_int.IdUid(5, 7865606278669430545),
+    flags: 0,
+    properties: <obx_int.ModelProperty>[
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(1, 4247977823785475131),
+        name: 'obxId',
+        type: 6,
+        flags: 1,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(2, 7627231164332001377),
+        name: 'uid',
+        type: 9,
+        flags: 2080,
+        indexId: const obx_int.IdUid(15, 742572860041903729),
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(3, 4222578831425351276),
+        name: 'stickerId',
+        type: 9,
+        flags: 2048,
+        indexId: const obx_int.IdUid(16, 5287084145654996155),
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(4, 97195578110906178),
+        name: 'stickerJson',
+        type: 9,
+        flags: 0,
+      ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(5, 7865606278669430545),
+        name: 'updatedAtMs',
+        type: 6,
+        flags: 8,
+        indexId: const obx_int.IdUid(17, 6132083275743481083),
+      ),
+    ],
+    relations: <obx_int.ModelRelation>[],
+    backlinks: <obx_int.ModelBacklink>[],
+  ),
 ];
 
 /// Shortcut for [obx.Store.new] that passes [getObjectBoxModel] and for Flutter
@@ -569,8 +703,8 @@ obx_int.ModelDefinition getObjectBoxModel() {
     // Typically, this is done with `dart run build_runner build`.
     generatorVersion: obx_int.GeneratorVersion.v2025_12_16,
     entities: _entities,
-    lastEntityId: const obx_int.IdUid(5, 2751039156396140663),
-    lastIndexId: const obx_int.IdUid(11, 7340127654314367791),
+    lastEntityId: const obx_int.IdUid(7, 4633006183410813102),
+    lastIndexId: const obx_int.IdUid(17, 6132083275743481083),
     lastRelationId: const obx_int.IdUid(0, 0),
     lastSequenceId: const obx_int.IdUid(0, 0),
     retiredEntityUids: const [],
@@ -1241,6 +1375,179 @@ obx_int.ModelDefinition getObjectBoxModel() {
         return object;
       },
     ),
+    RelationshipEntity: obx_int.EntityDefinition<RelationshipEntity>(
+      model: _entities[5],
+      toOneRelations: (RelationshipEntity object) => [],
+      toManyRelations: (RelationshipEntity object) => {},
+      getId: (RelationshipEntity object) => object.obxId,
+      setId: (RelationshipEntity object, int id) {
+        object.obxId = id;
+      },
+      objectToFB: (RelationshipEntity object, fb.Builder fbb) {
+        final uidOffset = fbb.writeString(object.uid);
+        final accountIdOffset = fbb.writeString(object.accountId);
+        final relatedIdOffset = fbb.writeString(object.relatedId);
+        final accountJsonOffset = object.accountJson == null
+            ? null
+            : fbb.writeString(object.accountJson!);
+        final relatedJsonOffset = object.relatedJson == null
+            ? null
+            : fbb.writeString(object.relatedJson!);
+        final aliasOffset = object.alias == null
+            ? null
+            : fbb.writeString(object.alias!);
+        fbb.startTable(14);
+        fbb.addInt64(0, object.obxId);
+        fbb.addOffset(1, uidOffset);
+        fbb.addOffset(2, accountIdOffset);
+        fbb.addOffset(3, relatedIdOffset);
+        fbb.addInt64(4, object.status);
+        fbb.addInt64(5, object.expiredAtMs);
+        fbb.addInt64(6, object.degradeToStatus);
+        fbb.addOffset(7, accountJsonOffset);
+        fbb.addOffset(8, relatedJsonOffset);
+        fbb.addInt64(9, object.createdAtMs);
+        fbb.addInt64(10, object.updatedAtMs);
+        fbb.addInt64(11, object.deletedAtMs);
+        fbb.addOffset(12, aliasOffset);
+        fbb.finish(fbb.endTable());
+        return object.obxId;
+      },
+      objectFromFB: (obx.Store store, ByteData fbData) {
+        final buffer = fb.BufferContext(fbData);
+        final rootOffset = buffer.derefObject(0);
+        final obxIdParam = const fb.Int64Reader().vTableGet(
+          buffer,
+          rootOffset,
+          4,
+          0,
+        );
+        final uidParam = const fb.StringReader(
+          asciiOptimization: true,
+        ).vTableGet(buffer, rootOffset, 6, '');
+        final accountIdParam = const fb.StringReader(
+          asciiOptimization: true,
+        ).vTableGet(buffer, rootOffset, 8, '');
+        final relatedIdParam = const fb.StringReader(
+          asciiOptimization: true,
+        ).vTableGet(buffer, rootOffset, 10, '');
+        final statusParam = const fb.Int64Reader().vTableGet(
+          buffer,
+          rootOffset,
+          12,
+          0,
+        );
+        final expiredAtMsParam = const fb.Int64Reader().vTableGetNullable(
+          buffer,
+          rootOffset,
+          14,
+        );
+        final degradeToStatusParam = const fb.Int64Reader().vTableGetNullable(
+          buffer,
+          rootOffset,
+          16,
+        );
+        final aliasParam = const fb.StringReader(
+          asciiOptimization: true,
+        ).vTableGetNullable(buffer, rootOffset, 28);
+        final accountJsonParam = const fb.StringReader(
+          asciiOptimization: true,
+        ).vTableGetNullable(buffer, rootOffset, 18);
+        final relatedJsonParam = const fb.StringReader(
+          asciiOptimization: true,
+        ).vTableGetNullable(buffer, rootOffset, 20);
+        final createdAtMsParam = const fb.Int64Reader().vTableGet(
+          buffer,
+          rootOffset,
+          22,
+          0,
+        );
+        final updatedAtMsParam = const fb.Int64Reader().vTableGet(
+          buffer,
+          rootOffset,
+          24,
+          0,
+        );
+        final deletedAtMsParam = const fb.Int64Reader().vTableGetNullable(
+          buffer,
+          rootOffset,
+          26,
+        );
+        final object = RelationshipEntity(
+          obxId: obxIdParam,
+          uid: uidParam,
+          accountId: accountIdParam,
+          relatedId: relatedIdParam,
+          status: statusParam,
+          expiredAtMs: expiredAtMsParam,
+          degradeToStatus: degradeToStatusParam,
+          alias: aliasParam,
+          accountJson: accountJsonParam,
+          relatedJson: relatedJsonParam,
+          createdAtMs: createdAtMsParam,
+          updatedAtMs: updatedAtMsParam,
+          deletedAtMs: deletedAtMsParam,
+        );
+
+        return object;
+      },
+    ),
+    StickerLookupEntity: obx_int.EntityDefinition<StickerLookupEntity>(
+      model: _entities[6],
+      toOneRelations: (StickerLookupEntity object) => [],
+      toManyRelations: (StickerLookupEntity object) => {},
+      getId: (StickerLookupEntity object) => object.obxId,
+      setId: (StickerLookupEntity object, int id) {
+        object.obxId = id;
+      },
+      objectToFB: (StickerLookupEntity object, fb.Builder fbb) {
+        final uidOffset = fbb.writeString(object.uid);
+        final stickerIdOffset = fbb.writeString(object.stickerId);
+        final stickerJsonOffset = fbb.writeString(object.stickerJson);
+        fbb.startTable(6);
+        fbb.addInt64(0, object.obxId);
+        fbb.addOffset(1, uidOffset);
+        fbb.addOffset(2, stickerIdOffset);
+        fbb.addOffset(3, stickerJsonOffset);
+        fbb.addInt64(4, object.updatedAtMs);
+        fbb.finish(fbb.endTable());
+        return object.obxId;
+      },
+      objectFromFB: (obx.Store store, ByteData fbData) {
+        final buffer = fb.BufferContext(fbData);
+        final rootOffset = buffer.derefObject(0);
+        final obxIdParam = const fb.Int64Reader().vTableGet(
+          buffer,
+          rootOffset,
+          4,
+          0,
+        );
+        final uidParam = const fb.StringReader(
+          asciiOptimization: true,
+        ).vTableGet(buffer, rootOffset, 6, '');
+        final stickerIdParam = const fb.StringReader(
+          asciiOptimization: true,
+        ).vTableGet(buffer, rootOffset, 8, '');
+        final stickerJsonParam = const fb.StringReader(
+          asciiOptimization: true,
+        ).vTableGet(buffer, rootOffset, 10, '');
+        final updatedAtMsParam = const fb.Int64Reader().vTableGet(
+          buffer,
+          rootOffset,
+          12,
+          0,
+        );
+        final object = StickerLookupEntity(
+          obxId: obxIdParam,
+          uid: uidParam,
+          stickerId: stickerIdParam,
+          stickerJson: stickerJsonParam,
+          updatedAtMs: updatedAtMsParam,
+        );
+
+        return object;
+      },
+    ),
   };
 
   return obx_int.ModelDefinition(model, bindings);
@@ -1627,5 +1934,101 @@ class RealmEntity_ {
   /// See [RealmEntity.deletedAtMs].
   static final deletedAtMs = obx.QueryIntegerProperty<RealmEntity>(
     _entities[4].properties[14],
+  );
+}
+
+/// [RelationshipEntity] entity fields to define ObjectBox queries.
+class RelationshipEntity_ {
+  /// See [RelationshipEntity.obxId].
+  static final obxId = obx.QueryIntegerProperty<RelationshipEntity>(
+    _entities[5].properties[0],
+  );
+
+  /// See [RelationshipEntity.uid].
+  static final uid = obx.QueryStringProperty<RelationshipEntity>(
+    _entities[5].properties[1],
+  );
+
+  /// See [RelationshipEntity.accountId].
+  static final accountId = obx.QueryStringProperty<RelationshipEntity>(
+    _entities[5].properties[2],
+  );
+
+  /// See [RelationshipEntity.relatedId].
+  static final relatedId = obx.QueryStringProperty<RelationshipEntity>(
+    _entities[5].properties[3],
+  );
+
+  /// See [RelationshipEntity.status].
+  static final status = obx.QueryIntegerProperty<RelationshipEntity>(
+    _entities[5].properties[4],
+  );
+
+  /// See [RelationshipEntity.expiredAtMs].
+  static final expiredAtMs = obx.QueryIntegerProperty<RelationshipEntity>(
+    _entities[5].properties[5],
+  );
+
+  /// See [RelationshipEntity.degradeToStatus].
+  static final degradeToStatus = obx.QueryIntegerProperty<RelationshipEntity>(
+    _entities[5].properties[6],
+  );
+
+  /// See [RelationshipEntity.accountJson].
+  static final accountJson = obx.QueryStringProperty<RelationshipEntity>(
+    _entities[5].properties[7],
+  );
+
+  /// See [RelationshipEntity.relatedJson].
+  static final relatedJson = obx.QueryStringProperty<RelationshipEntity>(
+    _entities[5].properties[8],
+  );
+
+  /// See [RelationshipEntity.createdAtMs].
+  static final createdAtMs = obx.QueryIntegerProperty<RelationshipEntity>(
+    _entities[5].properties[9],
+  );
+
+  /// See [RelationshipEntity.updatedAtMs].
+  static final updatedAtMs = obx.QueryIntegerProperty<RelationshipEntity>(
+    _entities[5].properties[10],
+  );
+
+  /// See [RelationshipEntity.deletedAtMs].
+  static final deletedAtMs = obx.QueryIntegerProperty<RelationshipEntity>(
+    _entities[5].properties[11],
+  );
+
+  /// See [RelationshipEntity.alias].
+  static final alias = obx.QueryStringProperty<RelationshipEntity>(
+    _entities[5].properties[12],
+  );
+}
+
+/// [StickerLookupEntity] entity fields to define ObjectBox queries.
+class StickerLookupEntity_ {
+  /// See [StickerLookupEntity.obxId].
+  static final obxId = obx.QueryIntegerProperty<StickerLookupEntity>(
+    _entities[6].properties[0],
+  );
+
+  /// See [StickerLookupEntity.uid].
+  static final uid = obx.QueryStringProperty<StickerLookupEntity>(
+    _entities[6].properties[1],
+  );
+
+  /// See [StickerLookupEntity.stickerId].
+  static final stickerId = obx.QueryStringProperty<StickerLookupEntity>(
+    _entities[6].properties[2],
+  );
+
+  /// See [StickerLookupEntity.stickerJson].
+  static final stickerJson = obx.QueryStringProperty<StickerLookupEntity>(
+    _entities[6].properties[3],
+  );
+
+  /// See [StickerLookupEntity.updatedAtMs].
+  static final updatedAtMs = obx.QueryIntegerProperty<StickerLookupEntity>(
+    _entities[6].properties[4],
   );
 }

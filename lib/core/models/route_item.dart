@@ -170,19 +170,6 @@ final List<RouteItem> kAvailableRoutes = [
     icon: Symbols.create,
   ),
   RouteItem(
-    name: 'developerPortal'.tr(),
-    path: '/developers',
-    description: 'developerPortalDescription'.tr(),
-    searchableAliases: [
-      'developers',
-      'dev',
-      'developer',
-      'developer hub',
-      'developers hub',
-    ],
-    icon: Symbols.code,
-  ),
-  RouteItem(
     name: 'webArticlesStand'.tr(),
     path: '/feeds/articles',
     description: 'webArticlesStandDescription'.tr(),
@@ -195,6 +182,13 @@ final List<RouteItem> kAvailableRoutes = [
     description: 'appSettingsDescription'.tr(),
     searchableAliases: ['settings', 'preferences', 'app', 'app settings'],
     icon: Symbols.settings,
+  ),
+  RouteItem(
+    name: 'Plugins',
+    path: '/plugins',
+    description: 'Manage plugins and the inline editor',
+    searchableAliases: ['plugins', 'plugin', 'python', 'scripts', 'extensions'],
+    icon: Symbols.extension,
   ),
   RouteItem(
     name: 'about'.tr(),

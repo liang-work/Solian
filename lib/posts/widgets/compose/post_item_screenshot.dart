@@ -2,26 +2,224 @@ import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:gap/gap.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
-import 'package:island/shared/widgets/content/markdown.dart';
+import 'package:material_symbols_icons/symbols.dart';
 import 'package:island/drive/widgets/cloud_files.dart';
+import 'package:island/shared/widgets/content/markdown.dart';
 import 'package:island/posts/widgets/compose/post_shared.dart';
-import 'package:island/posts/widgets/compose/post_item.dart';
+import 'package:island/posts/widgets/compose/post_reaction_sheet.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:styled_widget/styled_widget.dart';
 import 'package:solar_network_sdk/solar_network_sdk.dart';
+
+const _kScreenshotVisibleMainAttachments = 3;
 
 class PostItemScreenshot extends ConsumerWidget {
   final SnPost item;
   final EdgeInsets? padding;
   final bool isFullPost;
   final bool isShowReference;
+  final PostThreadData? thread;
+  final bool showThreadScreenshot;
   const PostItemScreenshot({
     super.key,
     required this.item,
     this.padding,
     this.isFullPost = false,
     this.isShowReference = true,
+    this.thread,
+    this.showThreadScreenshot = true,
   });
+
+  Widget _buildScreenshotAttachments(
+    BuildContext context,
+    List<IDisplayableCloudFile> attachments, {
+    required int maxVisible,
+    required EdgeInsets padding,
+  }) {
+    if (attachments.isEmpty) return const SizedBox.shrink();
+
+    final visibleAttachments = attachments.take(maxVisible).toList();
+    final hiddenCount = attachments.length - visibleAttachments.length;
+
+    return Padding(
+      padding: padding,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          ...visibleAttachments.asMap().entries.map((entry) {
+            final file = entry.value;
+
+            return Padding(
+              padding: EdgeInsets.only(
+                bottom: entry.key == visibleAttachments.length - 1 ? 0 : 8,
+              ),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(8),
+                child: AspectRatio(
+                  aspectRatio: file.ratio?.toDouble() ?? 1,
+                  child: CloudFileWidget(
+                    item: file,
+                    fit: BoxFit.contain,
+                    useInternalGate: false,
+                  ),
+                ),
+              ),
+            );
+          }),
+          if (hiddenCount > 0)
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    Symbols.collections,
+                    size: 14,
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+                  const Gap(6),
+                  Text(
+                    '+$hiddenCount more attachment${hiddenCount == 1 ? '' : 's'}',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildReplyContent(BuildContext context, SnPost post) {
+    if (post.content?.isNotEmpty ?? false) {
+      return MarkdownTextContent(
+        content: post.content!,
+        noMentionChip: post.fediverseUri != null,
+      );
+    }
+
+    if (post.attachments.isNotEmpty) {
+      return Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            Symbols.attach_file,
+            size: 14,
+            color: Theme.of(context).colorScheme.onSurfaceVariant,
+          ),
+          const Gap(4),
+          Flexible(
+            child: Text(
+              'postHasAttachments',
+              style: TextStyle(
+                fontSize: 13,
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+            ).plural(post.attachments.length),
+          ),
+        ],
+      );
+    }
+
+    return const SizedBox.shrink();
+  }
+
+  Widget _buildThreadScreenshot(BuildContext context, PostThreadData thread) {
+    final theme = Theme.of(context);
+    final childrenByParentId = buildThreadChildrenMap(
+      thread.allNodes,
+      hiddenParentId: item.id,
+      hiddenNodeId: item.id,
+      hiddenNodeParentId: item.repliedPostId ?? item.forwardedPostId,
+    );
+    final rootNodes = childrenByParentId[null] ?? const [];
+
+    if (rootNodes.isEmpty) return const SizedBox.shrink();
+
+    Color depthColor(int depth) {
+      final tint = theme.colorScheme.primary.withOpacity(
+        (0.04 + (depth % 4) * 0.035).clamp(0.04, 0.18),
+      );
+      return Color.alphaBlend(tint, theme.colorScheme.surfaceContainerLow);
+    }
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            child: Text(
+              'fullThread'.tr(),
+              style: theme.textTheme.titleSmall?.copyWith(
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+          const Gap(8),
+          for (final node in rootNodes)
+            _buildThreadNode(context, node, childrenByParentId, depthColor),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildThreadNode(
+    BuildContext context,
+    ThreadedReplyNode node,
+    Map<String?, List<ThreadedReplyNode>> childrenByParentId,
+    Color Function(int depth) depthColor,
+  ) {
+    final children = childrenByParentId[node.post.id] ?? const [];
+    final isRoot = node.depth == 0;
+
+    return Padding(
+      padding: EdgeInsets.only(left: isRoot ? 0 : 12),
+      child: Material(
+        color: depthColor(node.depth),
+        borderRadius: isRoot
+            ? BorderRadius.zero
+            : const BorderRadius.only(
+                topLeft: Radius.circular(10),
+                bottomLeft: Radius.circular(10),
+              ),
+        clipBehavior: Clip.antiAlias,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  PostHeader(
+                    item: node.post,
+                    isFullPost: false,
+                    isCompact: true,
+                    hideOverlay: true,
+                    isInteractive: false,
+                    renderingPadding: EdgeInsets.zero,
+                    isRelativeTime: false,
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.only(left: 40, top: 6),
+                    child: _buildReplyContent(context, node.post),
+                  ),
+                ],
+              ),
+            ),
+            for (final child in children)
+              _buildThreadNode(context, child, childrenByParentId, depthColor),
+          ],
+        ),
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -37,7 +235,15 @@ class PostItemScreenshot extends ConsumerWidget {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Gap(renderingPadding.vertical),
+          if (!isShowReference)
+            Gap(renderingPadding.vertical),
+          if (isShowReference)
+            ReferencedPostWidget(
+              item: item,
+              isInteractive: false,
+              hideOverlay: true,
+              renderingPadding: renderingPadding,
+            ),
           PostHeader(
             hideOverlay: true,
             item: item,
@@ -45,6 +251,9 @@ class PostItemScreenshot extends ConsumerWidget {
             isInteractive: false,
             renderingPadding: renderingPadding,
             isRelativeTime: false,
+            showUpperLine:
+                isShowReference &&
+                (item.repliedPost != null || item.forwardedPost != null),
           ),
           PostBody(
             item: item,
@@ -54,132 +263,62 @@ class PostItemScreenshot extends ConsumerWidget {
             isTextSelectable: false,
             isInteractive: false,
             hideOverlay: true,
+            hideAttachments: true,
           ),
-          if (isShowReference)
-            ReferencedPostWidget(
-              item: item,
-              isInteractive: false,
-              renderingPadding: renderingPadding,
-            ),
-          if (item.reactionsCount.isNotEmpty)
-            PostReactionList(
+          if (item.attachments.isNotEmpty)
+            _buildScreenshotAttachments(
+              context,
+              item.attachments,
+              maxVisible: _kScreenshotVisibleMainAttachments,
               padding: EdgeInsets.only(
                 left: renderingPadding.horizontal,
                 right: renderingPadding.horizontal,
                 top: 8,
               ),
-              item: item,
-              reactions: item.reactionsCount,
-              reactionsMade: item.reactionsMade,
             ),
-          if (item.threadedRepliesCount > 0)
-            Consumer(
-              builder: (context, ref, child) {
-                final repliesState = ref.watch(repliesProvider(item.id));
-                final topLevelPosts = repliesState.flatNodes
-                    .where((n) => n.depth == 0)
-                    .toList();
-
-                Widget buildReplyNode(
-                  ThreadedReplyNode node, {
-                  double indent = 20,
-                }) {
-                  final post = node.post;
-                  final children = repliesState.getChildrenOf(post.id);
-                  return Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      ConstrainedBox(
-                        constraints: const BoxConstraints(maxWidth: 400),
-                        child: Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          spacing: 8,
-                          children: [
-                            ProfilePictureWidget(
-                              file:
-                                  post.publisher?.picture ??
-                                  post.publisher?.account?.profile.picture,
-                              radius: 12,
-                            ).padding(top: 4),
-                            if (post.content?.isNotEmpty ?? false)
-                              Expanded(
-                                child: MarkdownTextContent(
-                                  content: post.content!,
-                                  attachments: post.attachments,
-                                  noMentionChip: post.fediverseUri != null,
-                                ).padding(top: 2),
-                              )
-                            else
-                              Expanded(
-                                child:
-                                    Text(
-                                          'postHasAttachments',
-                                          style: const TextStyle(height: 2),
-                                        )
-                                        .plural(post.attachments.length)
-                                        .padding(top: 2),
-                              ),
-                          ],
-                        ),
+          if (showThreadScreenshot && thread != null)
+            _buildThreadScreenshot(context, thread!),
+          if (item.reactionsCount.isNotEmpty)
+            Padding(
+              padding: EdgeInsets.only(
+                left: renderingPadding.horizontal,
+                right: renderingPadding.horizontal,
+                top: 8,
+              ),
+              child: Wrap(
+                spacing: 8,
+                runSpacing: 4,
+                children: [
+                  for (final symbol in item.reactionsCount.keys)
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 4,
                       ),
-                      for (final child in children)
-                        buildReplyNode(
-                          child,
-                          indent: indent,
-                        ).padding(left: indent, top: 4),
-                    ],
-                  );
-                }
-
-                return Container(
-                  margin: EdgeInsets.only(
-                    left: renderingPadding.horizontal,
-                    right: renderingPadding.horizontal,
-                    top: 8,
-                  ),
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 16,
-                    vertical: 12,
-                  ),
-                  decoration: BoxDecoration(
-                    color: Theme.of(context).colorScheme.surfaceContainerLow,
-                    border: Border.all(
-                      color: Theme.of(context).dividerColor.withOpacity(0.5),
+                      decoration: BoxDecoration(
+                        color: (item.reactionsMade[symbol] ?? false)
+                            ? Theme.of(
+                                context,
+                              ).colorScheme.primary.withOpacity(0.2)
+                            : Theme.of(
+                                context,
+                              ).colorScheme.surfaceContainerHighest,
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          buildReactionIcon(symbol, 20),
+                          const Gap(4),
+                          Text(
+                            'x${item.reactionsCount[symbol]}',
+                            style: const TextStyle(fontWeight: FontWeight.bold),
+                          ),
+                        ],
+                      ),
                     ),
-                    borderRadius: const BorderRadius.all(Radius.circular(8)),
-                  ),
-                  width: double.infinity,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    spacing: 4,
-                    children: [
-                      Text(
-                            'repliesCount',
-                            style: const TextStyle(
-                              fontSize: 15,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          )
-                          .plural(item.threadedRepliesCount)
-                          .padding(horizontal: 5),
-                      if (topLevelPosts.isEmpty && repliesState.loading)
-                        Row(
-                          children: [
-                            const SizedBox(
-                              width: 24,
-                              height: 24,
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            ),
-                            const Gap(8),
-                            const Text('loading').tr(),
-                          ],
-                        ).padding(horizontal: 5),
-                      if (topLevelPosts.isNotEmpty)
-                        ...topLevelPosts.map((post) => buildReplyNode(post)),
-                    ],
-                  ),
-                );
-              },
+                ],
+              ),
             ),
           Container(
             color: Theme.of(context).colorScheme.surfaceContainerLow,
@@ -194,7 +333,7 @@ class PostItemScreenshot extends ConsumerWidget {
                   width: 44,
                   height: 44,
                   child: Image.asset(
-                    'assets/icons/icon${isDark ? '-dark' : ''}.png',
+                    'assets/icons/icon${isDark ? '-dark' : ''}.webp',
                     width: 40,
                     height: 40,
                   ),

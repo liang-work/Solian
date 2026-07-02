@@ -31,6 +31,36 @@ struct AppIntentCredential {
     }
 }
 
+// MARK: - Localization Helper
+
+@available(iOS 16.0, *)
+enum AppIntentL10n {
+    static func string(_ key: String, _ args: CVarArg...) -> String {
+        let format = NSLocalizedString(key, comment: "")
+        guard !args.isEmpty else { return format }
+        return String(format: format, locale: Locale.current, arguments: args)
+    }
+}
+
+// MARK: - Navigation Helper
+
+@available(iOS 16.0, *)
+enum AppIntentNavigation {
+    static func queueDeepLink(path: String, queryItems: [URLQueryItem] = []) throws {
+        guard var components = URLComponents(string: "\(SharedConstants.urlScheme)://\(path)") else {
+            throw AppIntentError.networkError("Invalid app URL")
+        }
+        if !queryItems.isEmpty {
+            components.queryItems = queryItems
+        }
+        guard let url = components.url else {
+            throw AppIntentError.networkError("Invalid app URL")
+        }
+        UserDefaults.shared.set(url.absoluteString, forKey: SharedConstants.pendingDeepLinkUrlKey)
+        UserDefaults.shared.synchronize()
+    }
+}
+
 // MARK: - Cache Helper
 
 @available(iOS 16.0, *)
@@ -73,8 +103,16 @@ struct ChatRoomEntity: AppEntity {
     static var defaultQuery = ChatRoomEntityQuery()
 
     var displayRepresentation: DisplayRepresentation {
-        let title = name ?? "Chat Room \(id.prefix(8))"
-        let subtitle = type == 0 ? "Direct Message" : (type == 1 ? "Group Chat" : "Chat")
+        let title = name ?? AppIntentL10n.string("intent_chat_room_fallback_format", String(id.prefix(8)))
+        let subtitle: String
+        switch type {
+        case 1:
+            subtitle = AppIntentL10n.string("intent_chat_room_kind_direct")
+        case 0:
+            subtitle = AppIntentL10n.string("intent_chat_room_kind_group")
+        default:
+            subtitle = AppIntentL10n.string("intent_chat_room_kind_generic")
+        }
         return DisplayRepresentation(
             title: "\(title)",
             subtitle: "\(subtitle)",
@@ -86,6 +124,7 @@ struct ChatRoomEntity: AppEntity {
 @available(iOS 16.0, *)
 struct ChatRoomEntityQuery: EntityQuery {
     private static var cache = EntityCache<ChatRoomEntity>()
+    private static var currentAccountCache = EntityCache<AccountResponse>()
 
     func entities(for identifiers: [String]) async throws -> [ChatRoomEntity] {
         let rooms = try await Self.fetchRooms()
@@ -98,10 +137,25 @@ struct ChatRoomEntityQuery: EntityQuery {
     }
 
     func entities(matching string: String) async throws -> [ChatRoomEntity] {
-        let rooms = try await Self.fetchRooms()
-        let lowercased = string.lowercased()
-        return rooms.filter { room in
-            room.name?.lowercased().contains(lowercased) ?? false
+        guard let token = AppIntentCredential.getToken() else {
+            throw AppIntentError.networkError("Not logged in")
+        }
+        let serverUrl = AppIntentCredential.getServerUrl()
+
+        async let currentAccountTask = Self.fetchCurrentAccount(token: token, serverUrl: serverUrl)
+        let rooms = try await NetworkService.shared.searchChatRooms(
+            query: string,
+            token: token,
+            serverUrl: serverUrl
+        )
+        let currentAccount = try? await currentAccountTask
+        return rooms.map { room in
+            ChatRoomEntity(
+                id: room.id,
+                name: Self.displayName(for: room, currentAccountId: currentAccount?.id),
+                type: room.type,
+                pictureURL: room.picture?.url
+            )
         }
     }
 
@@ -115,17 +169,69 @@ struct ChatRoomEntityQuery: EntityQuery {
         }
         let serverUrl = AppIntentCredential.getServerUrl()
 
+        async let currentAccountTask = fetchCurrentAccount(token: token, serverUrl: serverUrl)
         let rooms = try await NetworkService.shared.getChatRooms(token: token, serverUrl: serverUrl)
+        let currentAccount = try? await currentAccountTask
         let entities = rooms.map { room in
             ChatRoomEntity(
                 id: room.id,
-                name: room.name ?? room.description,
+                name: displayName(for: room, currentAccountId: currentAccount?.id),
                 type: room.type,
                 pictureURL: room.picture?.url
             )
         }
         cache.setItems(entities)
         return entities
+    }
+
+    private static func fetchCurrentAccount(token: String, serverUrl: String) async throws -> AccountResponse {
+        if let cached = currentAccountCache.getItems()?.first {
+            return cached
+        }
+
+        let account = try await NetworkService.shared.getCurrentAccount(token: token, serverUrl: serverUrl)
+        currentAccountCache.setItems([account])
+        return account
+    }
+
+    private static func displayName(for room: ChatRoomResponse, currentAccountId: String?) -> String? {
+        if let explicitName = room.name, !explicitName.isEmpty {
+            return explicitName
+        }
+
+        if room.type == 1, let members = room.members, !members.isEmpty {
+            let otherMembers = members.filter { member in
+                guard let memberAccountId = member.accountId else { return true }
+                guard let currentAccountId else { return true }
+                return memberAccountId != currentAccountId
+            }
+
+            let displayMembers = otherMembers.isEmpty ? members : otherMembers
+            let memberNames = displayMembers.compactMap { member -> String? in
+                if let accountName = member.account?.name, !accountName.isEmpty {
+                    return accountName
+                }
+                if let accountNick = member.account?.nick, !accountNick.isEmpty {
+                    return accountNick
+                }
+                if let nick = member.nick, !nick.isEmpty {
+                    return nick
+                }
+                return nil
+            }
+
+            if !memberNames.isEmpty {
+                return memberNames.joined(separator: ", ")
+            }
+
+            return AppIntentL10n.string("intent_chat_room_direct_fallback")
+        }
+
+        if let description = room.description, !description.isEmpty {
+            return description
+        }
+
+        return nil
     }
 }
 
@@ -146,8 +252,8 @@ struct PostEntity: AppEntity {
     static var defaultQuery = PostEntityQuery()
 
     var displayRepresentation: DisplayRepresentation {
-        let title = content?.prefix(50).description ?? "Post \(id.prefix(8))"
-        let subtitle = authorName.map { "by \($0)" } ?? ""
+        let title = content?.prefix(50).description ?? AppIntentL10n.string("intent_post_fallback_format", String(id.prefix(8)))
+        let subtitle = authorName.map { AppIntentL10n.string("intent_post_author_format", $0) } ?? ""
         return DisplayRepresentation(
             title: "\(title)",
             subtitle: "\(subtitle)",
@@ -226,16 +332,16 @@ struct OpenChatIntent: AppIntent {
     var chatRoom: ChatRoomEntity?
 
     static var parameterSummary: some ParameterSummary {
-        Summary("Open chat with \(\.$chatRoom)")
+        Summary("intent_open_chat_summary \(\.$chatRoom)")
     }
 
     func perform() async throws -> some IntentResult & OpensIntent {
         if let chatRoom = chatRoom {
-            DeepLinkHandler.shared.handle(url: URL(string: "solian://chat/\(chatRoom.id)")!)
-            return .result(value: "Opening chat \(chatRoom.name ?? chatRoom.id)")
+            try AppIntentNavigation.queueDeepLink(path: "chat/\(chatRoom.id)")
+            return .result(value: AppIntentL10n.string("intent_open_chat_result_room", chatRoom.name ?? chatRoom.id))
         } else {
-            DeepLinkHandler.shared.handle(url: URL(string: "solian://chat")!)
-            return .result(value: "Opening chat list")
+            try AppIntentNavigation.queueDeepLink(path: "chat")
+            return .result(value: AppIntentL10n.string("intent_open_chat_result_list"))
         }
     }
 }
@@ -253,7 +359,7 @@ struct OpenPostIntent: AppIntent {
     var post: PostEntity?
 
     static var parameterSummary: some ParameterSummary {
-        Summary("Open post \(\.$post)")
+        Summary("intent_open_post_summary \(\.$post)")
     }
 
     func perform() async throws -> some IntentResult & OpensIntent {
@@ -261,9 +367,8 @@ struct OpenPostIntent: AppIntent {
             throw AppIntentError.requiredParameter("Post")
         }
 
-        DeepLinkHandler.shared.handle(url: URL(string: "solian://posts/\(post.id)")!)
-
-        return .result(value: "Opening post \(post.id)")
+        try AppIntentNavigation.queueDeepLink(path: "posts/\(post.id)")
+        return .result(value: AppIntentL10n.string("intent_open_post_result", post.id))
     }
 }
 
@@ -277,9 +382,8 @@ struct OpenComposeIntent: AppIntent {
     static var openAppWhenRun = true
 
     func perform() async throws -> some IntentResult & OpensIntent {
-        DeepLinkHandler.shared.handle(url: URL(string: "solian://compose")!)
-
-        return .result(value: "Opening compose screen")
+        try AppIntentNavigation.queueDeepLink(path: "compose")
+        return .result(value: AppIntentL10n.string("intent_open_compose_result"))
     }
 }
 
@@ -293,9 +397,8 @@ struct ComposePostIntent: AppIntent {
     static var openAppWhenRun = true
 
     func perform() async throws -> some IntentResult & OpensIntent {
-        DeepLinkHandler.shared.handle(url: URL(string: "solian://compose")!)
-
-        return .result(value: "Opening compose screen")
+        try AppIntentNavigation.queueDeepLink(path: "compose")
+        return .result(value: AppIntentL10n.string("intent_open_compose_result"))
     }
 }
 
@@ -306,24 +409,90 @@ struct SearchContentIntent: AppIntent {
     static var title: LocalizedStringResource = "intent_search_title"
     static var description = IntentDescription("intent_search_desc")
     static var isDiscoverable = true
+    static var openAppWhenRun = false
+
+    @Parameter(title: "intent_search_query_parameter")
+    var query: String?
+
+    static var parameterSummary: some ParameterSummary {
+        Summary("intent_search_summary \(\.$query)")
+    }
+
+    func perform() async throws -> some IntentResult & ProvidesDialog {
+        guard let query = query, !query.isEmpty else {
+            throw AppIntentError.requiredParameter(AppIntentL10n.string("intent_search_query_parameter"))
+        }
+        guard let token = AppIntentCredential.getToken() else {
+            throw AppIntentError.networkError("Not logged in")
+        }
+        let serverUrl = AppIntentCredential.getServerUrl()
+
+        do {
+            let posts = try await NetworkService.shared.searchPosts(
+                query: query,
+                limit: 3,
+                token: token,
+                serverUrl: serverUrl
+            )
+
+            if posts.isEmpty {
+                let message = AppIntentL10n.string("intent_search_result", query)
+                return .result(
+                    value: message,
+                    dialog: "\(message)"
+                )
+            }
+
+            let lines = posts.enumerated().map { index, post in
+                let title = post.content?
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                    .replacingOccurrences(of: "\n", with: " ")
+                    .prefix(60)
+                    .description
+                    ?? AppIntentL10n.string("intent_post_fallback_format", String(post.id.prefix(8)))
+                let author = post.author?.name ?? AppIntentL10n.string("intent_unknown_sender")
+                return "\(index + 1). \(title) (\(author))"
+            }
+            let message = lines.joined(separator: "\n")
+
+            return .result(
+                value: message,
+                dialog: "\(AppIntentL10n.string("intent_search_result", query))"
+            )
+        } catch {
+            throw AppIntentError.networkError(error.localizedDescription)
+        }
+    }
+}
+
+// MARK: - Open Search Intent
+
+@available(iOS 16.0, *)
+struct OpenSearchIntent: AppIntent {
+    static var title: LocalizedStringResource = "intent_search_title"
+    static var description = IntentDescription("intent_search_desc")
+    static var isDiscoverable = true
     static var openAppWhenRun = true
 
     @Parameter(title: "intent_search_query_parameter")
     var query: String?
 
     static var parameterSummary: some ParameterSummary {
-        Summary("Search for \(\.$query)")
+        Summary("intent_search_summary \(\.$query)")
     }
 
     func perform() async throws -> some IntentResult & OpensIntent {
-        guard let query = query, !query.isEmpty else {
-            throw AppIntentError.requiredParameter("Search Query")
-        }
+        let normalizedQuery = query?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        try AppIntentNavigation.queueDeepLink(
+            path: "search",
+            queryItems: normalizedQuery.isEmpty ? [] : [
+                URLQueryItem(name: "q", value: normalizedQuery)
+            ]
+        )
 
-        let encodedQuery = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? query
-        DeepLinkHandler.shared.handle(url: URL(string: "solian://search?q=\(encodedQuery)")!)
-
-        return .result(value: "Searching for \"\(query)\"")
+        return .result(value: normalizedQuery.isEmpty
+            ? AppIntentL10n.string("intent_search_short_title")
+            : AppIntentL10n.string("intent_search_result", normalizedQuery))
     }
 }
 
@@ -337,9 +506,8 @@ struct ViewNotificationsIntent: AppIntent {
     static var openAppWhenRun = true
 
     func perform() async throws -> some IntentResult & OpensIntent {
-        DeepLinkHandler.shared.handle(url: URL(string: "solian://notifications")!)
-
-        return .result(value: "Opening notifications")
+        try AppIntentNavigation.queueDeepLink(path: "notifications")
+        return .result(value: AppIntentL10n.string("intent_notifications_result"))
     }
 }
 
@@ -363,11 +531,11 @@ struct CheckNotificationsIntent: AppIntent {
 
             let message: String
             if count == 0 {
-                message = "You have no new notifications"
+                message = AppIntentL10n.string("intent_check_notifications_none")
             } else if count == 1 {
-                message = "You have 1 new notification"
+                message = AppIntentL10n.string("intent_check_notifications_one")
             } else {
-                message = "You have \(count) new notifications"
+                message = AppIntentL10n.string("intent_check_notifications_many", count)
             }
 
             return .result(
@@ -375,7 +543,7 @@ struct CheckNotificationsIntent: AppIntent {
                 dialog: "\(message)"
             )
         } catch {
-            throw AppIntentError.networkError("Failed to check notifications: \(error.localizedDescription)")
+            throw AppIntentError.networkError(AppIntentL10n.string("intent_check_notifications_failed", error.localizedDescription))
         }
     }
 }
@@ -389,14 +557,20 @@ struct SendMessageIntent: AppIntent {
     static var isDiscoverable = true
     static var openAppWhenRun = false
 
-    @Parameter(title: "intent_chat_room_parameter")
+    @Parameter(
+        title: "intent_chat_room_parameter",
+        requestValueDialog: IntentDialog("intent_send_message_chat_prompt")
+    )
     var chatRoom: ChatRoomEntity
 
-    @Parameter(title: "intent_message_parameter")
+    @Parameter(
+        title: "intent_message_parameter",
+        requestValueDialog: IntentDialog("intent_send_message_body_prompt")
+    )
     var message: String
 
     static var parameterSummary: some ParameterSummary {
-        Summary("Send message to \(\.$chatRoom)")
+        Summary("intent_send_message_summary \(\.$message) \(\.$chatRoom)")
     }
 
     func perform() async throws -> some IntentResult & ProvidesDialog {
@@ -409,11 +583,11 @@ struct SendMessageIntent: AppIntent {
             try await NetworkService.shared.sendMessage(channelId: chatRoom.id, content: message, token: token, serverUrl: serverUrl)
 
             return .result(
-                value: "Message sent to \(chatRoom.name ?? chatRoom.id)",
-                dialog: "Message sent successfully"
+                value: AppIntentL10n.string("intent_send_message_result", chatRoom.name ?? chatRoom.id),
+                dialog: "\(AppIntentL10n.string("intent_send_message_success"))"
             )
         } catch {
-            throw AppIntentError.networkError("Failed to send message: \(error.localizedDescription)")
+            throw AppIntentError.networkError(AppIntentL10n.string("intent_send_message_failed", error.localizedDescription))
         }
     }
 }
@@ -427,14 +601,21 @@ struct ReadMessagesIntent: AppIntent {
     static var isDiscoverable = true
     static var openAppWhenRun = false
 
-    @Parameter(title: "intent_chat_room_parameter")
+    @Parameter(
+        title: "intent_chat_room_parameter",
+        requestValueDialog: IntentDialog("intent_read_messages_chat_prompt")
+    )
     var chatRoom: ChatRoomEntity
 
-    @Parameter(title: "intent_message_count_parameter", default: 5)
+    @Parameter(
+        title: "intent_message_count_parameter",
+        default: 5,
+        requestValueDialog: IntentDialog("intent_read_messages_count_prompt")
+    )
     var limit: Int
 
     static var parameterSummary: some ParameterSummary {
-        Summary("Read messages from \(\.$chatRoom)")
+        Summary("intent_read_messages_summary \(\.$chatRoom)")
     }
 
     func perform() async throws -> some IntentResult & ProvidesDialog {
@@ -456,23 +637,23 @@ struct ReadMessagesIntent: AppIntent {
 
             if messages.isEmpty {
                 return .result(
-                    value: "No messages found in \(chatRoom.name ?? chatRoom.id)",
-                    dialog: "No messages found"
+                    value: AppIntentL10n.string("intent_read_messages_none", chatRoom.name ?? chatRoom.id),
+                    dialog: "\(AppIntentL10n.string("intent_read_messages_none_dialog"))"
                 )
             }
 
             let formattedMessages = messages.compactMap { message -> String? in
-                let senderName = message.sender?.account?.name ?? "Unknown"
+                let senderName = message.sender?.account?.name ?? AppIntentL10n.string("intent_unknown_sender")
                 let content = message.content ?? ""
                 return "\(senderName): \(content)"
             }.joined(separator: "\n")
 
             return .result(
                 value: formattedMessages,
-                dialog: "Found \(messages.count) messages"
+                dialog: "\(AppIntentL10n.string("intent_read_messages_found", messages.count))"
             )
         } catch {
-            throw AppIntentError.networkError("Failed to read messages: \(error.localizedDescription)")
+            throw AppIntentError.networkError(AppIntentL10n.string("intent_read_messages_failed", error.localizedDescription))
         }
     }
 }
@@ -497,11 +678,11 @@ struct CheckUnreadChatsIntent: AppIntent {
 
             let message: String
             if count == 0 {
-                message = "You have no unread messages"
+                message = AppIntentL10n.string("intent_unread_chats_none")
             } else if count == 1 {
-                message = "You have 1 unread message"
+                message = AppIntentL10n.string("intent_unread_chats_one")
             } else {
-                message = "You have \(count) unread messages"
+                message = AppIntentL10n.string("intent_unread_chats_many", count)
             }
 
             return .result(
@@ -509,7 +690,7 @@ struct CheckUnreadChatsIntent: AppIntent {
                 dialog: "\(message)"
             )
         } catch {
-            throw AppIntentError.networkError("Failed to check unread chats: \(error.localizedDescription)")
+            throw AppIntentError.networkError(AppIntentL10n.string("intent_unread_chats_failed", error.localizedDescription))
         }
     }
 }
@@ -533,11 +714,11 @@ struct MarkNotificationsReadIntent: AppIntent {
             try await NetworkService.shared.markNotificationsRead(token: token, serverUrl: serverUrl)
 
             return .result(
-                value: "All notifications marked as read",
-                dialog: "All notifications marked as read"
+                value: AppIntentL10n.string("intent_mark_read_result"),
+                dialog: "\(AppIntentL10n.string("intent_mark_read_result"))"
             )
         } catch {
-            throw AppIntentError.networkError("Failed to mark notifications: \(error.localizedDescription)")
+            throw AppIntentError.networkError(AppIntentL10n.string("intent_mark_read_failed", error.localizedDescription))
         }
     }
 }
@@ -551,9 +732,9 @@ enum AppIntentError: Error, CustomLocalizedStringResourceConvertible {
     var localizedStringResource: LocalizedStringResource {
         switch self {
         case .requiredParameter(let param):
-            return "\(param) is required"
+            return "\(param) \(LocalizedStringResource("intent_error_required_suffix"))"
         case .networkError(let message):
-            return "Network error: \(message)"
+            return "\(LocalizedStringResource("intent_error_network_prefix")) \(message)"
         }
     }
 }

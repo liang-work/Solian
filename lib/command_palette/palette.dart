@@ -7,7 +7,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 import 'package:flutter_hooks/flutter_hooks.dart';
+import 'dart:convert';
 import 'package:island/core/models/route_item.dart';
+import 'package:island/shared/widgets/alert.dart';
 import 'package:island/chat/pods/chat_room.dart';
 import 'package:island/chat/pods/chat_summary.dart';
 import 'package:island/core/config.dart';
@@ -21,6 +23,8 @@ import 'package:styled_widget/styled_widget.dart';
 import 'package:island/core/services/event_bus.dart';
 import 'package:island/core/widgets/draggable_log_overlay.dart';
 import 'package:island/core/debug_sheet.dart';
+import 'package:island/plugins/apis/commands_api.dart';
+import 'package:island/plugins/plugin_manager.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:solar_network_sdk/solar_network_sdk.dart';
 
@@ -29,7 +33,10 @@ class CommandPaletteWidget extends HookConsumerWidget {
 
   const CommandPaletteWidget({super.key, required this.onDismiss});
 
-  static List<SpecialAction> _getSpecialActions(BuildContext context) {
+  static List<SpecialAction> _getSpecialActions(
+    WidgetRef ref,
+    bool isDeveloperMode,
+  ) {
     return [
       SpecialAction(
         name: 'postCompose'.tr(),
@@ -45,7 +52,7 @@ class CommandPaletteWidget extends HookConsumerWidget {
         searchableAliases: ['notifications', 'alert', 'bell'],
         icon: Symbols.notifications,
         action: () {
-          eventBus.fire(const ShowNotificationSheetEvent());
+          eventBus.fire(const ShowNotificationModalEvent());
         },
       ),
       SpecialAction(
@@ -63,15 +70,16 @@ class CommandPaletteWidget extends HookConsumerWidget {
           toggleLogOverlay();
         },
       ),
-      SpecialAction(
-        name: 'Debug Panel',
-        description: 'Open the debug panel overlay',
-        searchableAliases: ['debug', 'panel', 'bug', 'debug panel'],
-        icon: Symbols.bug_report,
-        action: () {
-          toggleDebugOverlay();
-        },
-      ),
+      if (isDeveloperMode)
+        SpecialAction(
+          name: 'Debug Panel',
+          description: 'Open the debug panel overlay',
+          searchableAliases: ['debug', 'panel', 'bug', 'debug panel'],
+          icon: Symbols.bug_report,
+          action: () {
+            toggleDebugOverlay(ref);
+          },
+        ),
     ];
   }
 
@@ -82,6 +90,7 @@ class CommandPaletteWidget extends HookConsumerWidget {
     final searchQuery = useState('');
     final focusedIndex = useState<int?>(null);
     final scrollController = useScrollController();
+    final isDeveloperMode = ref.watch(developerModeProvider);
 
     final animationController = useAnimationController(
       duration: const Duration(milliseconds: 200),
@@ -160,7 +169,7 @@ class CommandPaletteWidget extends HookConsumerWidget {
 
     final filteredSpecialActions = searchQuery.value.isEmpty
         ? <SpecialAction>[]
-        : _getSpecialActions(context)
+        : _getSpecialActions(ref, isDeveloperMode)
               .where((action) {
                 final query = searchQuery.value.toLowerCase();
                 return action.name.toLowerCase().contains(query) ||
@@ -172,6 +181,36 @@ class CommandPaletteWidget extends HookConsumerWidget {
               .take(5) // Limit to 5 results
               .toList();
 
+    // Plugin commands
+    final pluginCommandsApi =
+        PluginManager().getApi<CommandsApi>();
+    final filteredPluginCommands = searchQuery.value.isEmpty
+        ? <SpecialAction>[]
+        : (pluginCommandsApi?.commands ?? [])
+              .where((cmd) {
+                final query = searchQuery.value.toLowerCase()
+                    .replaceFirst(RegExp(r'^/'), '');
+                return cmd.name.toLowerCase().contains(query) ||
+                    cmd.description.toLowerCase().contains(query);
+              })
+              .map((cmd) => SpecialAction(
+                    name: '/${cmd.name}',
+                    description: cmd.description,
+                    icon: Symbols.extension,
+                    searchableAliases: [cmd.name],
+                    action: () {
+                      final runtime = PluginManager().plugins[cmd.pluginId]?.runtime;
+                      if (runtime != null) {
+                        final result = pluginCommandsApi!.executeCommand(cmd, runtime);
+                        if (result != null) {
+                          _showCommandResult(context, result);
+                        }
+                      }
+                    },
+                  ))
+              .take(5)
+              .toList();
+
     final filteredFallbacks =
         searchQuery.value.isNotEmpty &&
             filteredChats.isEmpty &&
@@ -180,11 +219,12 @@ class CommandPaletteWidget extends HookConsumerWidget {
         ? _getFallbackActions(ref, context, searchQuery.value)
         : <FallbackAction>[];
 
-    // Combine results: fallbacks first, then chats, special actions, routes
+    // Combine results: fallbacks first, then chats, special actions, plugin commands, routes
     final allResults = [
       ...filteredFallbacks,
       ...filteredChats,
       ...filteredSpecialActions,
+      ...filteredPluginCommands,
       ...filteredRoutes,
     ];
 
@@ -405,6 +445,26 @@ class CommandPaletteWidget extends HookConsumerWidget {
     ref.read(routerProvider).navigatePath(route.path);
   }
 
+  void _showCommandResult(BuildContext context, Object result) {
+    // Parse UI descriptor from plugin if it's a JSON string
+    String title = 'Command Result';
+    String body = result.toString();
+
+    if (result is String) {
+      try {
+        final decoded = jsonDecode(result);
+        if (decoded is Map<String, dynamic>) {
+          title = decoded['title']?.toString() ?? title;
+          body = decoded['body']?.toString() ??
+              decoded['content']?.toString() ??
+              body;
+        }
+      } catch (_) {}
+    }
+
+    showInfoAlert(body, title);
+  }
+
   void _executeItem(BuildContext context, WidgetRef ref, dynamic item) {
     if (item is SnChatRoom) {
       _navigateToChat(context, ref, item);
@@ -428,15 +488,47 @@ class CommandPaletteWidget extends HookConsumerWidget {
 
     final List<FallbackAction> actions = [];
 
-    // Check if query is a URL
+    // Check if query is a solian:// deep link
     final Uri? uri = Uri.tryParse(query);
+    final isSolianLink = uri != null && uri.scheme == 'solian';
     final isValidUrl =
         uri != null && (uri.scheme == 'http' || uri.scheme == 'https');
     final isDomain = RegExp(
       r'^([a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$',
     ).hasMatch(query);
 
-    if (isValidUrl || isDomain) {
+    if (isSolianLink) {
+      final path = '/${uri.host}${uri.path}';
+      actions.add(
+        FallbackAction(
+          name: 'Open Link',
+          description: 'Open $query in app',
+          icon: Symbols.open_in_new,
+          action: () {
+            final params = uri.queryParameters;
+            if (path == '/auth/authorize') {
+              ref.read(routerProvider).push(
+                AuthorizeRoute(
+                  clientId: params['client_id'],
+                  redirectUri: params['redirect_uri'],
+                  scope: params['scope'],
+                  state: params['state'],
+                  responseType: params['response_type'],
+                ),
+              );
+            } else if (path == '/auth/callback' &&
+                params.containsKey('token')) {
+              // Handled via deep link service; just navigate home
+              ref.read(routerProvider).navigatePath('/');
+            } else {
+              ref.read(routerProvider).navigatePath(path);
+            }
+          },
+        ),
+      );
+    }
+
+    if (!isSolianLink && (isValidUrl || isDomain)) {
       final finalUri = isDomain ? Uri.parse('https://$query') : uri!;
       actions.add(
         FallbackAction(

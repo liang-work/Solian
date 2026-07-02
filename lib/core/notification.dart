@@ -1,25 +1,33 @@
-import 'dart:async';
-
 import 'package:riverpod_annotation/riverpod_annotation.dart';
+import 'package:island/accounts/widgets/friend_status_toast.dart';
+import 'package:island_ui_foundation/island_ui_foundation.dart';
 import 'package:uuid/uuid.dart';
 import 'package:solar_network_sdk/solar_network_sdk.dart';
 
 part 'notification.g.dart';
 
 const kNotificationBaseDuration = Duration(seconds: 5);
-const kNotificationStackedDuration = Duration(seconds: 1);
 
-class NotificationItem {
+enum NotificationItemType { system, friendStatus }
+
+class NotificationItem implements OverlayNotificationItem {
+  @override
   final String id;
-  final SnNotification notification;
+  final NotificationItemType type;
+  final SnNotification? notification;
+  final FriendStatusChangeEvent? friendStatusEvent;
   final DateTime createdAt;
   final int index;
+  @override
   final Duration duration;
+  @override
   final bool dismissed;
 
   NotificationItem({
     String? id,
-    required this.notification,
+    required this.type,
+    this.notification,
+    this.friendStatusEvent,
     DateTime? createdAt,
     required this.index,
     Duration? duration,
@@ -29,9 +37,41 @@ class NotificationItem {
        duration =
            duration ?? kNotificationBaseDuration + Duration(seconds: index);
 
+  factory NotificationItem.system({
+    String? id,
+    required SnNotification notification,
+    required int index,
+    Duration? duration,
+  }) {
+    return NotificationItem(
+      id: id,
+      type: NotificationItemType.system,
+      notification: notification,
+      index: index,
+      duration: duration,
+    );
+  }
+
+  factory NotificationItem.friendStatus({
+    String? id,
+    required FriendStatusChangeEvent event,
+    required int index,
+    Duration? duration,
+  }) {
+    return NotificationItem(
+      id: id,
+      type: NotificationItemType.friendStatus,
+      friendStatusEvent: event,
+      index: index,
+      duration: duration,
+    );
+  }
+
   NotificationItem copyWith({
     String? id,
+    NotificationItemType? type,
     SnNotification? notification,
+    FriendStatusChangeEvent? friendStatusEvent,
     DateTime? createdAt,
     int? index,
     Duration? duration,
@@ -39,7 +79,9 @@ class NotificationItem {
   }) {
     return NotificationItem(
       id: id ?? this.id,
+      type: type ?? this.type,
       notification: notification ?? this.notification,
+      friendStatusEvent: friendStatusEvent ?? this.friendStatusEvent,
       createdAt: createdAt ?? this.createdAt,
       index: index ?? this.index,
       duration: duration ?? this.duration,
@@ -59,26 +101,30 @@ class NotificationItem {
 
 @riverpod
 class NotificationState extends _$NotificationState {
-  final Map<String, Timer> _timers = {};
-
   @override
   List<NotificationItem> build() {
     return [];
   }
 
   void add(SnNotification notification, {Duration? duration}) {
-    final newItem = NotificationItem(
+    final newItem = NotificationItem.system(
       notification: notification,
       index: state.length,
       duration: duration,
     );
     state = [...state, newItem];
-    _timers[newItem.id] = Timer(newItem.duration, () => dismiss(newItem.id));
+  }
+
+  void addFriendStatus(FriendStatusChangeEvent event, {Duration? duration}) {
+    final newItem = NotificationItem.friendStatus(
+      event: event,
+      index: state.length,
+      duration: duration,
+    );
+    state = [...state, newItem];
   }
 
   void dismiss(String id) {
-    _timers[id]?.cancel();
-    _timers.remove(id);
     final index = state.indexWhere((item) => item.id == id);
     if (index != -1) {
       state = List.from(state)
@@ -91,10 +137,6 @@ class NotificationState extends _$NotificationState {
   }
 
   void clear() {
-    for (final timer in _timers.values) {
-      timer.cancel();
-    }
-    _timers.clear();
     state = [];
   }
 }

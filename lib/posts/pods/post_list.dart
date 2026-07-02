@@ -19,9 +19,10 @@ sealed class PostListQuery with _$PostListQuery {
     List<String>? tags,
     bool? pinned,
     @Default(false) bool shuffle,
-    bool? includeReplies,
+    @Default(false) bool? includeReplies,
     bool? mediaOnly,
     String? queryTerm,
+    String? searchEngine,
     String? order,
     int? periodStart,
     int? periodEnd,
@@ -60,7 +61,9 @@ class PostListNotifier extends AsyncNotifier<PaginationState<SnPost>>
 
   @override
   FutureOr<PaginationState<SnPost>> build() async {
-    currentFilter = config.initialFilter;
+    currentFilter = config.initialFilter.copyWith(
+      includeReplies: config.initialFilter.includeReplies ?? false,
+    );
 
     // Listen to real-time post update events
     _postUpdateSubscription = eventBus.on<PostUpdateEvent>().listen((event) {
@@ -136,7 +139,7 @@ class PostListNotifier extends AsyncNotifier<PaginationState<SnPost>>
         final queryParams = {
           'offset': fetchedCount,
           'take': pageSize,
-          'replies': currentFilter.includeReplies,
+          'replies': currentFilter.includeReplies ?? false,
           'orderDesc': currentFilter.orderDesc,
           if (currentFilter.shuffle) 'shuffle': currentFilter.shuffle,
           'pub': publisherName,
@@ -152,6 +155,8 @@ class PostListNotifier extends AsyncNotifier<PaginationState<SnPost>>
           if (currentFilter.periodEnd != null)
             'periodEnd': currentFilter.periodEnd,
           if (currentFilter.queryTerm != null) 'query': currentFilter.queryTerm,
+          if (currentFilter.searchEngine != null)
+            'searchEngine': currentFilter.searchEngine,
           if (currentFilter.mediaOnly != null) 'media': currentFilter.mediaOnly,
         };
 
@@ -190,7 +195,7 @@ class PostListNotifier extends AsyncNotifier<PaginationState<SnPost>>
       final queryParams = {
         'offset': fetchedCount,
         'take': pageSize,
-        'replies': currentFilter.includeReplies,
+        'replies': currentFilter.includeReplies ?? false,
         'orderDesc': currentFilter.orderDesc,
         if (currentFilter.shuffle) 'shuffle': currentFilter.shuffle,
         if (currentFilter.pubName != null) 'pub': currentFilter.pubName,
@@ -206,6 +211,8 @@ class PostListNotifier extends AsyncNotifier<PaginationState<SnPost>>
         if (currentFilter.periodEnd != null)
           'periodEnd': currentFilter.periodEnd,
         if (currentFilter.queryTerm != null) 'query': currentFilter.queryTerm,
+        if (currentFilter.searchEngine != null)
+          'searchEngine': currentFilter.searchEngine,
         if (currentFilter.mediaOnly != null) 'media': currentFilter.mediaOnly,
       };
 

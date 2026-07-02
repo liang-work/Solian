@@ -6,6 +6,33 @@ part of 'chat.dart';
 // JsonSerializableGenerator
 // **************************************************************************
 
+_SnChatGroup _$SnChatGroupFromJson(Map<String, dynamic> json) => _SnChatGroup(
+  id: json['id'] as String,
+  accountId: json['account_id'] as String,
+  name: json['name'] as String,
+  color: json['color'] as String?,
+  icon: json['icon'] as String?,
+  order: (json['order'] as num).toInt(),
+  roomIds:
+      (json['room_ids'] as List<dynamic>?)?.map((e) => e as String).toList() ??
+      const [],
+  createdAt: DateTime.parse(json['created_at'] as String),
+  updatedAt: DateTime.parse(json['updated_at'] as String),
+);
+
+Map<String, dynamic> _$SnChatGroupToJson(_SnChatGroup instance) =>
+    <String, dynamic>{
+      'id': instance.id,
+      'account_id': instance.accountId,
+      'name': instance.name,
+      'color': instance.color,
+      'icon': instance.icon,
+      'order': instance.order,
+      'room_ids': instance.roomIds,
+      'created_at': instance.createdAt.toIso8601String(),
+      'updated_at': instance.updatedAt.toIso8601String(),
+    };
+
 _SnChatRoom _$SnChatRoomFromJson(Map<String, dynamic> json) => _SnChatRoom(
   id: json['id'] as String,
   name: json['name'] as String?,
@@ -17,10 +44,12 @@ _SnChatRoom _$SnChatRoomFromJson(Map<String, dynamic> json) => _SnChatRoom(
   isCommunity: json['is_community'] as bool? ?? false,
   picture: json['picture'] == null
       ? null
-      : SnCloudFile.fromJson(json['picture'] as Map<String, dynamic>),
+      : SnCloudFileReference.fromJson(json['picture'] as Map<String, dynamic>),
   background: json['background'] == null
       ? null
-      : SnCloudFile.fromJson(json['background'] as Map<String, dynamic>),
+      : SnCloudFileReference.fromJson(
+          json['background'] as Map<String, dynamic>,
+        ),
   realmId: json['realm_id'] as String?,
   accountId: json['account_id'] as String?,
   realm: json['realm'] == null
@@ -82,7 +111,9 @@ _SnChatMessage _$SnChatMessageFromJson(Map<String, dynamic> json) =>
           : DateTime.parse(json['edited_at'] as String),
       attachments:
           (json['attachments'] as List<dynamic>?)
-              ?.map((e) => SnCloudFile.fromJson(e as Map<String, dynamic>))
+              ?.map(
+                (e) => SnCloudFileReference.fromJson(e as Map<String, dynamic>),
+              )
               .toList() ??
           const [],
       reactions:
@@ -159,6 +190,38 @@ Map<String, dynamic> _$SnChatReactionToJson(_SnChatReaction instance) =>
       'attitude': instance.attitude,
     };
 
+_SnChatMessagePin _$SnChatMessagePinFromJson(Map<String, dynamic> json) =>
+    _SnChatMessagePin(
+      id: json['id'] as String,
+      messageId: json['message_id'] as String,
+      chatRoomId: json['chat_room_id'] as String,
+      pinnedByMemberId: json['pinned_by_member_id'] as String,
+      expiresAt: json['expires_at'] == null
+          ? null
+          : DateTime.parse(json['expires_at'] as String),
+      createdAt: DateTime.parse(json['created_at'] as String),
+      updatedAt: DateTime.parse(json['updated_at'] as String),
+      message: json['message'] == null
+          ? null
+          : SnChatMessage.fromJson(json['message'] as Map<String, dynamic>),
+      pinnedBy: json['pinned_by'] == null
+          ? null
+          : SnChatMember.fromJson(json['pinned_by'] as Map<String, dynamic>),
+    );
+
+Map<String, dynamic> _$SnChatMessagePinToJson(_SnChatMessagePin instance) =>
+    <String, dynamic>{
+      'id': instance.id,
+      'message_id': instance.messageId,
+      'chat_room_id': instance.chatRoomId,
+      'pinned_by_member_id': instance.pinnedByMemberId,
+      'expires_at': instance.expiresAt?.toIso8601String(),
+      'created_at': instance.createdAt.toIso8601String(),
+      'updated_at': instance.updatedAt.toIso8601String(),
+      'message': instance.message?.toJson(),
+      'pinned_by': instance.pinnedBy?.toJson(),
+    };
+
 _SnChatMember _$SnChatMemberFromJson(Map<String, dynamic> json) =>
     _SnChatMember(
       createdAt: DateTime.parse(json['created_at'] as String),
@@ -184,6 +247,10 @@ _SnChatMember _$SnChatMemberFromJson(Map<String, dynamic> json) =>
       timeoutUntil: json['timeout_until'] == null
           ? null
           : DateTime.parse(json['timeout_until'] as String),
+      chatGroupId: json['chat_group_id'] as String?,
+      chatGroup: json['chat_group'] == null
+          ? null
+          : SnChatGroup.fromJson(json['chat_group'] as Map<String, dynamic>),
       lastReadAt: json['last_read_at'] == null
           ? null
           : DateTime.parse(json['last_read_at'] as String),
@@ -219,6 +286,8 @@ Map<String, dynamic> _$SnChatMemberToJson(_SnChatMember instance) =>
       'joined_at': instance.joinedAt?.toIso8601String(),
       'break_until': instance.breakUntil?.toIso8601String(),
       'timeout_until': instance.timeoutUntil?.toIso8601String(),
+      'chat_group_id': instance.chatGroupId,
+      'chat_group': instance.chatGroup?.toJson(),
       'last_read_at': instance.lastReadAt?.toIso8601String(),
       'status': instance.status?.toJson(),
       'realm_nick': instance.realmNick,

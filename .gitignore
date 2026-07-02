@@ -49,3 +49,9 @@ app.*.map.json
 
 Solian.AppDir
 *.AppImage
+buildtools/sentry.env
+buildtools/.env
+.env
+
+# Development certificate
+devcert.pfx

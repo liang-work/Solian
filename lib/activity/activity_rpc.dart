@@ -4,7 +4,10 @@ import 'dart:io';
 import 'package:dio/dio.dart' hide Response;
 import 'package:flutter/foundation.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
+import 'package:island/core/config.dart';
 import 'package:island/core/network.dart';
+import 'package:island/core/websocket.dart';
+import 'package:island_desktop_presence/activity_rpc_transport.dart';
 import 'package:logging/logging.dart';
 
 import 'package:riverpod_annotation/riverpod_annotation.dart';
@@ -13,9 +16,6 @@ import 'package:shelf/shelf_io.dart' as shelf_io;
 import 'package:shelf_web_socket/shelf_web_socket.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 import 'package:solar_network_sdk/solar_network_sdk.dart';
-
-// Conditional imports for IPC server - use web stubs on web platform
-import 'ipc_server.dart' if (dart.library.html) 'ipc_server.web.dart';
 
 part 'activity_rpc.g.dart';
 
@@ -110,7 +110,7 @@ class ActivityRpcServer {
     }
 
     // Start IPC server
-    final shouldStartIpc = !Platform.isMacOS && !kIsWeb;
+    final shouldStartIpc = !kIsWeb;
     if (shouldStartIpc) {
       try {
         _ipcServer = MultiPlatformIpcServer();
@@ -132,7 +132,7 @@ class ActivityRpcServer {
         Logger.root.info('[$kRpcLogPrefix] IPC server error: $e');
       }
     } else {
-      Logger.root.info('IPC server disabled on macOS or web');
+      Logger.root.info('IPC server disabled on web');
     }
   }
 
@@ -296,12 +296,14 @@ class ServerState {
   final List<String> activities;
   final String? currentActivityManualId;
   final Map<String, dynamic>? currentActivityData;
+  final List<Map<String, dynamic>> recentPackets;
 
   ServerState({
     required this.status,
     this.activities = const [],
     this.currentActivityManualId,
     this.currentActivityData,
+    this.recentPackets = const [],
   });
 
   ServerState copyWith({
@@ -309,6 +311,7 @@ class ServerState {
     List<String>? activities,
     String? currentActivityManualId,
     Map<String, dynamic>? currentActivityData,
+    List<Map<String, dynamic>>? recentPackets,
   }) {
     return ServerState(
       status: status ?? this.status,
@@ -316,25 +319,29 @@ class ServerState {
       currentActivityManualId:
           currentActivityManualId ?? this.currentActivityManualId,
       currentActivityData: currentActivityData ?? this.currentActivityData,
+      recentPackets: recentPackets ?? this.recentPackets,
     );
   }
 }
 
 class ServerStateNotifier extends Notifier<ServerState> {
-  late final ActivityRpcServer server;
-  late final Dio apiClient;
+  late ActivityRpcServer server;
+  late Dio apiClient;
   Timer? _renewalTimer;
+  bool _serverStarted = false;
+  static const int _maxRecentPackets = 50;
 
   @override
   ServerState build() {
     apiClient = ref.watch(apiClientProvider);
+    final enabled = ref.read(desktopRpcServerEnabledProvider);
     server = ActivityRpcServer({});
     _setupHandlers();
     ref.onDispose(() {
       _stopRenewal();
       server.stop();
     });
-    return ServerState(status: 'Server not started');
+    return ServerState(status: enabled ? 'Stopped' : 'Disabled');
   }
 
   void _setupHandlers() {
@@ -344,6 +351,12 @@ class ServerStateNotifier extends Notifier<ServerState> {
             ? socket.clientId
             : (socket as IpcSocketWrapper).clientId;
         updateStatus('Client connected (ID: $clientId)');
+        _addPacket({
+          'direction': 'incoming',
+          'type': 'connection',
+          'client_id': clientId,
+          'timestamp': DateTime.now().toIso8601String(),
+        });
         socket.send({
           'cmd': 'DISPATCH',
           'data': {
@@ -364,8 +377,22 @@ class ServerStateNotifier extends Notifier<ServerState> {
           'evt': 'READY',
           'nonce': '12345',
         });
+        _addPacket({
+          'direction': 'outgoing',
+          'type': 'DISPATCH',
+          'evt': 'READY',
+          'timestamp': DateTime.now().toIso8601String(),
+        });
       },
       'message': (socket, dynamic data) async {
+        _addPacket({
+          'direction': 'incoming',
+          'type': data['cmd'] ?? 'unknown',
+          if (data['nonce'] != null) 'nonce': data['nonce'],
+          if (data['args'] != null) 'args': data['args'],
+          'timestamp': DateTime.now().toIso8601String(),
+        });
+
         if (data['cmd'] == 'SET_ACTIVITY') {
           final activity = data['args']['activity'];
           final appId = 'rpc:${socket.clientId}';
@@ -379,12 +406,11 @@ class ServerStateNotifier extends Notifier<ServerState> {
           }
 
           addActivity('Activity: ${activity['details'] ?? 'Untitled'}');
-          // https://discord.com/developers/docs/topics/rpc#setactivity-set-activity-argument-structure
           final type = switch (activity['type']) {
-            0 => 1, // Discord Playing -> Playing
-            2 => 2, // Discord Music -> Listening
-            3 => 2, // Discord Watching -> Listening
-            _ => 1, // Discord Competing (or null) -> Playing
+            0 => 1,
+            2 => 2,
+            3 => 2,
+            _ => 1,
           };
           final title = activity['name'] ?? activity['assets']?['small_text'];
           final subtitle =
@@ -423,19 +449,39 @@ class ServerStateNotifier extends Notifier<ServerState> {
             'evt': null,
             'nonce': data['nonce'],
           });
+          _addPacket({
+            'direction': 'outgoing',
+            'type': 'SET_ACTIVITY',
+            'nonce': data['nonce'],
+            'timestamp': DateTime.now().toIso8601String(),
+          });
         }
       },
       'close': (socket) async {
+        final clientId = socket is _WsSocketWrapper
+            ? socket.clientId
+            : (socket as IpcSocketWrapper).clientId;
+        final appId = 'rpc:$clientId';
+
+        _addPacket({
+          'direction': 'internal',
+          'type': 'disconnect',
+          'client_id': clientId,
+          'timestamp': DateTime.now().toIso8601String(),
+        });
         updateStatus('Client disconnected');
+
         final currentId = currentActivityManualId;
-        try {
-          await apiClient.delete(
-            '/passport/activities',
-            queryParameters: {'manualId': currentId},
-          );
-          setCurrentActivity(null, null);
-        } catch (e) {
-          Logger.root.info('Failed to unset remote activity status: $e');
+        if (currentId != null && currentId == appId) {
+          try {
+            await apiClient.delete(
+              '/passport/activities',
+              queryParameters: {'manualId': currentId},
+            );
+            setCurrentActivity(null, null);
+          } catch (e) {
+            Logger.root.info('Failed to unset remote activity status: $e');
+          }
         }
       },
     });
@@ -443,19 +489,61 @@ class ServerStateNotifier extends Notifier<ServerState> {
 
   String? get currentActivityManualId => state.currentActivityManualId;
 
+  void _addPacket(Map<String, dynamic> packet) {
+    final packets = [...state.recentPackets, packet];
+    if (packets.length > _maxRecentPackets) {
+      packets.removeAt(0);
+    }
+    state = state.copyWith(recentPackets: packets);
+  }
+
+  void clearPackets() {
+    state = state.copyWith(recentPackets: []);
+  }
+
+  Future<void> toggleServer(bool enabled) async {
+    final prefs = ref.read(sharedPreferencesProvider);
+    await prefs.setBool(kAppDesktopRpcServerEnabled, enabled);
+    ref.invalidate(desktopRpcServerEnabledProvider);
+    if (enabled) {
+      await start();
+      return;
+    }
+    await _stopServer();
+    state = state.copyWith(status: 'Disabled');
+  }
+
   Future<void> start() async {
+    final enabled = ref.read(desktopRpcServerEnabledProvider);
+    if (!enabled) {
+      state = state.copyWith(status: 'Disabled');
+      return;
+    }
+    if (_serverStarted) {
+      state = state.copyWith(status: 'Server running');
+      return;
+    }
     if (!kIsWeb && !Platform.isAndroid && !Platform.isIOS) {
+      state = state.copyWith(status: 'Starting...');
       try {
         await server.start();
+        _serverStarted = true;
+        if (!ref.mounted) return;
         state = state.copyWith(status: 'Server running');
       } catch (e) {
+        if (!ref.mounted) return;
         state = state.copyWith(status: 'Server failed: $e');
       }
     } else {
-      Future(() {
-        state = state.copyWith(status: 'Server disabled on mobile/web');
-      });
+      state = state.copyWith(status: 'Server disabled on mobile/web');
     }
+  }
+
+  Future<void> _stopServer() async {
+    if (!_serverStarted) return;
+    _stopRenewal();
+    await server.stop();
+    _serverStarted = false;
   }
 
   void updateStatus(String status) {
@@ -524,15 +612,24 @@ Future<List<SnPresenceActivity>> presenceActivities(
   Ref ref,
   String uname,
 ) async {
-  ref.keepAlive();
-  final timer = Timer.periodic(
-    const Duration(minutes: 1),
-    (_) => ref.invalidateSelf(),
-  );
-  ref.onDispose(() => timer.cancel());
-
   final apiClient = ref.watch(apiClientProvider);
   final response = await apiClient.get('/passport/activities/$uname');
   final data = response.data as List<dynamic>;
-  return data.map((json) => SnPresenceActivity.fromJson(json)).toList();
+  final activities = data
+      .map((json) => SnPresenceActivity.fromJson(json))
+      .toList();
+
+  if (activities.isNotEmpty) {
+    final accountId = activities.first.accountId;
+    final websocket = ref.watch(websocketProvider);
+    final subscription = websocket.dataStream.listen((packet) {
+      if (packet.type == 'account.presence.activities.updated' &&
+          packet.data?['account_id'] == accountId) {
+        ref.invalidateSelf();
+      }
+    });
+    ref.onDispose(subscription.cancel);
+  }
+
+  return activities;
 }

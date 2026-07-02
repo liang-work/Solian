@@ -53,6 +53,47 @@ class AuthApi extends BaseApi {
   }
 
   // ==========================================
+  // Challenge approval endpoints
+  // ==========================================
+
+  /// Gets all pending challenges for the current user that are awaiting
+  /// approval from another device.
+  Future<List<SnAuthChallenge>> getPendingChallenges() async {
+    final response = await get<List<dynamic>>(
+      '$_basePath/auth/challenge/pending',
+    );
+    return parseList(response, SnAuthChallenge.fromJson);
+  }
+
+  /// Approves a pending challenge from another device.
+  ///
+  /// [challengeId] - The ID of the challenge to approve.
+  /// [pinCode] - The user's PIN code (required if account has PIN configured).
+  Future<void> approveChallenge({
+    required String challengeId,
+    String? pinCode,
+  }) async {
+    await post(
+      '$_basePath/auth/challenge/$challengeId/approve',
+      data: {'pin_code': pinCode},
+    );
+  }
+
+  /// Declines a pending challenge from another device.
+  ///
+  /// [challengeId] - The ID of the challenge to decline.
+  /// [pinCode] - The user's PIN code (required if account has PIN configured).
+  Future<void> declineChallenge({
+    required String challengeId,
+    String? pinCode,
+  }) async {
+    await post(
+      '$_basePath/auth/challenge/$challengeId/decline',
+      data: {'pin_code': pinCode},
+    );
+  }
+
+  // ==========================================
   // Session endpoints
   // ==========================================
 
@@ -104,11 +145,11 @@ class AuthApi extends BaseApi {
   /// [data] - Additional data for the factor.
   Future<SnAuthFactor> createFactor({
     required int type,
-    required Map<String, dynamic> data,
+    required String? secret,
   }) async {
     final response = await post<Map<String, dynamic>>(
       '$_basePath/factors',
-      data: {'type': type, 'data': data},
+      data: {'type': type, 'secret': secret},
     );
     return SnAuthFactor.fromJson(response.data!);
   }
@@ -213,6 +254,40 @@ class AuthApi extends BaseApi {
       },
     );
     return SnAuthFactor.fromJson(response.data!);
+  }
+
+  /// Starts a passkey authentication challenge for a login attempt.
+  Future<Map<String, dynamic>> startPasskeyAuthentication({
+    required String challengeId,
+  }) async {
+    final response = await post<Map<String, dynamic>>(
+      '$_basePath/auth/challenge/$challengeId/passkey/start',
+    );
+    return response.data!;
+  }
+
+  /// Completes a passkey authentication challenge.
+  Future<SnAuthChallenge> completePasskeyAuthentication({
+    required String challengeId,
+    required String factorId,
+    required String credentialId,
+    required String clientDataJson,
+    required String authenticatorData,
+    required String signature,
+    String? userHandle,
+  }) async {
+    final response = await post<Map<String, dynamic>>(
+      '$_basePath/auth/challenge/$challengeId/passkey/complete',
+      data: {
+        'factor_id': factorId,
+        'credential_id': credentialId,
+        'client_data_json': clientDataJson,
+        'authenticator_data': authenticatorData,
+        'signature': signature,
+        'user_handle': userHandle,
+      },
+    );
+    return SnAuthChallenge.fromJson(response.data!);
   }
 
   // ==========================================

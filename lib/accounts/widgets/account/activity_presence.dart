@@ -4,6 +4,7 @@ import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 import 'package:island/activity/activity_rpc.dart';
+import 'package:island/core/config.dart';
 import 'package:island/shared/widgets/content/image.dart';
 import 'package:material_symbols_icons/symbols.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
@@ -48,7 +49,7 @@ Future<String?> discordAssetsUrl(
   final assets = await ref.watch(discordAssetsProvider(activity).future);
   if (assets != null && assets.containsKey(key)) {
     final assetId = assets[key]!;
-    return 'https://cdn.discordapp.com/app-assets/${activity.manualId}/$assetId.png';
+    return 'https://cdn.discordapp.com/app-assets/${activity.manualId}/$assetId.webp';
   }
   return null;
 }
@@ -109,86 +110,56 @@ class _ActivityPresenceWidgetState extends State<ActivityPresenceWidget>
     super.dispose();
   }
 
+  String _resolveArtworkUrl(WidgetRef ref, String? imageUri) {
+    if (imageUri == null) return '';
+    if (imageUri.startsWith('sha256:')) {
+      final serverURL = ref.read(serverUrlProvider);
+      return '$serverURL/passport/presence/artworks/$imageUri';
+    }
+    return imageUri;
+  }
+
   List<Widget> _buildImages(WidgetRef ref, SnPresenceActivity activity) {
-    final List<Widget> images = [];
-
-    if (activity.largeImage != null) {
-      if (activity.largeImage!.startsWith('discord:')) {
-        final key = activity.largeImage!.substring('discord:'.length);
-        final urlAsync = ref.watch(discordAssetsUrlProvider(activity, key));
-        images.add(
-          urlAsync.when(
-            data: (url) => url != null
-                ? ClipRRect(
-                    borderRadius: BorderRadius.circular(12),
-                    child: CachedNetworkImage(
-                      imageUrl: url,
-                      width: 64,
-                      height: 64,
-                    ),
-                  )
-                : const SizedBox.shrink(),
-            loading: () => const SizedBox(
-              width: 64,
-              height: 64,
-              child: CircularProgressIndicator(strokeWidth: 2),
-            ),
-            error: (error, stack) => const SizedBox.shrink(),
-          ),
-        );
-      } else {
-        images.add(
-          ClipRRect(
-            borderRadius: BorderRadius.circular(12),
-            child: UniversalImage(
-              uri: activity.largeImage!,
-              width: 64,
-              height: 64,
-            ),
-          ),
-        );
-      }
+    final imageUri = _resolveArtworkUrl(ref, activity.largeImage ?? activity.smallImage);
+    if (imageUri.isEmpty) {
+      return const [];
     }
 
-    if (activity.smallImage != null) {
-      if (activity.smallImage!.startsWith('discord:')) {
-        final key = activity.smallImage!.substring('discord:'.length);
-        final urlAsync = ref.watch(discordAssetsUrlProvider(activity, key));
-        images.add(
-          urlAsync.when(
-            data: (url) => url != null
-                ? ClipRRect(
-                    borderRadius: BorderRadius.circular(12),
-                    child: CachedNetworkImage(
-                      imageUrl: url,
-                      width: 32,
-                      height: 32,
-                    ),
-                  )
-                : const SizedBox.shrink(),
-            loading: () => const SizedBox(
-              width: 16,
-              height: 16,
-              child: CircularProgressIndicator(strokeWidth: 2),
-            ),
-            error: (error, stack) => const SizedBox.shrink(),
+    if (imageUri.startsWith('discord:')) {
+      final key = imageUri.substring('discord:'.length);
+      final urlAsync = ref.watch(discordAssetsUrlProvider(activity, key));
+      return [
+        urlAsync.when(
+          data: (url) => url != null
+              ? ClipRRect(
+                  borderRadius: BorderRadius.circular(12),
+                  child: CachedNetworkImage(
+                    imageUrl: url,
+                    width: 64,
+                    height: 64,
+                  ),
+                )
+              : const SizedBox.shrink(),
+          loading: () => const SizedBox(
+            width: 64,
+            height: 64,
+            child: CircularProgressIndicator(strokeWidth: 2),
           ),
-        );
-      } else {
-        images.add(
-          ClipRRect(
-            borderRadius: BorderRadius.circular(12),
-            child: UniversalImage(
-              uri: activity.smallImage!,
-              width: 32,
-              height: 32,
-            ),
-          ),
-        );
-      }
+          error: (error, stack) => const SizedBox.shrink(),
+        ),
+      ];
     }
 
-    return images;
+    return [
+      ClipRRect(
+        borderRadius: BorderRadius.circular(12),
+        child: UniversalImage(
+          uri: imageUri,
+          width: 64,
+          height: 64,
+        ),
+      ),
+    ];
   }
 
   Widget buildSteamCompactImage({required SnPresenceActivity activity}) {
@@ -252,8 +223,9 @@ class _ActivityPresenceWidgetState extends State<ActivityPresenceWidget>
   }
 
   Widget _buildCompactImage(SnPresenceActivity activity, WidgetRef ref) {
-    if (activity.largeImage!.startsWith('discord:')) {
-      final key = activity.largeImage!.substring('discord:'.length);
+    final resolvedImage = _resolveArtworkUrl(ref, activity.largeImage);
+    if (resolvedImage.startsWith('discord:')) {
+      final key = resolvedImage.substring('discord:'.length);
       final urlAsync = ref.watch(discordAssetsUrlProvider(activity, key));
       return urlAsync.when(
         data: (url) => url != null
@@ -272,7 +244,7 @@ class _ActivityPresenceWidgetState extends State<ActivityPresenceWidget>
     }
     return ClipRRect(
       borderRadius: BorderRadius.circular(8),
-      child: UniversalImage(uri: activity.largeImage!, width: 32, height: 32),
+      child: UniversalImage(uri: resolvedImage, width: 32, height: 32),
     );
   }
 
@@ -307,9 +279,9 @@ class _ActivityPresenceWidgetState extends State<ActivityPresenceWidget>
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            (activity.subtitle?.isEmpty ?? true)
+                            (activity.title?.isEmpty ?? true)
                                 ? 'unknown'.tr()
-                                : activity.subtitle!,
+                                : activity.title!,
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: textTheme.bodySmall,
@@ -490,13 +462,13 @@ class _ActivityPresenceWidgetState extends State<ActivityPresenceWidget>
                                   spacing: 2,
                                   children: [
                                     Flexible(
-                                      child: Text(
-                                        (activity.subtitle?.isEmpty ?? true)
-                                            ? 'unknown'.tr()
-                                            : activity.subtitle!,
-                                        style: textTheme.bodyMedium,
-                                      ),
-                                    ),
+                                       child: Text(
+                                         (activity.title?.isEmpty ?? true)
+                                             ? 'unknown'.tr()
+                                             : activity.title!,
+                                         style: textTheme.bodyMedium,
+                                       ),
+                                     ),
                                     if (activity.titleUrl != null &&
                                         activity.titleUrl!.isNotEmpty)
                                       IconButton(
@@ -684,7 +656,7 @@ class _ActivityPresenceWidgetState extends State<ActivityPresenceWidget>
                             child: Tooltip(
                               message: 'Listening on Spotify',
                               child: Image.asset(
-                                'assets/images/oidc/spotify.png',
+                                'assets/images/oidc/spotify.webp',
                                 width: 24,
                                 height: 24,
                                 color: colorScheme.onSurface,

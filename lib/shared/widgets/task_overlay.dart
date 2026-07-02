@@ -1,688 +1,490 @@
 import 'dart:async';
 import 'dart:math' as math;
+
+import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_hooks/flutter_hooks.dart';
 import 'package:gap/gap.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
-import 'package:island/drive/screens/upload_tasks.dart';
-import 'package:island/core/services/responsive.dart';
+import 'package:island/drive/services/drive_task_ws_handler.dart';
+import 'package:island/route.dart';
+import 'package:island/tasks/app_task.dart';
+import 'package:island/tasks/tasks_notifier.dart';
+import 'package:island_ui_foundation/island_ui_foundation.dart';
 import 'package:material_symbols_icons/material_symbols_icons.dart';
-import 'package:easy_localization/easy_localization.dart';
-import 'package:styled_widget/styled_widget.dart';
-import 'package:solar_network_sdk/solar_network_sdk.dart';
+
+import 'task_overlay_state.dart';
 
 class TaskOverlay extends HookConsumerWidget {
   const TaskOverlay({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final uploadTasks = ref.watch(uploadTasksProvider);
-    final activeTasks =
-        uploadTasks
-            .where(
-              (task) =>
-                  task.status == DriveTaskStatus.pending ||
-                  task.status == DriveTaskStatus.inProgress ||
-                  task.status == DriveTaskStatus.paused ||
-                  task.status == DriveTaskStatus.completed,
-            )
-            .toList()
-          ..sort((a, b) => b.createdAt.compareTo(a.createdAt)); // Newest first
+    ref.watch(driveTaskWsHandlerProvider);
 
-    final isVisibleOverride = useState<bool?>(null);
-    final pendingHide = useState(false);
-    final isExpandedLocal = useState(false);
-    final isCompactLocal = useState(true); // Start compact
-    final autoHideTimer = useState<Timer?>(null);
-    final autoCompactTimer = useState<Timer?>(null);
-
-    final allFinished = activeTasks.every(
-      (task) =>
-          task.status == DriveTaskStatus.completed ||
-          task.status == DriveTaskStatus.failed ||
-          task.status == DriveTaskStatus.cancelled ||
-          task.status == DriveTaskStatus.expired,
-    );
-
-    // Auto-hide timer effect
-    useEffect(() {
-      // Reset pendingHide if there are unfinished tasks
-      final hasUnfinishedTasks = activeTasks.any(
-        (task) =>
-            task.status == DriveTaskStatus.pending ||
-            task.status == DriveTaskStatus.inProgress ||
-            task.status == DriveTaskStatus.paused,
-      );
-      if (hasUnfinishedTasks && pendingHide.value) {
-        pendingHide.value = false;
-      }
-
-      autoHideTimer.value?.cancel();
-      if (allFinished &&
-          activeTasks.isNotEmpty &&
-          !isExpandedLocal.value &&
-          !pendingHide.value) {
-        autoHideTimer.value = Timer(const Duration(seconds: 3), () {
-          pendingHide.value = true;
-        });
-      } else {
-        autoHideTimer.value?.cancel();
-        autoHideTimer.value = null;
-      }
-      return null;
-    }, [allFinished, activeTasks, isExpandedLocal.value, pendingHide.value]);
-
-    final isDesktop = isWideScreen(context);
-
-    // Auto-compact timer for mobile when not expanded
-    useEffect(() {
-      if (!isDesktop && !isCompactLocal.value && !isExpandedLocal.value) {
-        // Start timer to auto-compact after 5 seconds
-        autoCompactTimer.value?.cancel();
-        autoCompactTimer.value = Timer(const Duration(seconds: 5), () {
-          isCompactLocal.value = true;
-        });
-      } else {
-        autoCompactTimer.value?.cancel();
-        autoCompactTimer.value = null;
-      }
-      return null;
-    }, [isCompactLocal.value, isExpandedLocal.value, isDesktop]);
-    final isVisible =
-        (isVisibleOverride.value ?? activeTasks.isNotEmpty) &&
-        !pendingHide.value;
+    final allTasks = ref.watch(tasksProvider);
+    final snapshot = buildTaskOverlaySnapshot(allTasks, now: DateTime.now());
+    final isDesktop = DesktopWindowFrame.isPlatformDesktop;
+    final overlayHeight = taskOverlayHeight(isDesktop);
     final slideController = useAnimationController(
-      duration: const Duration(milliseconds: 300),
+      duration: const Duration(milliseconds: 320),
     );
-    final isTopPositioned = !isDesktop; // Mobile: top, Desktop: bottom
 
-    final slideAnimation = Tween<Offset>(
-      begin: isTopPositioned
-          ? const Offset(0, -1)
-          : const Offset(0, 1), // Start from above/below the screen
-      end: Offset.zero, // End at normal position
-    ).animate(CurvedAnimation(parent: slideController, curve: Curves.easeOut));
-
-    // Animate when visibility changes
     useEffect(() {
-      if (isVisible) {
+      if (snapshot.isVisible) {
         slideController.forward();
       } else {
         slideController.reverse();
       }
       return null;
-    }, [isVisible]);
+    }, [snapshot.isVisible]);
 
-    if (!isVisible && slideController.status == AnimationStatus.dismissed) {
-      // If not visible and animation is complete (back to start), don't show anything
+    if (!snapshot.isVisible &&
+        slideController.status == AnimationStatus.dismissed) {
       return const SizedBox.shrink();
     }
 
-    return Positioned(
-      top: isTopPositioned ? 0 : null,
-      bottom: !isTopPositioned ? 0 : null,
-      left: isDesktop ? null : 0,
-      right: isDesktop ? 24 : 0,
-      child: SlideTransition(
-        position: slideAnimation,
-        child:
-            _TaskOverlayContent(
-              activeTasks: activeTasks,
-              isExpanded: isExpandedLocal.value,
-              isCompact: isCompactLocal.value,
-              onExpansionChanged: (expanded) =>
-                  isExpandedLocal.value = expanded,
-              onCompactChanged: (compact) => isCompactLocal.value = compact,
-            ).padding(
-              top: isTopPositioned
-                  ? MediaQuery.of(context).padding.top + 16
-                  : 0,
-              bottom: !isTopPositioned
-                  ? 16 + MediaQuery.of(context).padding.bottom
-                  : 0,
-            ),
+    return IgnorePointer(
+      ignoring:
+          !snapshot.isVisible &&
+          slideController.status == AnimationStatus.dismissed,
+      child: AnimatedBuilder(
+        animation: slideController,
+        builder: (context, child) {
+          final offset =
+              Tween<Offset>(
+                begin: const Offset(0, 1),
+                end: Offset.zero,
+              ).evaluate(
+                CurvedAnimation(
+                  parent: slideController,
+                  curve: Curves.easeOutCubic,
+                  reverseCurve: Curves.easeInCubic,
+                ),
+              );
+          return FractionalTranslation(translation: offset, child: child);
+        },
+        child: _TaskOverlayBar(
+          snapshot: snapshot,
+          allTasks: allTasks,
+          height: overlayHeight,
+          isDesktop: isDesktop,
+        ),
       ),
     );
   }
 }
 
-class _TaskOverlayContent extends HookConsumerWidget {
-  final List<DriveTask> activeTasks;
-  final bool isExpanded;
-  final bool isCompact;
-  final Function(bool)? onExpansionChanged;
-  final Function(bool)? onCompactChanged;
-
-  const _TaskOverlayContent({
-    required this.activeTasks,
-    required this.isExpanded,
-    required this.isCompact,
-    this.onExpansionChanged,
-    this.onCompactChanged,
-  });
+class TaskOverlayHost extends ConsumerStatefulWidget {
+  const TaskOverlayHost({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final animationController = useAnimationController(
-      duration: const Duration(milliseconds: 200),
-      initialValue: 0.0,
+  ConsumerState<TaskOverlayHost> createState() => _TaskOverlayHostState();
+}
+
+class _TaskOverlayHostState extends ConsumerState<TaskOverlayHost> {
+  Timer? _clearTimer;
+
+  @override
+  void dispose() {
+    _clearTimer?.cancel();
+    super.dispose();
+  }
+
+  void _syncAutoClear(List<AppTask> allTasks) {
+    final staleCompletedIds = finishedTaskIdsToAutoClear(
+      allTasks,
+      now: DateTime.now(),
     );
-    final compactHeight = 32.0;
-    final collapsedHeight = 60.0;
-    final expandedHeight = 400.0;
-
-    final currentHeight = isCompact
-        ? compactHeight
-        : isExpanded
-        ? expandedHeight
-        : collapsedHeight;
-
-    final opacityAnimation = useAnimation(
-      CurvedAnimation(parent: animationController, curve: Curves.easeInOut),
-    );
-
-    useEffect(() {
-      if (isExpanded) {
-        animationController.forward();
-      } else {
-        animationController.reverse();
-      }
-      return null;
-    }, [isExpanded]);
-
-    final isMobile = !isWideScreen(context);
-
-    final taskNotifier = ref.read(uploadTasksProvider.notifier);
-
-    void handleInteraction() {
-      if (isCompact) {
-        onCompactChanged?.call(false);
-      } else if (!isExpanded) {
-        onExpansionChanged?.call(true);
-      } else {
-        onExpansionChanged?.call(false);
-      }
+    if (staleCompletedIds.isNotEmpty) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        final notifier = ref.read(tasksProvider.notifier);
+        for (final id in staleCompletedIds) {
+          notifier.removeTask(id);
+        }
+      });
     }
 
-    Widget content = AnimatedContainer(
-      duration: const Duration(milliseconds: 300),
-      curve: Curves.easeInOut,
-      decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surfaceContainer,
-        borderRadius: BorderRadius.circular(isCompact ? 64 : 12),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.1),
-            blurRadius: 8,
-            offset: const Offset(0, 2),
-          ),
-        ],
-      ),
-      width: isCompact
-          ? _getCompactWidth(activeTasks)
-          : (isMobile ? MediaQuery.of(context).size.width - 32 : 320),
-      height: currentHeight,
-      child: GestureDetector(
-        onTap: isMobile ? handleInteraction : null,
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(isCompact ? 64 : 12),
-          child: AnimatedSwitcher(
-            duration: const Duration(milliseconds: 300),
-            switchInCurve: Curves.easeInOut,
-            switchOutCurve: Curves.easeInOut,
-            child: isCompact
-                ? // Compact view with progress bar background and text
-                  Container(
-                    key: const ValueKey('compact'),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      spacing: 8,
-                      children: [
-                        Icon(
-                          _getOverallStatusIcon(activeTasks),
-                          size: 16,
-                          color: Theme.of(context).colorScheme.primary,
-                        ),
-                        Expanded(
-                          child: Text(
-                            activeTasks.isEmpty
-                                ? '0 tasks'
-                                : _getOverallStatusText(activeTasks),
-                            style: Theme.of(context).textTheme.bodySmall
-                                ?.copyWith(
-                                  fontWeight: FontWeight.w500,
-                                  color: Theme.of(
-                                    context,
-                                  ).colorScheme.onSurface,
-                                ),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                        SizedBox(
-                          width: 16,
-                          height: 16,
-                          child: Stack(
-                            alignment: Alignment.center,
-                            children: [
-                              CircularProgressIndicator(
-                                value: _getOverallProgress(activeTasks),
-                                strokeWidth: 3,
-                                backgroundColor: Theme.of(
-                                  context,
-                                ).colorScheme.surfaceContainerHighest,
-                                padding: EdgeInsets.zero,
-                              ),
-                              if (activeTasks.any(
-                                (task) =>
-                                    task.status == DriveTaskStatus.inProgress &&
-                                    task.uploadedBytes < task.fileSize,
-                              ))
-                                CircularProgressIndicator(
-                                  value: null, // Indeterminate
-                                  strokeWidth: 3,
-                                  trackGap: 0,
-                                  valueColor: AlwaysStoppedAnimation<Color>(
-                                    Theme.of(
-                                      context,
-                                    ).colorScheme.secondary.withOpacity(0.5),
-                                  ),
-                                  backgroundColor: Colors.transparent,
-                                  padding: EdgeInsets.zero,
-                                ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ).padding(horizontal: 12),
-                  )
-                : Container(
-                    key: const ValueKey('expanded'),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        // Collapsed Header
-                        Container(
-                          height: 60,
-                          padding: const EdgeInsets.symmetric(horizontal: 16),
-                          child: Row(
-                            children: [
-                              // Task icon with animation
-                              AnimatedSwitcher(
-                                duration: const Duration(milliseconds: 150),
-                                transitionBuilder: (child, animation) {
-                                  return FadeTransition(
-                                    opacity: animation,
-                                    child: child,
-                                  );
-                                },
-                                child: Icon(
-                                  key: ValueKey(isExpanded),
-                                  isExpanded
-                                      ? Symbols.list_rounded
-                                      : _getOverallStatusIcon(activeTasks),
-                                  size: 24,
-                                  color: Theme.of(context).colorScheme.primary,
-                                ),
-                              ),
-                              const SizedBox(width: 12),
+    final nextCompletedTask =
+        allTasks
+            .where((task) => task.isFinished)
+            .where(
+              (task) =>
+                  DateTime.now().difference(task.updatedAt) <
+                  kTaskOverlayCompletedRetention,
+            )
+            .toList()
+          ..sort((a, b) => a.updatedAt.compareTo(b.updatedAt));
 
-                              // Title and count
-                              Expanded(
-                                child: Column(
-                                  mainAxisAlignment: MainAxisAlignment.center,
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      isExpanded
-                                          ? 'tasks'.tr()
-                                          : _getOverallStatusText(activeTasks),
-                                      style: Theme.of(context)
-                                          .textTheme
-                                          .titleSmall
-                                          ?.copyWith(
-                                            fontWeight: FontWeight.w600,
-                                          ),
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                    ),
-                                    if (!isExpanded && activeTasks.isNotEmpty)
-                                      Text(
-                                        _getOverallProgressText(activeTasks),
-                                        style: Theme.of(context)
-                                            .textTheme
-                                            .bodySmall
-                                            ?.copyWith(
-                                              color: Theme.of(
-                                                context,
-                                              ).colorScheme.onSurfaceVariant,
-                                            ),
-                                      ),
-                                  ],
-                                ),
-                              ),
+    _clearTimer?.cancel();
+    if (nextCompletedTask.isNotEmpty) {
+      final oldestVisibleCompleted = nextCompletedTask.first;
+      final remaining =
+          kTaskOverlayCompletedRetention -
+          DateTime.now().difference(oldestVisibleCompleted.updatedAt);
+      _clearTimer = Timer(remaining.isNegative ? Duration.zero : remaining, () {
+        final notifier = ref.read(tasksProvider.notifier);
+        for (final id in finishedTaskIdsToAutoClear(
+          ref.read(tasksProvider),
+          now: DateTime.now(),
+        )) {
+          notifier.removeTask(id);
+        }
+      });
+    }
+  }
 
-                              // Progress indicator (collapsed)
-                              if (!isExpanded)
-                                SizedBox(
-                                  width: 32,
-                                  height: 32,
-                                  child: Stack(
-                                    children: [
-                                      CircularProgressIndicator(
-                                        value: _getOverallProgress(activeTasks),
-                                        strokeWidth: 3,
-                                        backgroundColor: Theme.of(
-                                          context,
-                                        ).colorScheme.surfaceContainerHighest,
-                                      ),
-                                      if (activeTasks.any(
-                                        (task) =>
-                                            task.status ==
-                                                DriveTaskStatus.inProgress &&
-                                            task.uploadedBytes < task.fileSize,
-                                      ))
-                                        CircularProgressIndicator(
-                                          value: null, // Indeterminate
-                                          strokeWidth: 3,
-                                          trackGap: 0,
-                                          valueColor:
-                                              AlwaysStoppedAnimation<Color>(
-                                                Theme.of(context)
-                                                    .colorScheme
-                                                    .secondary
-                                                    .withOpacity(0.5),
-                                              ),
-                                          backgroundColor: Colors.transparent,
-                                        ),
-                                    ],
-                                  ),
-                                ),
+  @override
+  Widget build(BuildContext context) {
+    final allTasks = ref.watch(tasksProvider);
+    final snapshot = buildTaskOverlaySnapshot(allTasks, now: DateTime.now());
+    final isDesktop = DesktopWindowFrame.isPlatformDesktop;
 
-                              // Expand/collapse button
-                              IconButton(
-                                icon: AnimatedRotation(
-                                  turns: opacityAnimation * 0.5,
-                                  duration: const Duration(milliseconds: 200),
-                                  child: Icon(
-                                    isExpanded
-                                        ? Symbols.expand_more
-                                        : Symbols.chevron_right,
-                                    size: 20,
-                                  ),
-                                ),
-                                onPressed: () =>
-                                    onExpansionChanged?.call(!isExpanded),
-                                padding: EdgeInsets.zero,
-                                constraints: const BoxConstraints(),
-                              ),
-                            ],
-                          ),
-                        ),
+    _syncAutoClear(allTasks);
 
-                        // Expanded content
-                        if (isExpanded)
-                          Expanded(
-                            child: Container(
-                              decoration: BoxDecoration(
-                                border: Border(
-                                  top: BorderSide(
-                                    color: Theme.of(
-                                      context,
-                                    ).colorScheme.outline,
-                                    width:
-                                        1 /
-                                        MediaQuery.of(context).devicePixelRatio,
-                                  ),
-                                ),
-                              ),
-                              child: Material(
-                                color: Colors.transparent,
-                                child: CustomScrollView(
-                                  slivers: [
-                                    SliverToBoxAdapter(
-                                      child: ListTile(
-                                        dense: true,
-                                        contentPadding: const EdgeInsets.only(
-                                          left: 18,
-                                          right: 16,
-                                        ),
-                                        title: const Text(
-                                          'clearCompleted',
-                                        ).tr(),
-                                        leading: Icon(
-                                          Symbols.clear_all,
-                                          size: 18,
-                                          color: Theme.of(
-                                            context,
-                                          ).colorScheme.onSurfaceVariant,
-                                        ),
-                                        onTap: () {
-                                          taskNotifier.clearCompletedTasks();
-                                          onExpansionChanged?.call(false);
-                                        },
-                                        trailing: IconButton(
-                                          tooltip: 'clearAll'.tr(),
-                                          icon: Icon(
-                                            Symbols.close,
-                                            size: 18,
-                                            color: Theme.of(
-                                              context,
-                                            ).colorScheme.error,
-                                          ),
-                                          padding: EdgeInsets.zero,
-                                          onPressed: () {
-                                            taskNotifier.clearAllTasks();
-                                            onExpansionChanged?.call(false);
-                                          },
-                                        ),
-                                        tileColor: Theme.of(
-                                          context,
-                                        ).colorScheme.surfaceContainerHighest,
-                                      ),
-                                    ),
-
-                                    // Task list
-                                    SliverList(
-                                      delegate: SliverChildBuilderDelegate((
-                                        context,
-                                        index,
-                                      ) {
-                                        final task = activeTasks[index];
-                                        return AnimatedOpacity(
-                                          opacity: opacityAnimation,
-                                          duration: const Duration(
-                                            milliseconds: 150,
-                                          ),
-                                          child: UploadTaskTile(task: task),
-                                        );
-                                      }, childCount: activeTasks.length),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ),
-                          ),
-                      ],
-                    ),
-                  ),
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 320),
+      curve: Curves.easeOutCubic,
+      height: snapshot.isVisible ? taskOverlayHeight(isDesktop) : 0,
+      child: ClipRect(
+        child: Align(
+          alignment: Alignment.topCenter,
+          child: SizedBox(
+            height: taskOverlayHeight(isDesktop),
+            child: const TaskOverlay(),
           ),
         ),
       ),
     );
-
-    // Add MouseRegion for desktop hover
-    if (!isMobile) {
-      content = MouseRegion(
-        onEnter: (_) => onCompactChanged?.call(false),
-        onExit: (_) => onCompactChanged?.call(true),
-        child: content,
-      );
-    }
-
-    if (isCompact) {
-      content = Center(child: content);
-    }
-
-    return Padding(
-      padding: EdgeInsets.only(
-        bottom: isMobile ? 16 : 24,
-        left: isMobile ? 16 : 0,
-        right: isMobile ? 16 : 24,
-      ),
-      child: content,
-    );
-  }
-
-  double? _getTaskProgress(DriveTask task) {
-    if (task.status == DriveTaskStatus.completed ||
-        (task.uploadedBytes >= task.fileSize && task.fileSize > 0)) {
-      return 1.0;
-    }
-    if (task.status != DriveTaskStatus.inProgress) return 0.0;
-
-    return task.fileSize > 0 ? task.uploadedBytes / task.fileSize : 0.0;
-  }
-
-  double _getOverallProgress(List<DriveTask> tasks) {
-    if (tasks.isEmpty) return 0.0;
-
-    final progressValues = tasks.map((task) => _getTaskProgress(task));
-    final determinateProgresses = progressValues.where((p) => p != null);
-
-    if (determinateProgresses.isEmpty) return 0.0;
-
-    final totalProgress = determinateProgresses.fold<double>(
-      0.0,
-      (sum, progress) => sum + progress!,
-    );
-    return totalProgress / tasks.length;
-  }
-
-  String _getOverallProgressText(List<DriveTask> tasks) {
-    final overallProgress = _getOverallProgress(tasks);
-    return '${(overallProgress * 100).toStringAsFixed(0)}%';
-  }
-
-  IconData _getOverallStatusIcon(List<DriveTask> tasks) {
-    if (tasks.isEmpty) return Symbols.upload;
-
-    final hasDownload = tasks.any((task) => task.type == 'FileDownload');
-    final hasInProgress = tasks.any(
-      (task) => task.status == DriveTaskStatus.inProgress,
-    );
-    final hasPending = tasks.any(
-      (task) => task.status == DriveTaskStatus.pending,
-    );
-    final hasPaused = tasks.any(
-      (task) => task.status == DriveTaskStatus.paused,
-    );
-    final hasFailed = tasks.any(
-      (task) =>
-          task.status == DriveTaskStatus.failed ||
-          task.status == DriveTaskStatus.cancelled ||
-          task.status == DriveTaskStatus.expired,
-    );
-    final hasCompleted = tasks.any(
-      (task) => task.status == DriveTaskStatus.completed,
-    );
-
-    // Priority order: in progress > pending > paused > failed > completed
-    if (hasInProgress) {
-      if (hasDownload) {
-        return Symbols.download;
-      }
-      return Symbols.upload;
-    } else if (hasPending) {
-      return Symbols.schedule;
-    } else if (hasPaused) {
-      return Symbols.pause_circle;
-    } else if (hasFailed) {
-      return Symbols.error;
-    } else if (hasCompleted) {
-      return Symbols.check_circle;
-    } else {
-      return Symbols.upload;
-    }
-  }
-
-  String _getOverallStatusText(List<DriveTask> tasks) {
-    if (tasks.isEmpty) return 'tasks'.plural(0);
-
-    final hasDownload = tasks.any((task) => task.type == 'FileDownload');
-    final hasInProgress = tasks.any(
-      (task) => task.status == DriveTaskStatus.inProgress,
-    );
-    final hasPending = tasks.any(
-      (task) => task.status == DriveTaskStatus.pending,
-    );
-    final hasPaused = tasks.any(
-      (task) => task.status == DriveTaskStatus.paused,
-    );
-    final hasFailed = tasks.any(
-      (task) =>
-          task.status == DriveTaskStatus.failed ||
-          task.status == DriveTaskStatus.cancelled ||
-          task.status == DriveTaskStatus.expired,
-    );
-    final hasCompleted = tasks.any(
-      (task) => task.status == DriveTaskStatus.completed,
-    );
-
-    // Priority order: in progress > pending > paused > failed > completed
-    if (hasInProgress) {
-      if (hasDownload) {
-        return '${tasks.length} ${'downloading'.tr()}';
-      } else {
-        return '${tasks.length} ${'uploading'.tr()}';
-      }
-    } else if (hasPending) {
-      return '${tasks.length} ${'pending'.tr()}';
-    } else if (hasPaused) {
-      return '${tasks.length} ${'paused'.tr()}';
-    } else if (hasFailed) {
-      return '${tasks.length} ${'failed'.tr()}';
-    } else if (hasCompleted) {
-      return '${tasks.length} ${'completed'.tr()}';
-    } else {
-      return 'tasks'.plural(tasks.length);
-    }
-  }
-
-  double _getCompactWidth(List<DriveTask> tasks) {
-    // Base width for icon and padding
-    double width = 16 + 12 + 12; // icon size + padding + spacing
-
-    // Add text width estimation
-    final text = activeTasks.isEmpty ? '0 tasks' : _getOverallStatusText(tasks);
-    // Rough estimation: 8px per character
-    width += text.length * 8.0;
-
-    // Cap at reasonable maximum
-    return width.clamp(200, 280);
   }
 }
 
-class UploadTaskTile extends StatefulWidget {
-  final DriveTask task;
+class _TaskOverlayBar extends ConsumerWidget {
+  final TaskOverlaySnapshot snapshot;
+  final List<AppTask> allTasks;
+  final double height;
+  final bool isDesktop;
 
-  const UploadTaskTile({super.key, required this.task});
+  const _TaskOverlayBar({
+    required this.snapshot,
+    required this.allTasks,
+    required this.height,
+    required this.isDesktop,
+  });
 
   @override
-  State<UploadTaskTile> createState() => _UploadTaskTileState();
+  Widget build(BuildContext context, WidgetRef ref) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final primaryTask = snapshot.primaryTask;
+    final completedCount = snapshot.visibleTasks
+        .where((task) => task.status == AppTaskStatus.completed)
+        .length;
+    final title = _buildTitle(primaryTask);
+    final subtitle = _buildSubtitle(
+      primaryTask,
+      snapshot.visibleTasks.length,
+      completedCount,
+    );
+    final fillColor = _statusFillColor(colorScheme, primaryTask);
+    final trackColor = colorScheme.surfaceContainerHighest;
 
-  static double? _getTaskProgress(DriveTask task) {
-    if (task.status == DriveTaskStatus.completed ||
-        (task.uploadedBytes >= task.fileSize && task.fileSize > 0)) {
-      return 1.0;
+    return Material(
+      color: Colors.transparent,
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: () => _showTaskSheet(context, ref),
+        child: SizedBox(
+          height: height,
+          child: ClipRRect(
+            borderRadius: BorderRadius.zero,
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final fillWidth =
+                    constraints.maxWidth * snapshot.progress.clamp(0, 1);
+                return Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    DecoratedBox(
+                      decoration: BoxDecoration(
+                        color: trackColor,
+                        border: Border(
+                          top: BorderSide(
+                            color: colorScheme.outlineVariant.withOpacity(0.3),
+                          ),
+                          bottom: BorderSide(
+                            color: colorScheme.outlineVariant.withOpacity(0.5),
+                          ),
+                        ),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withOpacity(0.14),
+                            blurRadius: 22,
+                            offset: const Offset(0, 10),
+                          ),
+                        ],
+                      ),
+                    ),
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: AnimatedContainer(
+                        duration: const Duration(milliseconds: 240),
+                        curve: Curves.easeOutCubic,
+                        width: fillWidth,
+                        decoration: BoxDecoration(
+                          color: fillColor,
+                          borderRadius: BorderRadius.zero,
+                        ),
+                      ),
+                    ),
+                    _buildForeground(
+                      context,
+                      theme,
+                      color: Colors.white,
+                      text: '$title · $subtitle',
+                    ),
+                    ClipRect(
+                      child: Align(
+                        alignment: Alignment.centerLeft,
+                        widthFactor: snapshot.progress.clamp(0, 1),
+                        child: SizedBox(
+                          width: constraints.maxWidth,
+                          child: _buildForeground(
+                            context,
+                            theme,
+                            color: Colors.white,
+                            text: '$title · $subtitle',
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                );
+              },
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildForeground(
+    BuildContext context,
+    ThemeData theme, {
+    required Color color,
+    required String text,
+  }) {
+    return Padding(
+      padding: EdgeInsets.only(
+        left: _contentHorizontalPadding(context),
+        right: _contentHorizontalPadding(context),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: isDesktop ? 22 : 36,
+            height: isDesktop ? 22 : 36,
+            decoration: BoxDecoration(
+              color: Colors.black.withOpacity(0.14),
+              borderRadius: BorderRadius.circular(isDesktop ? 7 : 12),
+            ),
+            child: Icon(
+              _statusIcon(snapshot.primaryTask),
+              color: color,
+              size: isDesktop ? 14 : 20,
+            ),
+          ),
+          Gap(isDesktop ? 8 : 12),
+          Expanded(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  text,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    color: color,
+                    fontWeight: FontWeight.w700,
+                    fontSize: isDesktop ? 13 : null,
+                    height: 1,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Gap(isDesktop ? 8 : 12),
+          Text(
+            '${(snapshot.progress * 100).round()}%',
+            style: theme.textTheme.titleSmall?.copyWith(
+              color: color,
+              fontWeight: FontWeight.w800,
+              fontSize: isDesktop ? 12 : null,
+            ),
+          ),
+          Gap(isDesktop ? 6 : 8),
+          Icon(
+            Symbols.expand_less,
+            color: color.withOpacity(0.9),
+            size: isDesktop ? 14 : 18,
+          ),
+        ],
+      ),
+    );
+  }
+
+  double _contentHorizontalPadding(BuildContext context) {
+    if (isDesktop) return 16;
+    final mediaQuery = MediaQuery.of(context);
+    return 16 + math.max(mediaQuery.padding.left, mediaQuery.padding.right);
+  }
+
+  String _buildTitle(AppTask? task) {
+    if (task == null) return 'Tasks';
+    if (task.title.isNotEmpty) return task.title;
+    return task.status == AppTaskStatus.completed ? 'Completed' : 'Working';
+  }
+
+  String _buildSubtitle(AppTask? task, int visibleCount, int completedCount) {
+    final otherCount = visibleCount - 1;
+    if (task == null) return '$visibleCount tasks';
+
+    if (task.status == AppTaskStatus.completed &&
+        completedCount == visibleCount) {
+      return completedCount == 1
+          ? 'Completed just now'
+          : '$completedCount tasks finished just now';
     }
-    if (task.status == DriveTaskStatus.inProgress) return null;
 
-    return task.fileSize > 0 ? task.uploadedBytes / task.fileSize : 0.0;
+    final statusText = task.statusMessage?.trim();
+    if (statusText != null && statusText.isNotEmpty) {
+      return otherCount > 0 ? '$statusText · +$otherCount more' : statusText;
+    }
+
+    final label = switch (task.status) {
+      AppTaskStatus.pending => 'Queued',
+      AppTaskStatus.inProgress => 'In progress',
+      AppTaskStatus.paused => 'Paused',
+      AppTaskStatus.completed => 'Completed',
+      AppTaskStatus.failed => 'Failed',
+      AppTaskStatus.cancelled => 'Cancelled',
+      AppTaskStatus.expired => 'Expired',
+    };
+    return otherCount > 0 ? '$label · +$otherCount more' : label;
+  }
+
+  IconData _statusIcon(AppTask? task) {
+    if (task == null) return Symbols.sync;
+    return switch (task.status) {
+      AppTaskStatus.pending => Symbols.schedule,
+      AppTaskStatus.inProgress =>
+        task.type == AppTaskType.driveDownload
+            ? Symbols.download
+            : Symbols.upload,
+      AppTaskStatus.paused => Symbols.pause_circle,
+      AppTaskStatus.completed => Symbols.check_circle,
+      AppTaskStatus.failed => Symbols.error,
+      AppTaskStatus.cancelled => Symbols.cancel,
+      AppTaskStatus.expired => Symbols.timer_off,
+    };
+  }
+
+  Color _statusFillColor(ColorScheme colorScheme, AppTask? task) {
+    if (task == null) return colorScheme.primary;
+    return switch (task.status) {
+      AppTaskStatus.completed => Colors.green,
+      AppTaskStatus.failed ||
+      AppTaskStatus.cancelled ||
+      AppTaskStatus.expired => Colors.red,
+      _ => colorScheme.primary,
+    };
+  }
+
+  void _showTaskSheet(BuildContext context, WidgetRef ref) {
+    final notifier = ref.read(tasksProvider.notifier);
+    final sortedTasks = [...allTasks]
+      ..sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
+    final navigatorContext =
+        ref.read(routerProvider).navigatorKey.currentContext ?? context;
+
+    showModalBottomSheet<void>(
+      context: navigatorContext,
+      isScrollControlled: true,
+      useSafeArea: true,
+      useRootNavigator: true,
+      builder: (sheetContext) {
+        return SheetScaffold(
+          titleText: 'Tasks',
+          child: Column(
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+                child: Row(
+                  children: [
+                    Text(
+                      '${sortedTasks.length} total',
+                      style: Theme.of(sheetContext).textTheme.bodySmall,
+                    ),
+                    const Spacer(),
+                    TextButton.icon(
+                      onPressed: notifier.clearCompleted,
+                      icon: const Icon(Symbols.done_all, size: 18),
+                      label: const Text('Clear done'),
+                    ),
+                    const Gap(8),
+                    TextButton.icon(
+                      onPressed: notifier.clearAll,
+                      icon: const Icon(Symbols.delete_sweep, size: 18),
+                      label: const Text('Clear all'),
+                    ),
+                  ],
+                ),
+              ),
+              Expanded(
+                child: sortedTasks.isEmpty
+                    ? Center(
+                        child: Text(
+                          'No tasks right now',
+                          style: Theme.of(sheetContext).textTheme.bodyMedium,
+                        ),
+                      )
+                    : ListView.builder(
+                        itemCount: sortedTasks.length,
+                        itemBuilder: (context, index) {
+                          return AppTaskTile(task: sortedTasks[index]);
+                        },
+                      ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
   }
 }
 
-class _UploadTaskTileState extends State<UploadTaskTile>
+double taskOverlayHeight(bool isDesktop) => isDesktop ? 32 : 56;
+
+class AppTaskTile extends StatefulWidget {
+  final AppTask task;
+
+  const AppTaskTile({super.key, required this.task});
+
+  @override
+  State<AppTaskTile> createState() => _AppTaskTileState();
+
+  static double? _getTaskProgress(AppTask task) {
+    if (task.status == AppTaskStatus.completed || task.progress >= 1.0) {
+      return 1.0;
+    }
+    if (task.status == AppTaskStatus.inProgress) return null;
+    return task.progress;
+  }
+}
+
+class _AppTaskTileState extends State<AppTaskTile>
     with TickerProviderStateMixin {
   late AnimationController _rotationController;
   late Animation<double> _rotationAnimation;
@@ -713,9 +515,7 @@ class _UploadTaskTileState extends State<UploadTaskTile>
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            widget.task.fileName.isEmpty
-                ? 'untitled'.tr()
-                : widget.task.fileName,
+            widget.task.title.isEmpty ? 'untitled'.tr() : widget.task.title,
             style: Theme.of(
               context,
             ).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w500),
@@ -724,7 +524,7 @@ class _UploadTaskTileState extends State<UploadTaskTile>
           ),
           const SizedBox(height: 2),
           Text(
-            _formatFileSize(widget.task.fileSize),
+            _getTaskTypeLabel(widget.task.type),
             style: Theme.of(context).textTheme.bodySmall?.copyWith(
               color: Theme.of(context).colorScheme.onSurfaceVariant,
             ),
@@ -740,7 +540,7 @@ class _UploadTaskTileState extends State<UploadTaskTile>
             child: Padding(
               padding: const EdgeInsets.all(2),
               child: CircularProgressIndicator(
-                value: UploadTaskTile._getTaskProgress(widget.task),
+                value: AppTaskTile._getTaskProgress(widget.task),
                 strokeWidth: 2.5,
                 backgroundColor: Theme.of(
                   context,
@@ -786,33 +586,33 @@ class _UploadTaskTileState extends State<UploadTaskTile>
     Color color;
 
     switch (widget.task.status) {
-      case DriveTaskStatus.pending:
+      case AppTaskStatus.pending:
         icon = Symbols.schedule;
         color = Theme.of(context).colorScheme.secondary;
         break;
-      case DriveTaskStatus.inProgress:
-        icon = widget.task.type == 'FileDownload'
+      case AppTaskStatus.inProgress:
+        icon = widget.task.type == AppTaskType.driveDownload
             ? Symbols.download
             : Symbols.upload;
         color = Theme.of(context).colorScheme.primary;
         break;
-      case DriveTaskStatus.paused:
+      case AppTaskStatus.paused:
         icon = Symbols.pause_circle;
         color = Theme.of(context).colorScheme.tertiary;
         break;
-      case DriveTaskStatus.completed:
+      case AppTaskStatus.completed:
         icon = Symbols.check_circle;
         color = Colors.green;
         break;
-      case DriveTaskStatus.failed:
+      case AppTaskStatus.failed:
         icon = Symbols.error;
         color = Theme.of(context).colorScheme.error;
         break;
-      case DriveTaskStatus.cancelled:
+      case AppTaskStatus.cancelled:
         icon = Symbols.cancel;
         color = Theme.of(context).colorScheme.error;
         break;
-      case DriveTaskStatus.expired:
+      case AppTaskStatus.expired:
         icon = Symbols.timer_off;
         color = Theme.of(context).colorScheme.error;
         break;
@@ -829,19 +629,25 @@ class _UploadTaskTileState extends State<UploadTaskTile>
         borderRadius: BorderRadius.circular(6),
       ),
       child: switch (widget.task.type) {
-        'FileUpload' => _buildFileUploadDetails(context),
+        AppTaskType.driveUpload => _buildDriveUploadDetails(context),
+        AppTaskType.driveDownload => _buildDriveDownloadDetails(context),
+        AppTaskType.postPublish => _buildPostPublishDetails(context),
         _ => _buildGenericTaskDetails(context),
       },
     );
   }
 
-  Widget _buildFileUploadDetails(BuildContext context) {
-    final transmissionProgress = widget.task.transmissionProgress ?? 0.0;
+  Widget _buildDriveUploadDetails(BuildContext context) {
+    final meta = widget.task.metadata;
+    final transmissionProgress =
+        (meta?['transmissionProgress'] as num?)?.toDouble() ?? 0.0;
+    final uploadedChunks = meta?['uploadedChunks'] as int? ?? 0;
+    final totalChunks = meta?['totalChunks'] as int? ?? 1;
+    final fileSize = meta?['fileSize'] as int? ?? 0;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // Server Processing Progress
         Text(
           widget.task.statusMessage ?? 'Processing',
           style: Theme.of(context).textTheme.bodySmall?.copyWith(
@@ -860,23 +666,20 @@ class _UploadTaskTileState extends State<UploadTaskTile>
               ).textTheme.bodySmall?.copyWith(fontWeight: FontWeight.w600),
             ),
             Text(
-              '${widget.task.uploadedChunks}/${widget.task.totalChunks} chunks',
+              '$uploadedChunks/$totalChunks chunks',
               style: Theme.of(context).textTheme.bodySmall,
             ),
           ],
         ),
         const SizedBox(height: 4),
         LinearProgressIndicator(
-          value: UploadTaskTile._getTaskProgress(widget.task),
+          value: AppTaskTile._getTaskProgress(widget.task),
           backgroundColor: Theme.of(context).colorScheme.surface,
           valueColor: AlwaysStoppedAnimation<Color>(
             Theme.of(context).colorScheme.primary,
           ),
         ),
-
         const SizedBox(height: 8),
-
-        // File Transmission Progress
         Text(
           'File Transmission',
           style: Theme.of(context).textTheme.bodySmall?.copyWith(
@@ -895,7 +698,7 @@ class _UploadTaskTileState extends State<UploadTaskTile>
               ).textTheme.bodySmall?.copyWith(fontWeight: FontWeight.w600),
             ),
             Text(
-              '${_formatFileSize((transmissionProgress * widget.task.fileSize).toInt())} / ${_formatFileSize(widget.task.fileSize)}',
+              '${_formatFileSize((transmissionProgress * fileSize).toInt())} / ${_formatFileSize(fileSize)}',
               style: Theme.of(context).textTheme.bodySmall,
             ),
           ],
@@ -908,10 +711,7 @@ class _UploadTaskTileState extends State<UploadTaskTile>
             Theme.of(context).colorScheme.secondary,
           ),
         ),
-
         const SizedBox(height: 4),
-
-        // Speed and ETA
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
@@ -921,17 +721,108 @@ class _UploadTaskTileState extends State<UploadTaskTile>
                 color: Theme.of(context).colorScheme.onSurfaceVariant,
               ),
             ),
-            if (widget.task.status == DriveTaskStatus.inProgress)
-              Text(
-                'ETA: ${_formatDuration(widget.task.estimatedTimeRemaining)}',
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: Theme.of(context).colorScheme.onSurfaceVariant,
-                ),
-              ),
           ],
         ),
+        if (widget.task.errorMessage != null) ...[
+          const SizedBox(height: 4),
+          Text(
+            widget.task.errorMessage!,
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: Theme.of(context).colorScheme.error,
+            ),
+          ),
+        ],
+      ],
+    );
+  }
 
-        // Error message if failed
+  Widget _buildDriveDownloadDetails(BuildContext context) {
+    final meta = widget.task.metadata;
+    final totalBytes = meta?['totalBytes'] as int? ?? 0;
+    final downloadedBytes = meta?['downloadedBytes'] as int? ?? 0;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          widget.task.statusMessage ?? 'Downloading',
+          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+            fontWeight: FontWeight.w600,
+            color: Theme.of(context).colorScheme.primary,
+          ),
+        ),
+        const SizedBox(height: 2),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text(
+              '${(widget.task.progress * 100).toStringAsFixed(1)}%',
+              style: Theme.of(
+                context,
+              ).textTheme.bodySmall?.copyWith(fontWeight: FontWeight.w600),
+            ),
+            Text(
+              '${_formatFileSize(downloadedBytes)} / ${_formatFileSize(totalBytes)}',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+          ],
+        ),
+        const SizedBox(height: 4),
+        LinearProgressIndicator(
+          value: widget.task.progress,
+          backgroundColor: Theme.of(context).colorScheme.surface,
+          valueColor: AlwaysStoppedAnimation<Color>(
+            Theme.of(context).colorScheme.primary,
+          ),
+        ),
+        if (widget.task.errorMessage != null) ...[
+          const SizedBox(height: 4),
+          Text(
+            widget.task.errorMessage!,
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: Theme.of(context).colorScheme.error,
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+
+  Widget _buildPostPublishDetails(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          widget.task.statusMessage ?? 'taskPostPublishPublishing'.tr(),
+          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+            fontWeight: FontWeight.w600,
+            color: Theme.of(context).colorScheme.primary,
+          ),
+        ),
+        const SizedBox(height: 2),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text(
+              '${(widget.task.progress * 100).toStringAsFixed(0)}%',
+              style: Theme.of(
+                context,
+              ).textTheme.bodySmall?.copyWith(fontWeight: FontWeight.w600),
+            ),
+            Text(
+              _taskStatusLabel(widget.task.status),
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+          ],
+        ),
+        const SizedBox(height: 4),
+        LinearProgressIndicator(
+          value: widget.task.progress,
+          backgroundColor: Theme.of(context).colorScheme.surface,
+          valueColor: AlwaysStoppedAnimation<Color>(
+            Theme.of(context).colorScheme.primary,
+          ),
+        ),
         if (widget.task.errorMessage != null) ...[
           const SizedBox(height: 4),
           Text(
@@ -949,9 +840,8 @@ class _UploadTaskTileState extends State<UploadTaskTile>
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // Generic task progress
         Text(
-          'Progress',
+          'taskProgress'.tr(),
           style: Theme.of(context).textTheme.bodySmall?.copyWith(
             fontWeight: FontWeight.w600,
             color: Theme.of(context).colorScheme.primary,
@@ -968,7 +858,7 @@ class _UploadTaskTileState extends State<UploadTaskTile>
               ).textTheme.bodySmall?.copyWith(fontWeight: FontWeight.w600),
             ),
             Text(
-              widget.task.status.name,
+              _taskStatusLabel(widget.task.status),
               style: Theme.of(context).textTheme.bodySmall,
             ),
           ],
@@ -981,8 +871,6 @@ class _UploadTaskTileState extends State<UploadTaskTile>
             Theme.of(context).colorScheme.primary,
           ),
         ),
-
-        // Error message if failed
         if (widget.task.errorMessage != null) ...[
           const SizedBox(height: 4),
           Text(
@@ -996,7 +884,28 @@ class _UploadTaskTileState extends State<UploadTaskTile>
     );
   }
 
-  String _formatFileSize(int bytes) {
+  String _getTaskTypeLabel(String type) {
+    return switch (type) {
+      AppTaskType.driveUpload => 'taskTypeDriveUpload'.tr(),
+      AppTaskType.driveDownload => 'taskTypeDriveDownload'.tr(),
+      AppTaskType.postPublish => 'taskTypePostPublish'.tr(),
+      _ => type,
+    };
+  }
+
+  String _taskStatusLabel(AppTaskStatus status) {
+    return switch (status) {
+      AppTaskStatus.pending => 'taskStatusPending'.tr(),
+      AppTaskStatus.inProgress => 'taskStatusInProgress'.tr(),
+      AppTaskStatus.paused => 'taskStatusPaused'.tr(),
+      AppTaskStatus.completed => 'taskStatusCompleted'.tr(),
+      AppTaskStatus.failed => 'taskStatusFailed'.tr(),
+      AppTaskStatus.cancelled => 'taskStatusCancelled'.tr(),
+      AppTaskStatus.expired => 'taskStatusExpired'.tr(),
+    };
+  }
+
+  String _formatFileSize(num bytes) {
     if (bytes >= 1073741824) {
       return '${(bytes / 1073741824).toStringAsFixed(1)} GB';
     } else if (bytes >= 1048576) {
@@ -1008,23 +917,18 @@ class _UploadTaskTileState extends State<UploadTaskTile>
     }
   }
 
-  String _formatBytesPerSecond(DriveTask task) {
-    if (task.uploadedBytes == 0) return '0 B/s';
+  String _formatBytesPerSecond(AppTask task) {
+    final meta = task.metadata;
+    final uploadedBytes =
+        (meta?['transmissionProgress'] as num?)?.toDouble() ?? 0.0;
+    final fileSize = meta?['fileSize'] as int? ?? 0;
+    final bytes = (uploadedBytes * fileSize).toInt();
+    if (bytes == 0) return '0 B/s';
 
     final elapsedSeconds = DateTime.now().difference(task.createdAt).inSeconds;
     if (elapsedSeconds == 0) return '0 B/s';
 
-    final bytesPerSecond = task.uploadedBytes / elapsedSeconds;
+    final bytesPerSecond = bytes / elapsedSeconds;
     return '${_formatFileSize(bytesPerSecond.toInt())}/s';
-  }
-
-  String _formatDuration(Duration duration) {
-    if (duration.inHours > 0) {
-      return '${duration.inHours}h ${duration.inMinutes.remainder(60)}m';
-    } else if (duration.inMinutes > 0) {
-      return '${duration.inMinutes}m ${duration.inSeconds.remainder(60)}s';
-    } else {
-      return '${duration.inSeconds}s';
-    }
   }
 }

@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:collection/collection.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:auto_route/auto_route.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
@@ -25,9 +26,7 @@ class TabsScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return AutoTabsRouter.tabBar(
-      physics: const NeverScrollableScrollPhysics(),
-      scrollDirection: isWideScreen(context) ? Axis.vertical : Axis.horizontal,
+    return AutoTabsRouter(
       routes: [
         DashboardRoute(),
         ExploreRoute(),
@@ -35,15 +34,51 @@ class TabsScreen extends StatelessWidget {
         RealmListRoute(),
         AccountRoute(),
         FileListRoute(),
+        WalletRoute(),
         ThoughtRoute(),
         CreatorHubRoute(),
-        DeveloperHubRoute(),
       ],
-      builder: (context, child, _) {
+      duration: const Duration(milliseconds: 500),
+      curve: Curves.easeOutCubic,
+      transitionBuilder: _buildTabTransition,
+      builder: (context, child) {
         return _TabsScreenContent(child: child);
       },
     );
   }
+}
+
+Widget _buildTabTransition(
+  BuildContext context,
+  Widget child,
+  Animation<double> animation,
+) {
+  final tabsRouter = AutoTabsRouter.of(context);
+  final theme = Theme.of(context);
+  final previousIndex = tabsRouter.previousIndex ?? tabsRouter.activeIndex;
+  final isForward = tabsRouter.activeIndex >= previousIndex;
+  final isWide = isWideScreen(context);
+
+  final offset = isWide
+      ? Offset(0, isForward ? 0.06 : -0.06)
+      : Offset(isForward ? 0.08 : -0.08, 0);
+
+  final position = Tween<Offset>(
+    begin: offset,
+    end: Offset.zero,
+  ).animate(CurvedAnimation(parent: animation, curve: Curves.easeOutCubic));
+  final opacity = CurvedAnimation(
+    parent: animation,
+    curve: Curves.easeOutCubic,
+  );
+
+  return ColoredBox(
+    color: theme.colorScheme.surface,
+    child: FadeTransition(
+      opacity: opacity,
+      child: SlideTransition(position: position, child: child),
+    ),
+  );
 }
 
 class _TabsScreenContent extends ConsumerStatefulWidget {
@@ -141,8 +176,17 @@ class _TabsScreenContentState extends ConsumerState<_TabsScreenContent> {
           Icon(Symbols.folder_rounded, fill: selected ? 1 : null),
     ),
     _TabDestination(
-      id: 'thought',
+      id: 'wallet',
       routeIndex: 6,
+      routePath: '/wallet',
+      label: 'wallet'.tr(),
+      navigationIcon: Symbols.wallet,
+      iconBuilder: (selected) =>
+          Icon(Symbols.wallet, fill: selected ? 1 : null),
+    ),
+    _TabDestination(
+      id: 'thought',
+      routeIndex: 7,
       routePath: '/thought',
       label: 'aiThought'.tr(),
       navigationIcon: Symbols.bubble_chart,
@@ -151,27 +195,19 @@ class _TabsScreenContentState extends ConsumerState<_TabsScreenContent> {
     ),
     _TabDestination(
       id: 'creators',
-      routeIndex: 7,
+      routeIndex: 8,
       routePath: '/creators',
       label: 'creatorHub'.tr(),
       navigationIcon: Symbols.design_services_rounded,
       iconBuilder: (selected) =>
           Icon(Symbols.design_services_rounded, fill: selected ? 1 : null),
     ),
-    _TabDestination(
-      id: 'developers',
-      routeIndex: 8,
-      routePath: '/developers',
-      label: 'developerHub'.tr(),
-      navigationIcon: Symbols.data_object_rounded,
-      iconBuilder: (selected) =>
-          Icon(Symbols.data_object_rounded, fill: selected ? 1 : null),
-    ),
   ];
 
   @override
   Widget build(BuildContext context) {
     final tabsRouter = AutoTabsRouter.of(context);
+    final rootBottomViewPadding = MediaQuery.of(context).viewPadding.bottom;
 
     final token = ref.watch(tokenProvider);
     final userInfo = ref.watch(userInfoProvider);
@@ -234,10 +270,12 @@ class _TabsScreenContentState extends ConsumerState<_TabsScreenContent> {
     final bottomNavCurrentIndex = selectedBottomNavIndex >= 0
         ? selectedBottomNavIndex
         : 0;
-    final isDrawerEnabled = shouldShowBottomNavForCurrentPath(
-      context,
-      routes: rootTabRoutes,
-    );
+    final isDrawerEnabled =
+        kIsWeb ||
+        defaultTargetPlatform == TargetPlatform.macOS ||
+        defaultTargetPlatform == TargetPlatform.windows ||
+        defaultTargetPlatform == TargetPlatform.linux ||
+        shouldShowBottomNavForCurrentPath(context, routes: rootTabRoutes);
 
     void onDestinationSelected(int index) {
       tabsRouter.setActiveIndex(index);
@@ -349,14 +387,14 @@ class _TabsScreenContentState extends ConsumerState<_TabsScreenContent> {
                                         CrossAxisAlignment.start,
                                     children: [
                                       Text(
-                                        'Not logged in',
+                                        'notLoggedIn'.tr(),
                                         style: Theme.of(context)
                                             .textTheme
                                             .titleSmall
                                             ?.copyWith(color: Colors.white),
                                       ),
                                       Text(
-                                        'Tap to sign in',
+                                        'tapToSignIn'.tr(),
                                         style: Theme.of(context)
                                             .textTheme
                                             .bodySmall
@@ -411,7 +449,7 @@ class _TabsScreenContentState extends ConsumerState<_TabsScreenContent> {
             const Divider(),
             ListTile(
               leading: const Icon(Symbols.tune_rounded),
-              title: Text('Customize Navigation'),
+              title: Text('customizeNavigation').tr(),
               contentPadding: const EdgeInsets.symmetric(horizontal: 28),
               dense: true,
               onTap: () {
@@ -489,6 +527,28 @@ class _TabsScreenContentState extends ConsumerState<_TabsScreenContent> {
       );
     }
 
+    final mobileTabBody = Builder(
+      builder: (context) {
+        final bodyMediaQuery = MediaQuery.of(context);
+        return MediaQuery(
+          // Keep Scaffold's injected bottom inset for the tab bar and restore
+          // the original device safe area for nested app scaffolds.
+          data: bodyMediaQuery.copyWith(
+            padding: bodyMediaQuery.padding.copyWith(
+              bottom: bodyMediaQuery.padding.bottom + rootBottomViewPadding,
+            ),
+          ),
+          child: ClipRRect(
+            borderRadius: const BorderRadius.only(
+              topLeft: Radius.circular(16),
+              topRight: Radius.circular(16),
+            ),
+            child: widget.child,
+          ),
+        );
+      },
+    );
+
     final scaffold = Scaffold(
       key: rootScaffoldKey,
       backgroundColor: Colors.transparent,
@@ -498,13 +558,7 @@ class _TabsScreenContentState extends ConsumerState<_TabsScreenContent> {
           ? Drawer(child: buildNavigationDrawerContent())
           : null,
       drawerEnableOpenDragGesture: isDrawerEnabled,
-      body: ClipRRect(
-        borderRadius: const BorderRadius.only(
-          topLeft: Radius.circular(16),
-          topRight: Radius.circular(16),
-        ),
-        child: widget.child,
-      ),
+      body: mobileTabBody,
       bottomNavigationBar: ConditionalBottomNav(
         routes: bottomNavRoutes,
         child: NavigationBar(
@@ -684,7 +738,7 @@ class _NavigationCustomizationSheetState
     final allBottomCandidates = widget.allDestinations;
 
     return SheetScaffold(
-      titleText: 'Customize Navigation',
+      titleText: 'customizeNavigation'.tr(),
       actions: [
         IconButton(
           onPressed: () {
@@ -692,7 +746,7 @@ class _NavigationCustomizationSheetState
             Navigator.of(context).pop();
           },
           icon: const Icon(Symbols.refresh_rounded),
-          tooltip: 'Restore Defaults',
+          tooltip: 'restoreDefaults'.tr(),
         ),
         IconButton(
           onPressed: () {
@@ -710,7 +764,7 @@ class _NavigationCustomizationSheetState
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'Bottom Navigation',
+                  'bottomNavigation'.tr(),
                   style: Theme.of(context).textTheme.titleMedium,
                 ),
                 const SizedBox(height: 8),
@@ -766,7 +820,7 @@ class _NavigationCustomizationSheetState
                 ),
                 const SizedBox(height: 16),
                 Text(
-                  'Rail Navigation',
+                  'railNavigation'.tr(),
                   style: Theme.of(context).textTheme.titleMedium,
                 ),
                 const SizedBox(height: 8),

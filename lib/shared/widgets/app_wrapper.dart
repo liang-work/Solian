@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:math';
 import 'dart:convert';
+import 'dart:ui';
 import 'package:auto_route/auto_route.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
@@ -11,9 +12,21 @@ import 'package:hooks_riverpod/hooks_riverpod.dart';
 import 'package:in_app_review/in_app_review.dart';
 import 'package:island/auth/web_auth/auth_request_sheet.dart';
 import 'package:island/auth/web_auth/web_auth_server.dart';
+import 'package:island/auth/challenge_approval_sheet.dart';
+import 'package:island/auth/challenge_ws_listener.dart';
 import 'package:island/accounts/progression_ws.dart';
+import 'package:island/accounts/pods/friend_status_listener.dart';
+import 'package:island/accounts/screens/me/account_qr.dart';
+import 'package:island/core/lifecycle.dart';
 import 'package:island/core/services/deeplink_service.dart';
+import 'package:island/core/services/desktop_presence.dart';
 import 'package:island/core/services/quick_actions.dart';
+import 'package:island/chat/pods/native_call_bridge.dart';
+import 'package:island/chat/pods/call.dart';
+import 'package:island/chat/widgets/incoming_call_invite_sheet.dart';
+import 'package:island/chat/widgets/call_overlay.dart';
+import 'package:island/chat/widgets/call_window.dart';
+import 'package:island/chat/widgets/pending_join_sheet.dart';
 import 'package:island/notifications/notification.dart';
 import 'package:island/posts/widgets/compose/compose_dialog.dart';
 import 'package:island/route.dart';
@@ -21,11 +34,14 @@ import 'package:island/route.gr.dart';
 import 'package:island/shared/widgets/app_onboarding_sheet.dart';
 import 'package:island/shared/widgets/app_startup_splash.dart';
 import 'package:island/shared/widgets/alert.dart';
+import 'package:island/shared/widgets/attention_modal.dart';
 import 'package:island/thoughts/screens/think_sheet.dart';
+import 'package:island/wallets/wallet.dart';
 import 'package:logging/logging.dart';
 import 'package:material_symbols_icons/symbols.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:island/activity/activity_rpc.dart';
+import 'package:island/core/audio.dart';
 import 'package:island/core/config.dart';
 import 'package:island/core/network.dart';
 import 'package:island/core/websocket.dart';
@@ -38,6 +54,7 @@ import 'package:island/core/widgets/content/network_status_sheet.dart';
 import 'package:island/core/tour/tour.dart';
 import 'package:island/core/services/event_bus.dart';
 import 'package:snow_fall_animation/snow_fall_animation.dart';
+import 'package:solar_network_sdk/solar_network_sdk.dart';
 import 'package:tray_manager/tray_manager.dart';
 import 'package:url_launcher/url_launcher_string.dart';
 import 'package:window_manager/window_manager.dart';
@@ -46,6 +63,25 @@ const kForceShowStartupSplashForTesting = false;
 const kOnboardingLastShownVersion = 'app_onboarding_last_shown_version';
 
 final appWrapperKey = GlobalKey();
+
+class ForcedStartupSplashNotifier extends Notifier<bool> {
+  bool _showAfterDone = false;
+
+  bool get showAfterDone => _showAfterDone;
+
+  @override
+  bool build() => kForceShowStartupSplashForTesting;
+
+  void setVisible(bool value, {bool afterDone = false}) {
+    _showAfterDone = afterDone;
+    state = value;
+  }
+}
+
+final forcedStartupSplashProvider =
+    NotifierProvider<ForcedStartupSplashNotifier, bool>(
+      ForcedStartupSplashNotifier.new,
+    );
 
 class AppWrapper extends HookConsumerWidget {
   final Widget child;
@@ -56,22 +92,350 @@ class AppWrapper extends HookConsumerWidget {
     final networkStateShowing = useState(false);
     final websocketState = ref.watch(websocketStateProvider);
     final apiState = ref.watch(networkStatusProvider);
+    final connectivityStatus = ref.watch(connectivityStatusProvider);
+    final hasConnectivity = hasNetworkConnectivityValue(connectivityStatus);
     final token = ref.watch(tokenProvider);
+    final forceShowStartupSplash = ref.watch(forcedStartupSplashProvider);
     final isShowSnow = useState(false);
     final isSnowGone = useState(false);
     final bootstrapCompleted = useState(false);
     final startupGateResolved = useState(false);
     final onboardingChecked = useState(false);
+    final autoUpdateChecked = useState(false);
+    final activeInviteKey = useRef<String?>(null);
+    final recentlyHandledInvites = useRef(<String, DateTime>{});
+    final lastHandledAcceptedRoomId = useRef<String?>(null);
 
-    // Initialize progression WebSocket listener
+    void kickCallKitMicrophone(String reason) {
+      if (kIsWeb || !Platform.isIOS) return;
+      final callState = ref.read(callProvider);
+      final nativeState = ref.read(nativeCallBridgeProvider);
+      if (!callState.isConnected ||
+          !nativeState.isAudioSessionActive ||
+          nativeState.callKitAcceptedRoomId == null) {
+        return;
+      }
+      Logger.root.info(
+        '[AppWrapper] Restarting iOS CallKit microphone: $reason',
+      );
+      unawaited(() async {
+        await Future<void>.delayed(const Duration(milliseconds: 250));
+        await ref.read(callProvider.notifier).ensureMicrophoneEnabled();
+        await Future<void>.delayed(const Duration(milliseconds: 800));
+        await ref.read(callProvider.notifier).ensureMicrophoneEnabled();
+      }());
+    }
+
     useEffect(() {
       ref.read(progressionWebSocketProvider);
       return null;
     }, []);
 
-    // Handle network status modal
+    useEffect(() {
+      ref.read(friendStatusListenerProvider);
+      return null;
+    }, []);
+
+    useEffect(() {
+      ref.read(desktopPresenceProvider);
+      return null;
+    }, []);
+
+    useEffect(() {
+      if (kIsWeb ||
+          !(Platform.isMacOS || Platform.isLinux || Platform.isWindows)) {
+        return null;
+      }
+
+      final listener = _DesktopWindowFocusListener(ref);
+      windowManager.addListener(listener);
+      windowManager.isFocused().then(
+        (focused) =>
+            ref.read(desktopWindowFocusedProvider.notifier).set(focused),
+      );
+
+      return () {
+        windowManager.removeListener(listener);
+      };
+    }, []);
+
+    useEffect(() {
+      if (isNativeCallAvailable) {
+        unawaited(
+          ref.read(nativeCallBridgeProvider.notifier).ensureInitialized(),
+        );
+      }
+      // ponytail: setup inter-window call channel on desktop
+      if (!kIsWeb &&
+          (Platform.isMacOS || Platform.isLinux || Platform.isWindows)) {
+        setupCallChannelHandler();
+      }
+      return null;
+    }, []);
+
+    useEffect(() {
+      if (!isNativeCallAvailable) return null;
+      final sub = ref.listenManual(appLifecycleStateProvider, (previous, next) {
+        final state = next.value;
+        if (state == AppLifecycleState.resumed) {
+          Logger.root.info(
+            '[AppWrapper] App resumed, syncing native call state',
+          );
+          unawaited(
+            ref.read(nativeCallBridgeProvider.notifier).ensureInitialized(),
+          );
+        }
+      });
+      return sub.close;
+    }, []);
+
+    useEffect(() {
+      if (!kIsWeb && Platform.isIOS) {
+        // ponytail: let CallKit own iOS incoming-call UX
+        return null;
+      }
+
+      void pruneRecentInvites() {
+        final now = DateTime.now();
+        recentlyHandledInvites.value.removeWhere(
+          (_, expiresAt) => expiresAt.isBefore(now),
+        );
+      }
+
+      bool shouldSuppressInvite(IncomingCallInvite invite) {
+        final callState = ref.read(callProvider);
+        final callNotifier = ref.read(callProvider.notifier);
+        final nativeCallState = ref.read(nativeCallBridgeProvider);
+
+        if (callNotifier.roomId == invite.roomId &&
+            (callState.isConnected || callState.isReconnecting)) {
+          return true;
+        }
+        if (nativeCallState.callKitAcceptedRoomId == invite.roomId &&
+            (nativeCallState.isConnected ||
+                nativeCallState.isAcceptedPending)) {
+          return true;
+        }
+        return false;
+      }
+
+      Future<void> handleIncomingInvite(IncomingCallInvite invite) async {
+        pruneRecentInvites();
+        if (!invite.isValid || shouldSuppressInvite(invite)) {
+          return;
+        }
+        if (activeInviteKey.value == invite.dedupeKey ||
+            recentlyHandledInvites.value.containsKey(invite.dedupeKey)) {
+          return;
+        }
+
+        final router = ref.read(routerProvider);
+        final navigatorContext = router.navigatorKey.currentContext;
+        if (navigatorContext == null || !navigatorContext.mounted) {
+          return;
+        }
+
+        activeInviteKey.value = invite.dedupeKey;
+        await playCallInvitedSfxLoop(ref);
+        if (!navigatorContext.mounted) return;
+        final shouldJoin = await showModalBottomSheet<bool>(
+          context: navigatorContext,
+          useRootNavigator: true,
+          useSafeArea: true,
+          isScrollControlled: true,
+          builder: (context) => IncomingCallInviteSheet(
+            invite: invite,
+            onJoin: () => Navigator.pop(context, true),
+            onDismiss: () => Navigator.pop(context, false),
+          ),
+        ).whenComplete(() => stopCallInvitedSfxLoop(ref));
+        activeInviteKey.value = null;
+
+        final now = DateTime.now();
+        recentlyHandledInvites.value[invite.dedupeKey] = shouldJoin == true
+            ? now.add(const Duration(minutes: 2))
+            : now.add(const Duration(seconds: 30));
+
+        if (shouldJoin == true) {
+          await _navigateToCallScreen(
+            ref,
+            invite.roomId,
+            showPendingJoin: true,
+          );
+        }
+      }
+
+      final subscription = ref.read(websocketProvider).dataStream.listen((
+        packet,
+      ) {
+        if (packet.type != 'call.invited' || packet.data == null) return;
+        try {
+          final invite = IncomingCallInvite.fromJson(packet.data!);
+          unawaited(handleIncomingInvite(invite));
+        } catch (err) {
+          Logger.root.warning(
+            '[AppWrapper] Failed to parse call.invited packet: $err',
+          );
+        }
+      });
+      return () {
+        subscription.cancel();
+      };
+    }, []);
+
+    // Navigate to CallScreen when CallKit call is accepted
+    useEffect(() {
+      if (!isNativeCallAvailable) return null;
+
+      final sub = ref.listenManual(nativeCallBridgeProvider, (
+        previous,
+        current,
+      ) {
+        Logger.root.info(
+          '[AppWrapper] Native call state changed '
+          'prevRoom=${previous?.callKitAcceptedRoomId} '
+          'currRoom=${current.callKitAcceptedRoomId} '
+          'pending=${current.isAcceptedPending} '
+          'connected=${current.isConnected}',
+        );
+        final callbackRequested =
+            current.callbackRequestedAt != null &&
+            current.callbackRequestedAt != previous?.callbackRequestedAt;
+        if (callbackRequested && current.roomId != null) {
+          Logger.root.info(
+            '[AppWrapper] Native callback requested, navigating to CallScreen: ${current.roomId}',
+          );
+          unawaited(() async {
+            final didNavigate = await _navigateToCallScreen(
+              ref,
+              current.roomId!,
+            );
+            Logger.root.info(
+              '[AppWrapper] Callback navigation result room=${current.roomId} didNavigate=$didNavigate',
+            );
+            ref.read(nativeCallBridgeProvider.notifier).clearCallbackRequest();
+          }());
+        }
+
+        final currRoomId = current.callKitAcceptedRoomId;
+        if (currRoomId == null) {
+          final nativeEnded =
+              current.systemEndedAt != null &&
+              current.systemEndedAt != previous?.systemEndedAt;
+          if (nativeEnded && ref.read(callProvider).isConnected) {
+            Logger.root.info(
+              '[AppWrapper] Native call ended, disconnecting Flutter call',
+            );
+            unawaited(ref.read(callProvider.notifier).disconnect());
+          }
+          lastHandledAcceptedRoomId.value = null;
+          return;
+        }
+
+        if (!kIsWeb &&
+            Platform.isIOS &&
+            current.isAcceptedPending &&
+            !current.isAudioSessionActive) {
+          Logger.root.info(
+            '[AppWrapper] Waiting for CallKit audio session before joining room=$currRoomId',
+          );
+          return;
+        }
+
+        if (currRoomId != lastHandledAcceptedRoomId.value &&
+            (current.isAcceptedPending || current.isConnected)) {
+          lastHandledAcceptedRoomId.value = currRoomId;
+          Logger.root.info(
+            '[AppWrapper] CallKit call accepted, navigating to CallScreen: $currRoomId',
+          );
+          unawaited(() async {
+            final didNavigate = await _navigateToCallScreen(ref, currRoomId);
+            Logger.root.info(
+              '[AppWrapper] CallKit navigation result room=$currRoomId didNavigate=$didNavigate',
+            );
+            if (didNavigate) {
+              await ref
+                  .read(nativeCallBridgeProvider.notifier)
+                  .clearPendingAcceptedCall();
+            } else {
+              await ref.read(nativeCallBridgeProvider.notifier).endCall();
+            }
+          }());
+        }
+      });
+      return sub.close;
+    }, []);
+
+    // Fulfill CallKit answer when Flutter call connects
+    useEffect(() {
+      if (!isNativeCallAvailable) return null;
+
+      final sub = ref.listenManual(callProvider, (previous, current) {
+        final prevConnected = previous?.isConnected ?? false;
+        final currConnected = current.isConnected;
+
+        // Flutter call just connected
+        if (!prevConnected && currConnected) {
+          Logger.root.info(
+            '[AppWrapper] Flutter call connected, syncing native call state',
+          );
+          ref
+              .read(nativeCallBridgeProvider.notifier)
+              .markFlutterCallConnected();
+          if (!kIsWeb && Platform.isIOS) {
+            final nativeState = ref.read(nativeCallBridgeProvider);
+            if (nativeState.isAudioSessionActive &&
+                nativeState.callKitAcceptedRoomId != null) {
+              kickCallKitMicrophone('call connected');
+            }
+          }
+        }
+
+        // Flutter call just disconnected
+        if (prevConnected && !currConnected) {
+          Logger.root.info('[AppWrapper] Flutter call disconnected');
+          ref.read(nativeCallBridgeProvider.notifier).endAllCalls();
+        }
+      });
+      return sub.close;
+    }, []);
+
+    // CallKit may activate audio after LiveKit already published the mic.
+    // Restart capture when that happens; this mirrors the manual mute/unmute fix.
+    useEffect(() {
+      if (!isNativeCallAvailable) return null;
+      final sub = ref.listenManual(nativeCallBridgeProvider, (
+        previous,
+        current,
+      ) {
+        if (!(previous?.isAudioSessionActive ?? false) &&
+            current.isAudioSessionActive) {
+          kickCallKitMicrophone('audio session activated');
+        }
+      });
+      return sub.close;
+    }, []);
+
+    useEffect(() {
+      ref.read(desktopNowPlayingProvider);
+      return null;
+    }, []);
+
     useEffect(() {
       bool triedOpen = false;
+      if (!hasConnectivity && !networkStateShowing.value && !triedOpen) {
+        networkStateShowing.value = true;
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          final ctx = ref.read(routerProvider).navigatorKey.currentContext!;
+          showModalBottomSheet(
+            context: ctx,
+            isScrollControlled: true,
+            builder: (context) => const NetworkStatusSheet(),
+          ).then((_) => networkStateShowing.value = false);
+        });
+        triedOpen = true;
+      }
+
       if (websocketState == WebSocketState.duplicateDevice() &&
           !networkStateShowing.value &&
           !triedOpen) {
@@ -87,7 +451,8 @@ class AppWrapper extends HookConsumerWidget {
         triedOpen = true;
       }
 
-      if (apiState != NetworkStatus.online &&
+      if (hasConnectivity &&
+          apiState != NetworkStatus.online &&
           !networkStateShowing.value &&
           !triedOpen) {
         networkStateShowing.value = true;
@@ -102,9 +467,29 @@ class AppWrapper extends HookConsumerWidget {
         triedOpen = true;
       }
       return null;
-    }, [websocketState, apiState]);
+    }, [websocketState, apiState, hasConnectivity]);
 
-    // Initialize services and listeners
+    useEffect(() {
+      if (!hasConnectivity) {
+        Future.microtask(() {
+          ref.read(networkStatusProvider.notifier).setOffline();
+        });
+        return null;
+      }
+
+      if (token == null) return null;
+      final shouldReconnect = websocketState.maybeWhen(
+        disconnected: () => true,
+        serverDown: () => true,
+        error: (_) => true,
+        orElse: () => false,
+      );
+      if (shouldReconnect) {
+        Future(() => ref.read(websocketStateProvider.notifier).connect());
+      }
+      return null;
+    }, [hasConnectivity, token, websocketState]);
+
     useEffect(() {
       final ntySubs = setupNotificationListener(context, ref);
       final sharingService = SharingIntentService();
@@ -128,7 +513,6 @@ class AppWrapper extends HookConsumerWidget {
           handleWhenReady();
         },
       );
-      UpdateService().checkForUpdates(context);
 
       void checkPendingShare([int retry = 0]) {
         final ctx = ref.read(routerProvider).navigatorKey.currentContext;
@@ -153,10 +537,11 @@ class AppWrapper extends HookConsumerWidget {
         ),
       );
 
-      ref.read(rpcServerStateProvider.notifier).start();
-      ref.read(webAuthServerStateProvider.notifier).start();
+      Future(() {
+        ref.read(rpcServerStateProvider.notifier).start();
+        ref.read(webAuthServerStateProvider.notifier).start();
+      });
 
-      // Listen to special action events
       final composeSheetSubs = eventBus.on<ShowComposeSheetEvent>().listen((
         event,
       ) {
@@ -164,11 +549,10 @@ class AppWrapper extends HookConsumerWidget {
         if (ctx.mounted) _showPostCompose(ctx);
       });
 
-      final notificationSheetSubs = eventBus
-          .on<ShowNotificationSheetEvent>()
+      final notificationModalSubs = eventBus
+          .on<ShowNotificationModalEvent>()
           .listen((event) {
-            final ctx = ref.read(routerProvider).navigatorKey.currentContext!;
-            if (ctx.mounted) _showNotificationSheet(ctx);
+            _showNotificationModal();
           });
 
       final thoughtSheetSubs = eventBus.on<ShowThoughtSheetEvent>().listen((
@@ -178,10 +562,17 @@ class AppWrapper extends HookConsumerWidget {
         if (ctx.mounted) _showThoughtSheet(ctx, event);
       });
 
-      // Web auth request listener
       final webAuthSubs = eventBus.on<WebAuthRequestEvent>().listen((event) {
         final ctx = ref.read(routerProvider).navigatorKey.currentContext!;
         if (ctx.mounted) _showWebAuthSheet(ctx, event);
+      });
+
+      ref.read(challengeWsListenerProvider).start();
+      final challengeSubs = eventBus.on<ChallengePendingEvent>().listen((
+        event,
+      ) {
+        final ctx = ref.read(routerProvider).navigatorKey.currentContext;
+        if (ctx != null && ctx.mounted) _showChallengeApprovalSheet(ctx, event);
       });
 
       return () {
@@ -196,9 +587,10 @@ class AppWrapper extends HookConsumerWidget {
         );
         ntySubs?.cancel();
         composeSheetSubs.cancel();
-        notificationSheetSubs.cancel();
+        notificationModalSubs.cancel();
         thoughtSheetSubs.cancel();
         webAuthSubs.cancel();
+        challengeSubs.cancel();
       };
     }, []);
 
@@ -223,7 +615,7 @@ class AppWrapper extends HookConsumerWidget {
     final shouldRunBootstrap = token != null && !bootstrapCompleted.value;
     final shouldShowStartupSplash =
         !startupGateResolved.value ||
-        kForceShowStartupSplashForTesting ||
+        forceShowStartupSplash ||
         shouldRunBootstrap;
 
     useEffect(() {
@@ -290,7 +682,11 @@ class AppWrapper extends HookConsumerWidget {
     }, []);
 
     useEffect(() {
-      if (shouldShowStartupSplash || onboardingChecked.value) return null;
+      if (shouldShowStartupSplash ||
+          onboardingChecked.value ||
+          autoUpdateChecked.value) {
+        return null;
+      }
 
       Future(() async {
         final prefs = ref.read(sharedPreferencesProvider);
@@ -302,20 +698,33 @@ class AppWrapper extends HookConsumerWidget {
             lastShownVersion == null || lastShownVersion != currentVersion;
 
         onboardingChecked.value = true;
-        if (!shouldShowOnboarding) return;
-
-        WidgetsBinding.instance.addPostFrameCallback((_) async {
+        if (shouldShowOnboarding) {
           final ctx = ref.read(routerProvider).navigatorKey.currentContext;
-          if (ctx == null || !ctx.mounted) return;
+          if (ctx != null && ctx.mounted) {
+            await showAppOnboardingSheet(
+              ctx,
+              version: packageInfo.version,
+              isFirstLaunch: lastShownVersion == null,
+              suggestAuth: token == null,
+            );
+            await prefs.setString(kOnboardingLastShownVersion, currentVersion);
+          }
+        }
 
-          await showAppOnboardingSheet(
-            ctx,
-            version: packageInfo.version,
-            isFirstLaunch: lastShownVersion == null,
-            suggestAuth: token == null,
-          );
-          await prefs.setString(kOnboardingLastShownVersion, currentVersion);
-        });
+        autoUpdateChecked.value = true;
+
+        Future<void> checkForUpdatesWhenReady([int retry = 0]) async {
+          final ctx = ref.read(routerProvider).navigatorKey.currentContext;
+          if (ctx != null && ctx.mounted) {
+            await UpdateService().checkForUpdates(ctx);
+            return;
+          }
+          if (retry >= 16) return;
+          await Future.delayed(const Duration(milliseconds: 250));
+          await checkForUpdatesWhenReady(retry + 1);
+        }
+
+        unawaited(checkForUpdatesWhenReady());
       });
       return null;
     }, [shouldShowStartupSplash, token]);
@@ -337,7 +746,13 @@ class AppWrapper extends HookConsumerWidget {
                   key: ValueKey('bootstrap_splash'),
                   child: StartupSplashScreen(
                     runBootstrap: shouldRunBootstrap,
+                    showCompleted: ref
+                        .read(forcedStartupSplashProvider.notifier)
+                        .showAfterDone,
                     onCompleted: () {
+                      ref
+                          .read(forcedStartupSplashProvider.notifier)
+                          .setVisible(false);
                       bootstrapCompleted.value = true;
                     },
                   ),
@@ -346,7 +761,7 @@ class AppWrapper extends HookConsumerWidget {
                   key: const ValueKey('main_content'),
                   child: Stack(
                     children: [
-                      child,
+                      _AppWrapperBackdrop(child: child),
                       if (doesShowSnow && !isSnowGone.value)
                         IgnorePointer(
                           child: AnimatedOpacity(
@@ -373,12 +788,12 @@ class AppWrapper extends HookConsumerWidget {
     PostComposeDialog.show(context);
   }
 
-  void _showNotificationSheet(BuildContext context) {
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      useRootNavigator: true,
-      builder: (context) => const NotificationSheet(),
+  void _showNotificationModal() {
+    showAttentionModal(
+      id: 'notifications',
+      replaceIfExists: true,
+      barrierDismissible: true,
+      builder: (context, dismiss) => NotificationModal(onDismiss: dismiss),
     );
   }
 
@@ -419,26 +834,85 @@ class AppWrapper extends HookConsumerWidget {
     return base64Url.encode(values);
   }
 
+  void _showChallengeApprovalSheet(
+    BuildContext context,
+    ChallengePendingEvent event,
+  ) {
+    final challenge = SnAuthChallenge.fromJson(
+      Map<String, dynamic>.from(event.data),
+    );
+    // Don't show if the challenge is already expired
+    if (challenge.expiredAt != null &&
+        challenge.expiredAt!.isBefore(DateTime.now())) {
+      return;
+    }
+    ChallengeApprovalSheet.show(context, challenge);
+  }
+
   void _handleDeepLink(Uri uri, WidgetRef ref, BuildContext context) async {
     String path = '/${uri.host}${uri.path}';
+    final transferRequestId = parseWalletTransferRequestId(uri.toString());
 
-    // Web auth deep links for native apps:
-    // 1) Request challenge:
-    //    solian://auth/web?app=MyApp&redirect_uri=myapp://auth-callback
-    // 2) Exchange signed challenge:
-    //    solian://auth/web?signed_challenge=...&redirect_uri=myapp://auth-callback
+    if (transferRequestId != null) {
+      try {
+        await handleWalletTransferRequestDeepLink(
+          context: context,
+          ref: ref,
+          requestId: transferRequestId,
+        );
+      } catch (err) {
+        showErrorAlert(err);
+      }
+
+      if (!kIsWeb &&
+          (Platform.isWindows || Platform.isLinux || Platform.isMacOS)) {
+        windowManager.show();
+      }
+      return;
+    }
+
+    final transferPayload = parseWalletTransferQrPayload(uri.toString());
+    if (transferPayload != null) {
+      await handleWalletTransferPayloadDeepLink(
+        context: context,
+        ref: ref,
+        payload: transferPayload,
+      );
+
+      if (!kIsWeb &&
+          (Platform.isWindows || Platform.isLinux || Platform.isMacOS)) {
+        windowManager.show();
+      }
+      return;
+    }
+
+    if (path == '/auth/authorize') {
+      context.router.push(
+        AuthorizeRoute(
+          clientId: uri.queryParameters['client_id'],
+          redirectUri: uri.queryParameters['redirect_uri'],
+          scope: uri.queryParameters['scope'],
+          state: uri.queryParameters['state'],
+          responseType: uri.queryParameters['response_type'],
+        ),
+      );
+      if (!kIsWeb &&
+          (Platform.isWindows || Platform.isLinux || Platform.isMacOS)) {
+        windowManager.show();
+      }
+      return;
+    }
+
     if (path == '/auth/web') {
       await _handleProtocolWebAuth(uri, ref, context);
       return;
     }
 
-    // Special handling for OIDC auth callback
     if (path == '/auth/callback' && uri.queryParameters.containsKey('token')) {
       final token = uri.queryParameters['token']!;
       setToken(ref.read(sharedPreferencesProvider), token);
       ref.invalidate(tokenProvider);
 
-      // Do post login tasks
       await performPostLogin(context, ref);
 
       if (!kIsWeb &&
@@ -448,9 +922,6 @@ class AppWrapper extends HookConsumerWidget {
       return;
     }
 
-    // Special handling for share intent deep links
-    // Share intents are handled by SharingIntentService showing a modal,
-    // not by routing to a page
     if (path == '/share') {
       if (!kIsWeb &&
           (Platform.isWindows || Platform.isLinux || Platform.isMacOS)) {
@@ -460,11 +931,10 @@ class AppWrapper extends HookConsumerWidget {
     }
 
     if (path == '/notifications') {
-      eventBus.fire(ShowNotificationSheetEvent());
+      eventBus.fire(ShowNotificationModalEvent());
       return;
     }
 
-    // Handle NFC tag deep links: solian://phpass/<tag_id>
     if (path.startsWith('/phpass/')) {
       final tagId = path.substring('/phpass/'.length);
       if (tagId.isNotEmpty) {
@@ -473,17 +943,13 @@ class AppWrapper extends HookConsumerWidget {
       }
     }
 
-    // final router = ref.read(routerProvider);
     if (path == '/dashboard') {
       context.router.navigate(const DashboardRoute());
       return;
     }
 
-    // Handle bottom navigation routes properly to prevent navigation bar disappearance
-    // These routes should navigate within the bottom navigation shell
     final bottomNavRoutes = ['/', '/explore', '/chat', '/realms', '/account'];
     if (bottomNavRoutes.contains(path)) {
-      // Navigate within the bottom navigation shell using go() to maintain shell context
       context.router.navigatePath(path);
       if (!kIsWeb &&
           (Platform.isWindows || Platform.isLinux || Platform.isMacOS)) {
@@ -497,7 +963,6 @@ class AppWrapper extends HookConsumerWidget {
         path,
       ).replace(queryParameters: uri.queryParameters).toString();
     }
-    // For non-bottom navigation routes, use push() to navigate outside the shell
     context.router.navigatePath(path);
     if (!kIsWeb &&
         (Platform.isWindows || Platform.isLinux || Platform.isMacOS)) {
@@ -645,6 +1110,177 @@ class AppWrapper extends HookConsumerWidget {
     queryParams.addAll(payload);
     final target = redirectUri.replace(queryParameters: queryParams).toString();
     await launchUrlString(target, mode: LaunchMode.externalApplication);
+  }
+
+  Future<bool> _navigateToCallScreen(
+    WidgetRef ref,
+    String roomId, {
+    bool showPendingJoin = false,
+  }) async {
+    try {
+      Logger.root.info(
+        '[AppWrapper] Navigating to CallScreen for room=$roomId',
+      );
+      final router = ref.read(routerProvider);
+      final ctx = router.navigatorKey.currentContext;
+      if (ctx == null || !ctx.mounted) {
+        Logger.root.warning(
+          '[AppWrapper] Navigation aborted: navigator context unavailable for room=$roomId',
+        );
+        return false;
+      }
+
+      // Fetch the chat room
+      final apiClient = ref.read(apiClientProvider);
+      final resp = await apiClient.get('/messager/chat/$roomId');
+      final room = SnChatRoom.fromJson(resp.data);
+      Logger.root.info(
+        '[AppWrapper] Loaded room for call navigation room=$roomId',
+      );
+      var cameraEnabled = false;
+
+      if (!ctx.mounted) return false;
+      if (showPendingJoin) {
+        final result = await showModalBottomSheet<({bool cameraEnabled})>(
+          context: ctx,
+          useSafeArea: true,
+          isScrollControlled: true,
+          useRootNavigator: true,
+          builder: (context) => PendingJoinSheet(
+            room: room,
+            onJoin: (settings) => Navigator.pop(context, settings),
+          ),
+        );
+        if (result == null) return false;
+        cameraEnabled = result.cameraEnabled;
+      }
+      // Navigate to call screen — desktop: new window; mobile: push route
+      if (!kIsWeb &&
+          (Platform.isMacOS || Platform.isLinux || Platform.isWindows)) {
+        await createCallWindow(room, cameraEnabled: cameraEnabled);
+      } else {
+        await pushCallScreenOnce(ref, room, cameraEnabled: cameraEnabled);
+      }
+      return true;
+    } catch (e) {
+      Logger.root.severe('[AppWrapper] Failed to navigate to call screen: $e');
+      return false;
+    }
+  }
+}
+
+class _AppWrapperBackdrop extends StatelessWidget {
+  final Widget child;
+
+  const _AppWrapperBackdrop({required this.child});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final isDark = theme.brightness == Brightness.dark;
+
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        DecoratedBox(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [
+                scheme.surface,
+                Color.lerp(
+                  scheme.surface,
+                  scheme.surfaceContainerHighest,
+                  isDark ? 0.65 : 0.85,
+                )!,
+                Color.lerp(
+                  scheme.surface,
+                  scheme.primary.withOpacity(isDark ? 0.14 : 0.08),
+                  0.5,
+                )!,
+              ],
+              stops: const [0, 0.55, 1],
+            ),
+          ),
+        ),
+        const Positioned(
+          top: -120,
+          left: -80,
+          child: _BackdropOrb(size: 280, alignment: Alignment.topLeft),
+        ),
+        const Positioned(
+          right: -110,
+          top: 90,
+          child: _BackdropOrb(size: 240, alignment: Alignment.topRight),
+        ),
+        const Positioned(
+          left: 24,
+          bottom: -140,
+          child: _BackdropOrb(size: 320, alignment: Alignment.bottomLeft),
+        ),
+        Positioned.fill(
+          child: IgnorePointer(
+            child: BackdropFilter(
+              filter: ImageFilter.blur(sigmaX: 36, sigmaY: 36),
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  color: scheme.surface.withOpacity(isDark ? 0.18 : 0.08),
+                ),
+              ),
+            ),
+          ),
+        ),
+        child,
+      ],
+    );
+  }
+}
+
+class _BackdropOrb extends StatelessWidget {
+  final double size;
+  final Alignment alignment;
+
+  const _BackdropOrb({required this.size, required this.alignment});
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final primary = scheme.primary.withOpacity(0.18);
+    final tertiary = scheme.tertiary.withOpacity(0.12);
+
+    return IgnorePointer(
+      child: Container(
+        width: size,
+        height: size,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          gradient: RadialGradient(
+            center: alignment,
+            radius: 1,
+            colors: [primary, tertiary, Colors.transparent],
+            stops: const [0, 0.55, 1],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _DesktopWindowFocusListener with WindowListener {
+  _DesktopWindowFocusListener(this.ref);
+
+  final WidgetRef ref;
+
+  @override
+  void onWindowFocus() {
+    ref.read(desktopWindowFocusedProvider.notifier).set(true);
+  }
+
+  @override
+  void onWindowBlur() {
+    ref.read(desktopWindowFocusedProvider.notifier).set(false);
   }
 }
 

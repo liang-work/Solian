@@ -28,6 +28,36 @@ Map<String, dynamic> _$SnNotableDayToJson(_SnNotableDay instance) =>
       'holidays': instance.holidays,
     };
 
+_SnNotableDayDetail _$SnNotableDayDetailFromJson(Map<String, dynamic> json) =>
+    _SnNotableDayDetail(
+      date: DateTime.parse(json['date'] as String),
+      localName: json['local_name'] as String,
+      globalName: json['global_name'] as String,
+      localizableKey: json['localizable_key'] as String?,
+      countryCode: json['country_code'] as String?,
+      description: json['description'] as String?,
+      meta: json['meta'] as Map<String, dynamic>?,
+      occurrenceKey: json['occurrence_key'] as String?,
+      holidays: (json['holidays'] as List<dynamic>?)
+          ?.map((e) => e as String)
+          .toList(),
+      tags: (json['tags'] as List<dynamic>?)?.map((e) => e as String).toList(),
+    );
+
+Map<String, dynamic> _$SnNotableDayDetailToJson(_SnNotableDayDetail instance) =>
+    <String, dynamic>{
+      'date': instance.date.toIso8601String(),
+      'local_name': instance.localName,
+      'global_name': instance.globalName,
+      'localizable_key': instance.localizableKey,
+      'country_code': instance.countryCode,
+      'description': instance.description,
+      'meta': instance.meta,
+      'occurrence_key': instance.occurrenceKey,
+      'holidays': instance.holidays,
+      'tags': instance.tags,
+    };
+
 _SnTimelineEvent _$SnTimelineEventFromJson(Map<String, dynamic> json) =>
     _SnTimelineEvent(
       id: json['id'] as String,
@@ -59,6 +89,11 @@ _SnCheckInResult _$SnCheckInResultFromJson(Map<String, dynamic> json) =>
       tips: (json['tips'] as List<dynamic>)
           .map((e) => SnFortuneTip.fromJson(e as Map<String, dynamic>))
           .toList(),
+      fortuneReport: json['fortune_report'] == null
+          ? null
+          : SnCheckInFortuneReport.fromJson(
+              json['fortune_report'] as Map<String, dynamic>,
+            ),
       accountId: json['account_id'] as String,
       account: json['account'] == null
           ? null
@@ -75,12 +110,57 @@ Map<String, dynamic> _$SnCheckInResultToJson(_SnCheckInResult instance) =>
       'id': instance.id,
       'level': instance.level,
       'tips': instance.tips.map((e) => e.toJson()).toList(),
+      'fortune_report': instance.fortuneReport?.toJson(),
       'account_id': instance.accountId,
       'account': instance.account?.toJson(),
       'created_at': instance.createdAt.toIso8601String(),
       'updated_at': instance.updatedAt.toIso8601String(),
       'deleted_at': instance.deletedAt?.toIso8601String(),
     };
+
+_SnCheckInFortuneReport _$SnCheckInFortuneReportFromJson(
+  Map<String, dynamic> json,
+) => _SnCheckInFortuneReport(
+  version: (json['version'] as num).toInt(),
+  poem: json['poem'] as String,
+  summary: json['summary'] as String,
+  summaryDetail: json['summary_detail'] as String?,
+  wish: json['wish'] as String,
+  love: json['love'] as String,
+  study: json['study'] as String,
+  career: json['career'] as String,
+  health: json['health'] as String,
+  lostItem: json['lost_item'] as String,
+  luckyColor: json['lucky_color'] as String,
+  luckyDirection: json['lucky_direction'] as String,
+  luckyTime: json['lucky_time'] as String,
+  luckyItem: json['lucky_item'] as String,
+  luckyAction: json['lucky_action'] as String,
+  avoidAction: json['avoid_action'] as String,
+  ritual: json['ritual'] as String,
+);
+
+Map<String, dynamic> _$SnCheckInFortuneReportToJson(
+  _SnCheckInFortuneReport instance,
+) => <String, dynamic>{
+  'version': instance.version,
+  'poem': instance.poem,
+  'summary': instance.summary,
+  'summary_detail': instance.summaryDetail,
+  'wish': instance.wish,
+  'love': instance.love,
+  'study': instance.study,
+  'career': instance.career,
+  'health': instance.health,
+  'lost_item': instance.lostItem,
+  'lucky_color': instance.luckyColor,
+  'lucky_direction': instance.luckyDirection,
+  'lucky_time': instance.luckyTime,
+  'lucky_item': instance.luckyItem,
+  'lucky_action': instance.luckyAction,
+  'avoid_action': instance.avoidAction,
+  'ritual': instance.ritual,
+};
 
 _SnFortuneTip _$SnFortuneTipFromJson(Map<String, dynamic> json) =>
     _SnFortuneTip(
@@ -139,8 +219,22 @@ _SnUserCalendarEvent _$SnUserCalendarEventFromJson(Map<String, dynamic> json) =>
           : SnRecurrencePattern.fromJson(
               json['recurrence'] as Map<String, dynamic>,
             ),
+      tags:
+          (json['tags'] as List<dynamic>?)?.map((e) => e as String).toList() ??
+          const [],
       meta: json['meta'] as Map<String, dynamic>?,
+      icon: json['icon'] == null
+          ? null
+          : SnCloudFileReference.fromJson(json['icon'] as Map<String, dynamic>),
+      background: json['background'] == null
+          ? null
+          : SnCloudFileReference.fromJson(
+              json['background'] as Map<String, dynamic>,
+            ),
       accountId: json['account_id'] as String,
+      account: json['account'] == null
+          ? null
+          : SnAccount.fromJson(json['account'] as Map<String, dynamic>),
       createdAt: DateTime.parse(json['created_at'] as String),
       updatedAt: DateTime.parse(json['updated_at'] as String),
       deletedAt: json['deleted_at'] == null
@@ -160,8 +254,12 @@ Map<String, dynamic> _$SnUserCalendarEventToJson(
   'is_all_day': instance.isAllDay,
   'visibility': instance.visibility,
   'recurrence': instance.recurrence?.toJson(),
+  'tags': instance.tags,
   'meta': instance.meta,
+  'icon': instance.icon?.toJson(),
+  'background': instance.background?.toJson(),
   'account_id': instance.accountId,
+  'account': instance.account?.toJson(),
   'created_at': instance.createdAt.toIso8601String(),
   'updated_at': instance.updatedAt.toIso8601String(),
   'deleted_at': instance.deletedAt?.toIso8601String(),
@@ -251,6 +349,9 @@ _SnPresenceActivity _$SnPresenceActivityFromJson(Map<String, dynamic> json) =>
       leaseMinutes: (json['lease_minutes'] as num).toInt(),
       leaseExpiresAt: DateTime.parse(json['lease_expires_at'] as String),
       accountId: json['account_id'] as String,
+      account: json['account'] == null
+          ? null
+          : SnAccount.fromJson(json['account'] as Map<String, dynamic>),
       createdAt: DateTime.parse(json['created_at'] as String),
       updatedAt: DateTime.parse(json['updated_at'] as String),
       deletedAt: json['deleted_at'] == null
@@ -274,6 +375,7 @@ Map<String, dynamic> _$SnPresenceActivityToJson(_SnPresenceActivity instance) =>
       'lease_minutes': instance.leaseMinutes,
       'lease_expires_at': instance.leaseExpiresAt.toIso8601String(),
       'account_id': instance.accountId,
+      'account': instance.account?.toJson(),
       'created_at': instance.createdAt.toIso8601String(),
       'updated_at': instance.updatedAt.toIso8601String(),
       'deleted_at': instance.deletedAt?.toIso8601String(),
@@ -319,6 +421,14 @@ _SnEventCountdownItem _$SnEventCountdownItemFromJson(
   isOngoing: json['is_ongoing'] as bool,
   meta: json['meta'] as Map<String, dynamic>?,
   accountId: json['account_id'] as String?,
+  background: json['background'] == null
+      ? null
+      : SnCloudFileReference.fromJson(
+          json['background'] as Map<String, dynamic>,
+        ),
+  icon: json['icon'] == null
+      ? null
+      : SnCloudFileReference.fromJson(json['icon'] as Map<String, dynamic>),
 );
 
 Map<String, dynamic> _$SnEventCountdownItemToJson(
@@ -337,4 +447,6 @@ Map<String, dynamic> _$SnEventCountdownItemToJson(
   'is_ongoing': instance.isOngoing,
   'meta': instance.meta,
   'account_id': instance.accountId,
+  'background': instance.background?.toJson(),
+  'icon': instance.icon?.toJson(),
 };

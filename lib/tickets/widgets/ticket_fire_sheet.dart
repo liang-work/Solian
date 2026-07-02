@@ -29,6 +29,10 @@ class TicketCreateSheet extends HookConsumerWidget {
     final selectedPriority = useState<TicketPriority>(TicketPriority.medium);
     final isSubmitting = useState<bool>(false);
     final attachments = useState<List<SnCloudFile>>([]);
+    final resource = resourceIdentifier?.trim();
+    final resources = (resource == null || resource.isEmpty)
+        ? null
+        : <String?>[resource];
 
     Future<void> submitTicket() async {
       if (titleController.text.trim().isEmpty) {
@@ -51,6 +55,7 @@ class TicketCreateSheet extends HookConsumerWidget {
               fileIds: attachments.value.isEmpty
                   ? null
                   : attachments.value.map((e) => e.id).toList(),
+              resources: resources,
             );
 
         if (context.mounted) {
@@ -243,7 +248,7 @@ class TicketCreateSheet extends HookConsumerWidget {
                       context: context,
                       isScrollControlled: true,
                       builder: (context) =>
-                          const CloudFilePicker(allowMultiple: true),
+                          const CloudFilePicker(allowMultiple: true, usage: 'ticket'),
                     ).then((value) {
                       if (value != null && value.isNotEmpty) {
                         attachments.value = [...attachments.value, ...value];

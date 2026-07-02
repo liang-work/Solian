@@ -5,22 +5,22 @@
 list(APPEND FLUTTER_PLUGIN_LIST
   bluetooth_low_energy_windows
   connectivity_plus
-  dart_ipc
   desktop_drop
+  desktop_multi_window
   disk_space_2
   file_saver
   file_selector_windows
   firebase_core
   flutter_blue_plus_winrt
   flutter_inappwebview_windows
+  flutter_js
   flutter_secure_storage_windows
   flutter_timezone
-  flutter_tts
   flutter_webrtc
   gal
   geolocator_windows
-  hotkey_manager_windows
   irondash_engine_context
+  island_desktop_presence
   livekit_client
   local_auth_windows
   media_kit_libs_windows_video
@@ -32,11 +32,11 @@ list(APPEND FLUTTER_PLUGIN_LIST
   protocol_handler_windows
   record_windows
   screen_retriever_windows
+  sentry_flutter
   share_plus
   super_native_extensions
   tray_manager
   url_launcher_windows
-  webcrypto
   window_manager
   windows_notification
 )

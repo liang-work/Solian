@@ -1,4 +1,8 @@
-import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'dart:async';
+import 'dart:io';
+
+import 'package:flutter/foundation.dart';
+import 'package:hooks_riverpod/hooks_riverpod.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:island/core/config.dart';
 import 'package:audio_session/audio_session.dart';
@@ -11,15 +15,30 @@ final sfxPlayerProvider = Provider<AudioPlayer>((ref) {
   return player;
 });
 
+final callInviteLoopPlayerProvider = Provider<AudioPlayer>((ref) {
+  final player = AudioPlayer();
+  ref.onDispose(() {
+    player.dispose();
+  });
+  return player;
+});
+
 Future<void> _configureAudioSession() async {
   final session = await AudioSession.instance;
-  await session.configure(
-    const AudioSessionConfiguration(
-      avAudioSessionCategory: AVAudioSessionCategory.playback,
-      avAudioSessionCategoryOptions:
-          AVAudioSessionCategoryOptions.mixWithOthers,
-    ),
-  );
+  if (Platform.isIOS) {
+    // Let CallKit/LiveKit own the iOS audio session during calls.
+    // A startup-wide playback session can override CallKit's voiceChat routing
+    // after accepting from the lock screen, which leaves media connected but silent.
+    await session.configure(
+      const AudioSessionConfiguration(
+        avAudioSessionCategory: AVAudioSessionCategory.ambient,
+        avAudioSessionCategoryOptions:
+            AVAudioSessionCategoryOptions.mixWithOthers,
+      ),
+    );
+    return;
+  }
+  await session.configure(const AudioSessionConfiguration.music());
   await session.setActive(true);
 }
 
@@ -73,11 +92,49 @@ Future<void> _playSfx(String assetPath, double volume) async {
 void playNotificationSfx(WidgetRef ref) {
   final settings = ref.read(appSettingsProvider);
   if (!settings.soundEffects) return;
-  _playSfx('assets/audio/notification.mp3', 0.75);
+  _playSfx('assets/audio/notification.wav', 0.75);
 }
 
 void playMessageSfx(WidgetRef ref) {
   final settings = ref.read(appSettingsProvider);
   if (!settings.soundEffects) return;
-  _playSfx('assets/audio/messages.mp3', 0.75);
+  _playSfx('assets/audio/messages.wav', 0.75);
+}
+
+void playMessageSfxRef(Ref ref) {
+  final settings = ref.read(appSettingsProvider);
+  if (!settings.soundEffects) return;
+  _playSfx('assets/audio/messages.wav', 0.75);
+}
+
+Future<void> playCallInvitedSfxLoop(WidgetRef ref) async {
+  final settings = ref.read(appSettingsProvider);
+  if (!settings.soundEffects || (!kIsWeb && Platform.isIOS)) return;
+
+  final player = ref.read(callInviteLoopPlayerProvider);
+  try {
+    await player.stop();
+    await player.setVolume(0.75);
+    await player.setLoopMode(LoopMode.one);
+    await player.setAudioSource(
+      AudioSource.asset('assets/audio/call_invited.wav'),
+    );
+    await player.play();
+    Future.delayed(const Duration(minutes: 1), () {
+      unawaited(stopCallInvitedSfxLoop(ref));
+    });
+  } on PlayerInterruptedException catch (_) {
+    await player.stop();
+  } on PlayerException catch (e) {
+    if (e.code != -11849) rethrow;
+  }
+}
+
+Future<void> stopCallInvitedSfxLoop(WidgetRef ref) async {
+  final player = ref.read(callInviteLoopPlayerProvider);
+  try {
+    await player.stop();
+  } catch (_) {
+    // ponytail: ignore stop races when the sheet closes as timeout fires
+  }
 }

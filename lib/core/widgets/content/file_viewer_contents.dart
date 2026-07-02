@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_hooks/flutter_hooks.dart';
+import 'package:flutter/services.dart';
 import 'package:gap/gap.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 import 'package:island/core/config.dart';
@@ -15,6 +16,7 @@ import 'package:island/drive/widgets/cloud_files.dart';
 import 'package:island/core/widgets/content/exif_info_overlay.dart';
 import 'package:island/core/widgets/content/file_info_sheet.dart';
 import 'package:island/core/widgets/content/image_control_overlay.dart';
+import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:material_symbols_icons/symbols.dart';
 import 'package:photo_view/photo_view.dart';
 import 'package:solar_network_sdk/solar_network_sdk.dart';
@@ -71,66 +73,63 @@ class ImageFileContent extends HookConsumerWidget {
     final showOriginal = useState(false);
     final showExif = useState(hasExifData);
 
-    return Stack(
-      children: [
-        Positioned.fill(
-          child: Listener(
-            onPointerSignal: (pointerSignal) {
-              try {
-                // Handle mouse wheel zoom - cast to dynamic to access scrollDelta
-                final delta =
-                    (pointerSignal as dynamic).scrollDelta.dy as double?;
-                if (delta != null && delta != 0) {
-                  final currentScale = photoViewController.scale ?? 1.0;
-                  // Adjust scale based on scroll direction (invert for natural zoom)
-                  final newScale = delta > 0
-                      ? currentScale * 0.9
-                      : currentScale * 1.1;
-                  // Clamp scale to reasonable bounds
-                  final clampedScale = newScale.clamp(0.1, 10.0);
-                  photoViewController.scale = clampedScale;
+    return LayoutBuilder(
+      builder: (context, constraints) => Stack(
+        children: [
+          Positioned.fill(
+            child: Listener(
+              onPointerSignal: (pointerSignal) {
+                try {
+                  final delta =
+                      (pointerSignal as dynamic).scrollDelta.dy as double?;
+                  if (delta != null && delta != 0) {
+                    final currentScale = photoViewController.scale ?? 1.0;
+                    final newScale = delta > 0
+                        ? currentScale * 0.9
+                        : currentScale * 1.1;
+                    final clampedScale = newScale.clamp(0.1, 10.0);
+                    photoViewController.scale = clampedScale;
+                  }
+                } catch (_) {
+                  // Ignore non-scroll events.
                 }
-              } catch (e) {
-                // Ignore non-scroll events
-              }
-            },
-            child: PhotoView(
-              backgroundDecoration: BoxDecoration(
-                color: Colors.black.withOpacity(0.9),
+              },
+              child: PhotoView(
+                backgroundDecoration: BoxDecoration(color: Colors.transparent),
+                controller: photoViewController,
+                imageProvider: CloudImageWidget.provider(
+                  file: item,
+                  serverUrl: ref.watch(serverUrlProvider),
+                  original: showOriginal.value,
+                ),
+                customSize: Size(constraints.maxWidth, constraints.maxHeight),
+                basePosition: Alignment.center,
+                filterQuality: FilterQuality.high,
               ),
-              controller: photoViewController,
-              imageProvider: CloudImageWidget.provider(
-                file: item,
-                serverUrl: ref.watch(serverUrlProvider),
-                original: showOriginal.value,
-              ),
-              customSize: MediaQuery.of(context).size,
-              basePosition: Alignment.center,
-              filterQuality: FilterQuality.high,
             ),
           ),
-        ),
-        if (showExif.value)
-          Positioned(
-            bottom: MediaQuery.of(context).padding.bottom + 60,
-            left: 16,
-            right: 16,
-            child: ExifInfoOverlay(item: item),
+          if (showExif.value)
+            Positioned(
+              bottom: MediaQuery.of(context).padding.bottom + 60,
+              left: 16,
+              right: 16,
+              child: ExifInfoOverlay(item: item),
+            ),
+          ImageControlOverlay(
+            photoViewController: photoViewController,
+            rotation: rotation,
+            showOriginal: showOriginal.value,
+            onToggleQuality: () {
+              showOriginal.value = !showOriginal.value;
+            },
+            showExifInfo: showExif.value,
+            onToggleExif: () {
+              showExif.value = !showExif.value;
+            },
+            hasExifData: hasExifData,
           ),
-        ImageControlOverlay(
-          photoViewController: photoViewController,
-          rotation: rotation,
-          showOriginal: showOriginal.value,
-          onToggleQuality: () {
-            showOriginal.value = !showOriginal.value;
-          },
-          showExifInfo: showExif.value,
-          onToggleExif: () {
-            showExif.value = !showExif.value;
-          },
-          hasExifData: hasExifData,
-        ),
-      ],
+        ],
+      ),
     );
   }
 }
@@ -143,13 +142,15 @@ class VideoFileContent extends HookConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    var ratio = item.fileMeta?['ratio'] is num
-        ? item.fileMeta!['ratio'].toDouble()
-        : 1.0;
+    var ratio = item.ratio;
     if (ratio == 0) ratio = 16 / 9;
 
     return Center(
-      child: UniversalVideo(uri: uri, autoplay: true, aspectRatio: ratio,),
+      child: UniversalVideo(
+        uri: uri,
+        autoplay: true,
+        aspectRatio: ratio ?? 16 / 9,
+      ),
     );
   }
 }
@@ -177,6 +178,44 @@ class GenericFileContent extends HookConsumerWidget {
   final SnCloudFile item;
 
   const GenericFileContent({required this.item, super.key});
+
+  void _openWebPreview(BuildContext context) {
+    final url = 'https://solian.app/files/${item.id}';
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      useRootNavigator: true,
+      builder: (context) => DraggableScrollableSheet(
+        initialChildSize: 0.9,
+        minChildSize: 0.5,
+        maxChildSize: 0.95,
+        expand: false,
+        builder: (context, scrollController) => Column(
+          children: [
+            AppBar(
+              title: Text(item.name),
+              leading: IconButton(
+                icon: const Icon(Icons.close),
+                onPressed: () => Navigator.of(context).pop(),
+              ),
+              actions: [
+                IconButton(icon: const Icon(Symbols.refresh), onPressed: () {}),
+              ],
+            ),
+            Expanded(
+              child: InAppWebView(
+                initialUrlRequest: URLRequest(url: WebUri(url)),
+                initialSettings: InAppWebViewSettings(
+                  useShouldOverrideUrlLoading: true,
+                  mediaPlaybackRequiresUserGesture: false,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -212,12 +251,23 @@ class GenericFileContent extends HookConsumerWidget {
             mainAxisSize: MainAxisSize.min,
             children: [
               FilledButton.icon(
-                onPressed: () =>
-                    ref.read(driveFileDownloaderProvider).downloadFile(item),
+                onPressed: () => ref
+                    .read(driveFileDownloaderProvider)
+                    .downloadFile(
+                      item,
+                      useDownloadsFolder:
+                          HardwareKeyboard.instance.isShiftPressed,
+                    ),
                 icon: const Icon(Symbols.download),
                 label: Text('download').tr(),
               ),
-              const Gap(16),
+              const Gap(12),
+              FilledButton.tonalIcon(
+                onPressed: () => _openWebPreview(context),
+                icon: const Icon(Symbols.open_in_browser),
+                label: Text('previewInWeb'.tr()),
+              ),
+              const Gap(12),
               OutlinedButton.icon(
                 onPressed: () {
                   showModalBottomSheet(

@@ -16,7 +16,7 @@ class WalletApi extends BaseApi {
   // Wallet endpoints
   // ==========================================
 
-  /// Gets the current user's wallet.
+  /// Gets the current user default wallet.
   Future<SnWallet?> getWallet() async {
     try {
       final response = await get<Map<String, dynamic>>('$_basePath/wallets');
@@ -29,9 +29,45 @@ class WalletApi extends BaseApi {
     }
   }
 
+  /// Gets all personal wallets for the current user.
+  Future<List<SnWallet>> getWallets() async {
+    final response = await get<List<dynamic>>('$_basePath/wallets/all');
+    return parseList(response, SnWallet.fromJson);
+  }
+
+  /// Gets a specific wallet by ID.
+  Future<SnWallet> getWalletById(String id) async {
+    final response = await get<Map<String, dynamic>>('$_basePath/wallets/$id');
+    return SnWallet.fromJson(response.data!);
+  }
+
   /// Creates a new wallet.
-  Future<SnWallet> createWallet() async {
-    final response = await post<Map<String, dynamic>>('$_basePath/wallets');
+  Future<SnWallet> createWallet({String? name, String? realmId}) async {
+    final response = await post<Map<String, dynamic>>(
+      '$_basePath/wallets',
+      data: {'name': ?name, 'realm_id': ?realmId},
+    );
+    return SnWallet.fromJson(response.data!);
+  }
+
+  /// Sets a wallet as the default for the current user.
+  Future<void> setDefaultWallet(String id) async {
+    await post('$_basePath/wallets/$id/default');
+  }
+
+  /// Enables the public ID for a wallet.
+  Future<SnWallet> enablePublicId(String id) async {
+    final response = await post<Map<String, dynamic>>(
+      '$_basePath/wallets/$id/public-id/enable',
+    );
+    return SnWallet.fromJson(response.data!);
+  }
+
+  /// Disables the public ID for a wallet.
+  Future<SnWallet> disablePublicId(String id) async {
+    final response = await post<Map<String, dynamic>>(
+      '$_basePath/wallets/$id/public-id/disable',
+    );
     return SnWallet.fromJson(response.data!);
   }
 
@@ -76,20 +112,52 @@ class WalletApi extends BaseApi {
 
   /// Creates a new fund.
   ///
-  /// [name] - The fund name.
-  /// [amount] - The amount.
-  /// [recipients] - List of recipients with splits.
+  /// [currency] - The currency.
+  /// [totalAmount] - Total amount for distribute mode.
+  /// [amountOfSplits] - Number of splits / max participants.
+  /// [splitType] - 0: even, 1: random.
+  /// [recipientAccountIds] - List of recipient account IDs.
+  /// [message] - Optional message.
+  /// [expirationHours] - Optional hours until expiration.
+  /// [isRaising] - Enable raising mode.
+  /// [targetAmount] - Fundraising goal (0 = unlimited).
+  /// [contributionType] - 0: Free, 1: Fixed.
+  /// [contributionAmount] - Per-person amount when Fixed.
+  /// [isOpen] - true = open to all, false = invited only.
+  /// [deadlineAt] - Optional deadline for contributions.
   Future<SnWalletFund> createFund({
-    required String name,
-    required double amount,
-    required List<SnWalletFundRecipient> recipients,
+    required String currency,
+    required double totalAmount,
+    required int amountOfSplits,
+    required int splitType,
+    List<String>? recipientAccountIds,
+    String? message,
+    int? expirationHours,
+    String? pinCode,
+    bool isRaising = false,
+    double targetAmount = 0,
+    int contributionType = 0,
+    double contributionAmount = 0,
+    bool isOpen = true,
+    DateTime? deadlineAt,
   }) async {
     final response = await post<Map<String, dynamic>>(
       '$_basePath/wallets/funds',
       data: {
-        'name': name,
-        'amount': amount,
-        'recipients': recipients.map((r) => r.toJson()).toList(),
+        'currency': currency,
+        'total_amount': totalAmount,
+        'amount_of_splits': amountOfSplits,
+        'split_type': splitType,
+        'recipient_account_ids': recipientAccountIds ?? [],
+        'message': ?message,
+        'expiration_hours': ?expirationHours,
+        'pin_code': ?pinCode,
+        'is_raising': isRaising,
+        'target_amount': targetAmount,
+        'contribution_type': contributionType,
+        'contribution_amount': contributionAmount,
+        'is_open': isOpen,
+        'deadline_at': deadlineAt?.toUtc().toIso8601String(),
       },
     );
     return SnWalletFund.fromJson(response.data!);
@@ -117,20 +185,71 @@ class WalletApi extends BaseApi {
     await delete('$_basePath/wallets/funds/$fundId');
   }
 
+  /// Contributes money to a raising fund.
+  ///
+  /// [fundId] - The fund ID.
+  /// [amount] - Contribution amount (for Free type; ignored for Fixed).
+  Future<SnTransaction> contributeToFund({
+    required String fundId,
+    double amount = 0,
+  }) async {
+    final response = await post<Map<String, dynamic>>(
+      '$_basePath/wallets/funds/$fundId/contribute',
+      data: {'amount': amount},
+    );
+    return SnTransaction.fromJson(response.data!);
+  }
+
+  /// Gets the list of contributors for a raising fund.
+  ///
+  /// [fundId] - The fund ID.
+  Future<List<SnWalletFundRecipient>> getFundContributors(String fundId) async {
+    final response = await get<List<dynamic>>(
+      '$_basePath/wallets/funds/$fundId/contributors',
+    );
+    return parseList(response, SnWalletFundRecipient.fromJson);
+  }
+
   /// Transfers funds from one wallet to another.
   ///
-  /// [toWalletId] - The recipient wallet ID.
   /// [amount] - The amount to transfer.
-  /// [message] - Optional message.
-  Future<void> transfer({
-    required String toWalletId,
+  /// [currency] - The currency.
+  /// [pinCode] - The PIN code for verification.
+  /// [payerWalletId] - Optional source wallet ID.
+  /// [payeeWalletId] - Optional target wallet ID.
+  /// [payeeAccountId] - Optional target account ID (resolves to default wallet).
+  /// [payeePublicId] - Optional target public wallet ID.
+  /// [remark] - Optional message.
+  /// [freeze] - Hold funds for 24hr before clearing.
+  /// [requireConfirmation] - Require payee to confirm receipt.
+  Future<SnTransaction> transfer({
     required double amount,
-    String? message,
+    required String currency,
+    required String pinCode,
+    String? payerWalletId,
+    String? payeeWalletId,
+    String? payeeAccountId,
+    String? payeePublicId,
+    String? remark,
+    bool freeze = false,
+    bool requireConfirmation = false,
   }) async {
-    await post(
+    final response = await post<Map<String, dynamic>>(
       '$_basePath/wallets/transfer',
-      data: {'to_wallet_id': toWalletId, 'amount': amount, 'message': ?message},
+      data: {
+        'amount': amount,
+        'currency': currency,
+        'pin_code': pinCode,
+        'payer_wallet_id': ?payerWalletId,
+        'payee_wallet_id': ?payeeWalletId,
+        'payee_account_id': ?payeeAccountId,
+        'payee_public_id': ?payeePublicId,
+        'remark': ?remark,
+        'freeze': freeze,
+        'require_confirmation': requireConfirmation,
+      },
     );
+    return SnTransaction.fromJson(response.data!);
   }
 
   // ==========================================
@@ -141,13 +260,25 @@ class WalletApi extends BaseApi {
   ///
   /// [offset] - Pagination offset.
   /// [take] - Number of items to take.
+  /// [wallet] - Filter by wallet ID.
+  /// [direction] - Filter by direction (income/outcome).
+  /// [type] - Filter by transaction type.
   Future<PaginatedResult<SnTransaction>> getTransactions({
     int offset = 0,
     int take = 20,
+    String? wallet,
+    String? direction,
+    String? type,
   }) async {
     final response = await get<List<dynamic>>(
       '$_basePath/wallets/transactions',
-      queryParameters: {'offset': offset, 'take': take},
+      queryParameters: {
+        'offset': offset,
+        'take': take,
+        'wallet': ?wallet,
+        'direction': ?direction,
+        'type': ?type,
+      },
     );
     final totalCount = getTotalCount(response.headers);
     final items = parseList(response, SnTransaction.fromJson);
@@ -162,6 +293,43 @@ class WalletApi extends BaseApi {
       '$_basePath/wallets/transactions/$transactionId',
     );
     return SnTransaction.fromJson(response.data!);
+  }
+
+  /// Confirms a pending/frozen transaction (payee action).
+  ///
+  /// [transactionId] - The transaction ID.
+  Future<SnTransaction> confirmTransaction(String transactionId) async {
+    final response = await post<Map<String, dynamic>>(
+      '$_basePath/wallets/transactions/$transactionId/confirm',
+    );
+    return SnTransaction.fromJson(response.data!);
+  }
+
+  /// Rejects a pending/frozen transaction (payee action, refunds to payer).
+  ///
+  /// [transactionId] - The transaction ID.
+  Future<SnTransaction> rejectTransaction(String transactionId) async {
+    final response = await post<Map<String, dynamic>>(
+      '$_basePath/wallets/transactions/$transactionId/reject',
+    );
+    return SnTransaction.fromJson(response.data!);
+  }
+
+  /// Gets transactions awaiting the current user's confirmation.
+  ///
+  /// [offset] - Pagination offset.
+  /// [take] - Number of items to take.
+  Future<PaginatedResult<SnTransaction>> getPendingTransactions({
+    int offset = 0,
+    int take = 20,
+  }) async {
+    final response = await get<List<dynamic>>(
+      '$_basePath/wallets/transactions/pending',
+      queryParameters: {'offset': offset, 'take': take},
+    );
+    final totalCount = getTotalCount(response.headers);
+    final items = parseList(response, SnTransaction.fromJson);
+    return PaginatedResult(items: items, totalCount: totalCount);
   }
 
   // ==========================================
@@ -232,13 +400,28 @@ class WalletApi extends BaseApi {
   ///
   /// [offset] - Pagination offset.
   /// [take] - Number of items to take.
+  /// [wallet] - Filter by wallet ID.
+  /// [status] - Filter by order status.
+  /// [direction] - Filter by direction (income/outcome).
+  /// [type] - Filter by order type.
   Future<PaginatedResult<SnWalletOrder>> getOrders({
     int offset = 0,
     int take = 20,
+    String? wallet,
+    String? status,
+    String? direction,
+    String? type,
   }) async {
     final response = await get<List<dynamic>>(
       '$_basePath/wallets/orders',
-      queryParameters: {'offset': offset, 'take': take},
+      queryParameters: {
+        'offset': offset,
+        'take': take,
+        'wallet': ?wallet,
+        'status': ?status,
+        'direction': ?direction,
+        'type': ?type,
+      },
     );
     final totalCount = getTotalCount(response.headers);
     final items = parseList(response, SnWalletOrder.fromJson);

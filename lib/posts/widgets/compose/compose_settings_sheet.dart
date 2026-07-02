@@ -5,11 +5,13 @@ import 'package:flutter_hooks/flutter_hooks.dart';
 import 'package:flutter_typeahead/flutter_typeahead.dart';
 import 'package:gap/gap.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
+import 'package:island/creators/screens/posts/post_collections_manage.dart';
 import 'package:island/posts/pods/post_categories.dart';
 import 'package:island/posts/widgets/compose/compose_shared.dart';
 import 'package:island/realms/screens/realms.dart';
 import 'package:island/core/network.dart';
 import 'package:island/drive/widgets/cloud_files.dart';
+import 'package:island/shared/widgets/typeahead_enter_handler.dart';
 import 'package:island/shared/widgets/layouts/sheet_scaffold.dart';
 import 'package:material_symbols_icons/symbols.dart';
 import 'package:styled_widget/styled_widget.dart';
@@ -44,29 +46,33 @@ class ComposeSettingsSheet extends HookConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final theme = Theme.of(context);
-    final colorScheme = theme.colorScheme;
-
     // Listen to visibility changes to trigger rebuilds
     final currentVisibility = useValueListenable(state.visibility);
     final currentLanguage = useValueListenable(state.language);
     final currentCategories = useValueListenable(state.categories);
     final currentTags = useValueListenable(state.tags);
     final currentRealm = useValueListenable(state.realm);
+    final currentCollectionIds = useValueListenable(state.collectionIds);
     final postCategories = ref.watch(postCategoriesProvider);
     final userRealms = ref.watch(realmsJoinedProvider);
+    final publisherName = state.currentPublisher.value?.name;
+    final isIndividualPublisher = state.currentPublisher.value?.type == 0;
+    final publisherCollections =
+        publisherName != null && publisherName.isNotEmpty
+        ? ref.watch(publisherCollectionsProvider(publisherName))
+        : null;
 
     final languages = [
-      (code: null, name: 'Auto'),
-      (code: 'en', name: 'English'),
-      (code: 'zh', name: 'Chinese'),
-      (code: 'ja', name: 'Japanese'),
-      (code: 'ko', name: 'Korean'),
-      (code: 'es', name: 'Spanish'),
-      (code: 'fr', name: 'French'),
-      (code: 'de', name: 'German'),
-      (code: 'ru', name: 'Russian'),
-      (code: 'pt', name: 'Portuguese'),
+      (code: null, name: 'languageAuto'.tr()),
+      (code: 'en', name: 'languageEN'.tr()),
+      (code: 'zh', name: 'languageCN'.tr()),
+      (code: 'ja', name: 'languageJA'.tr()),
+      (code: 'ko', name: 'languageKO'.tr()),
+      (code: 'es', name: 'languageES'.tr()),
+      (code: 'fr', name: 'languageFR'.tr()),
+      (code: 'de', name: 'languageDE'.tr()),
+      (code: 'ru', name: 'languageRU'.tr()),
+      (code: 'pt', name: 'languagePT'.tr()),
     ];
 
     String getLanguageDisplayName(String? code) {
@@ -78,90 +84,11 @@ class ComposeSettingsSheet extends HookConsumerWidget {
       return lang.name;
     }
 
-    IconData getVisibilityIcon(int visibilityValue) {
-      switch (visibilityValue) {
-        case 1:
-          return Symbols.group;
-        case 2:
-          return Symbols.link_off;
-        case 3:
-          return Symbols.lock;
-        default:
-          return Symbols.public;
-      }
-    }
-
-    String getVisibilityText(int visibilityValue) {
-      switch (visibilityValue) {
-        case 1:
-          return 'postVisibilityFriends';
-        case 2:
-          return 'postVisibilityUnlisted';
-        case 3:
-          return 'postVisibilityPrivate';
-        default:
-          return 'postVisibilityPublic';
-      }
-    }
-
-    Widget buildVisibilityOption(
-      BuildContext context,
-      int value,
-      IconData icon,
-      String textKey,
-    ) {
-      return ListTile(
-        leading: Icon(icon),
-        title: Text(textKey.tr()),
-        onTap: () {
-          state.visibility.value = value;
-          Navigator.pop(context);
-        },
-        selected: state.visibility.value == value,
-        contentPadding: const EdgeInsets.symmetric(horizontal: 20),
-      );
-    }
-
-    void showVisibilitySheet() {
-      showModalBottomSheet(
-        context: context,
-        builder: (context) => SheetScaffold(
-          heightFactor: 0.6,
-          showHeader: false,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              buildVisibilityOption(
-                context,
-                0,
-                Symbols.public,
-                'postVisibilityPublic',
-              ),
-              buildVisibilityOption(
-                context,
-                1,
-                Symbols.group,
-                'postVisibilityFriends',
-              ),
-              buildVisibilityOption(
-                context,
-                2,
-                Symbols.link_off,
-                'postVisibilityUnlisted',
-              ),
-              buildVisibilityOption(
-                context,
-                3,
-                Symbols.lock,
-                'postVisibilityPrivate',
-              ),
-            ],
-          ),
-        ),
-      );
-    }
-
     final tagInputController = useTextEditingController();
+    final tagSuggestionsController = useMemoized(
+      () => SuggestionsController<SnPostTag>(),
+      [],
+    );
 
     return SheetScaffold(
       heightFactor: 0.6,
@@ -259,20 +186,29 @@ class ComposeSettingsSheet extends HookConsumerWidget {
                   // Tag input with autocomplete
                   TypeAheadField<SnPostTag>(
                     controller: tagInputController,
+                    suggestionsController: tagSuggestionsController,
                     builder: (context, controller, focusNode) {
-                      return TextField(
-                        controller: controller,
-                        focusNode: focusNode,
-                        decoration: InputDecoration(
-                          hintText: 'addTag'.tr(),
-                          border: InputBorder.none,
-                          isCollapsed: true,
-                          contentPadding: EdgeInsets.zero,
-                        ),
-                        onSubmitted: (value) {
+                      return TypeAheadEnterHandler<SnPostTag>(
+                        suggestionsController: tagSuggestionsController,
+                        onEnter: () {
+                          final value = controller.text;
                           state.tags.value = [...state.tags.value, value];
                           controller.clear();
                         },
+                        child: TextField(
+                          controller: controller,
+                          focusNode: focusNode,
+                          decoration: InputDecoration(
+                            hintText: 'addTag'.tr(),
+                            border: InputBorder.none,
+                            isCollapsed: true,
+                            contentPadding: EdgeInsets.zero,
+                          ),
+                          onSubmitted: (value) {
+                            state.tags.value = [...state.tags.value, value];
+                            controller.clear();
+                          },
+                        ),
                       );
                     },
                     suggestionsCallback: (pattern) =>
@@ -403,6 +339,134 @@ class ComposeSettingsSheet extends HookConsumerWidget {
               ),
             ),
 
+            // Collections field
+            if (publisherCollections != null && publisherCollections.hasValue)
+              DropdownButtonFormField2<SnPostCollection>(
+                isExpanded: true,
+                decoration: InputDecoration(
+                  contentPadding: const EdgeInsets.symmetric(vertical: 9),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+                hint: Text('collections'.tr(), style: TextStyle(fontSize: 15)),
+                items: (publisherCollections.value ?? <SnPostCollection>[]).map(
+                  (item) {
+                    return DropdownItem(
+                      value: item,
+                      enabled: false,
+                      child: StatefulBuilder(
+                        builder: (context, menuSetState) {
+                          final isSelected = currentCollectionIds.contains(
+                            item.id,
+                          );
+                          return InkWell(
+                            onTap: () {
+                              isSelected
+                                  ? state.collectionIds.value = state
+                                        .collectionIds
+                                        .value
+                                        .where((e) => e != item.id)
+                                        .toList()
+                                  : state.collectionIds.value = [
+                                      ...state.collectionIds.value,
+                                      item.id,
+                                    ];
+                              menuSetState(() {});
+                            },
+                            child: Container(
+                              height: double.infinity,
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 16.0,
+                              ),
+                              child: Row(
+                                children: [
+                                  if (isSelected)
+                                    const Icon(Icons.check_box_outlined)
+                                  else
+                                    const Icon(Icons.check_box_outline_blank),
+                                  const SizedBox(width: 16),
+                                  Expanded(
+                                    child: Text(
+                                      item.name?.isNotEmpty == true
+                                          ? item.name!
+                                          : item.slug,
+                                      style: const TextStyle(fontSize: 14),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+                    );
+                  },
+                ).toList(),
+                valueListenable: ValueNotifier(
+                  currentCollectionIds.isEmpty
+                      ? null
+                      : (publisherCollections.value ?? []).firstWhere(
+                          (c) => c.id == currentCollectionIds.last,
+                          orElse: () =>
+                              (publisherCollections.value ?? []).first,
+                        ),
+                ),
+                onChanged: (_) {},
+                selectedItemBuilder: (context) {
+                  final collections = publisherCollections.value ?? [];
+                  return collections.map((item) {
+                    return SingleChildScrollView(
+                      scrollDirection: Axis.horizontal,
+                      child: Row(
+                        children: [
+                          for (final id in currentCollectionIds)
+                            Builder(
+                              builder: (context) {
+                                final collection = collections.firstWhere(
+                                  (c) => c.id == id,
+                                  orElse: () => item,
+                                );
+                                return Container(
+                                  decoration: BoxDecoration(
+                                    borderRadius: BorderRadius.circular(20),
+                                    color: Theme.of(
+                                      context,
+                                    ).colorScheme.primary,
+                                  ),
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 12,
+                                    vertical: 4,
+                                  ),
+                                  margin: const EdgeInsets.only(right: 4),
+                                  child: Text(
+                                    collection.name?.isNotEmpty == true
+                                        ? collection.name!
+                                        : collection.slug,
+                                    style: TextStyle(
+                                      color: Theme.of(
+                                        context,
+                                      ).colorScheme.onPrimary,
+                                      fontSize: 13,
+                                    ),
+                                  ),
+                                );
+                              },
+                            ),
+                        ],
+                      ),
+                    );
+                  }).toList();
+                },
+                buttonStyleData: const FormFieldButtonStyleData(
+                  padding: EdgeInsets.only(left: 16, right: 8),
+                  height: 38,
+                ),
+                menuItemStyleData: const MenuItemStyleData(
+                  padding: EdgeInsets.zero,
+                ),
+              ),
+
             // Language selection
             DropdownButtonFormField2<String?>(
               isExpanded: true,
@@ -416,7 +480,7 @@ class ComposeSettingsSheet extends HookConsumerWidget {
               items: languages.map((lang) {
                 return DropdownItem<String?>(
                   value: lang.code,
-                  child: Text(lang.name),
+                  child: Text(lang.name).padding(left: 16, right: 8),
                 );
               }).toList(),
               valueListenable: ValueNotifier(currentLanguage),
@@ -503,25 +567,53 @@ class ComposeSettingsSheet extends HookConsumerWidget {
                 state.realm.value = value;
               },
               selectedItemBuilder: (context) {
-                return (userRealms.value ?? []).map((_) {
-                  return Row(
+                final items = <Widget>[];
+                items.add(
+                  Row(
                     children: [
-                      if (currentRealm == null)
-                        const CircleAvatar(
-                          radius: 16,
-                          child: Icon(Symbols.link_off, fill: 1),
-                        )
-                      else
+                      const CircleAvatar(
+                        radius: 16,
+                        child: Icon(Symbols.link_off, fill: 1),
+                      ),
+                      const SizedBox(width: 12),
+                      Text('postUnlinkRealm'.tr()),
+                    ],
+                  ),
+                );
+                if (currentRealm != null &&
+                    !(userRealms.value ?? []).any(
+                      (r) => r.id == currentRealm.id,
+                    )) {
+                  items.add(
+                    Row(
+                      children: [
                         ProfilePictureWidget(
                           file: currentRealm.picture,
                           fallbackIcon: Symbols.workspaces,
                           radius: 16,
                         ),
-                      const SizedBox(width: 12),
-                      Text(currentRealm?.name ?? 'postUnlinkRealm'.tr()),
-                    ],
+                        const SizedBox(width: 12),
+                        Text(currentRealm.name),
+                      ],
+                    ),
                   );
-                }).toList();
+                }
+                items.addAll(
+                  (userRealms.value ?? []).map((realm) {
+                    return Row(
+                      children: [
+                        ProfilePictureWidget(
+                          file: realm.picture,
+                          fallbackIcon: Symbols.workspaces,
+                          radius: 16,
+                        ),
+                        const SizedBox(width: 12),
+                        Text(realm.name),
+                      ],
+                    );
+                  }),
+                );
+                return items;
               },
               buttonStyleData: const FormFieldButtonStyleData(
                 padding: EdgeInsets.only(left: 16, right: 8),
@@ -532,25 +624,137 @@ class ComposeSettingsSheet extends HookConsumerWidget {
               ),
             ),
 
-            // Visibility setting
-            Container(
-              decoration: BoxDecoration(
-                border: Border.all(color: colorScheme.outline, width: 1),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: ListTile(
-                leading: Icon(getVisibilityIcon(currentVisibility)),
-                title: Text('postVisibility'.tr()),
-                subtitle: Text(getVisibilityText(currentVisibility).tr()),
-                trailing: const Icon(Symbols.chevron_right),
-                onTap: showVisibilitySheet,
-                shape: RoundedRectangleBorder(
+            DropdownButtonFormField2<int>(
+              isExpanded: true,
+              decoration: InputDecoration(
+                labelText: 'postVisibility'.tr(),
+                contentPadding: const EdgeInsets.symmetric(vertical: 9),
+                border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(12),
                 ),
-                contentPadding: const EdgeInsets.symmetric(
-                  horizontal: 16,
-                  vertical: 8,
-                ),
+              ),
+              items:
+                  [
+                    (
+                      value: 0,
+                      icon: Symbols.public,
+                      title: 'postVisibilityPublic',
+                      description: 'postVisibilityPublicDescription',
+                      requiresIndividual: false,
+                    ),
+                    (
+                      value: 1,
+                      icon: Symbols.group,
+                      title: 'postVisibilityFriends',
+                      description: 'postVisibilityFriendsDescription',
+                      requiresIndividual: true,
+                    ),
+                    (
+                      value: 2,
+                      icon: Symbols.link_off,
+                      title: 'postVisibilityUnlisted',
+                      description: 'postVisibilityUnlistedDescription',
+                      requiresIndividual: false,
+                    ),
+                    (
+                      value: 3,
+                      icon: Symbols.lock,
+                      title: 'postVisibilityPrivate',
+                      description: 'postVisibilityPrivateDescription',
+                      requiresIndividual: false,
+                    ),
+                    (
+                      value: 4,
+                      icon: Symbols.favorite,
+                      title: 'postVisibilityCloseFriends',
+                      description: 'postVisibilityCloseFriendsDescription',
+                      requiresIndividual: true,
+                    ),
+                    (
+                      value: 5,
+                      icon: Symbols.public,
+                      title: 'postVisibilityQuitePublic',
+                      description: 'postVisibilityQuitePublicDescription',
+                      requiresIndividual: false,
+                    ),
+                  ].map((option) {
+                    final enabled =
+                        !option.requiresIndividual || isIndividualPublisher;
+                    return DropdownItem<int>(
+                      height: 66,
+                      value: option.value,
+                      enabled: enabled,
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.center,
+                        children: [
+                          Icon(
+                            option.icon,
+                            color: enabled
+                                ? null
+                                : Theme.of(context).disabledColor,
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Text(
+                                  option.title.tr(),
+                                  style: TextStyle(
+                                    color: enabled
+                                        ? null
+                                        : Theme.of(context).disabledColor,
+                                  ),
+                                ),
+                                Text(
+                                  option.description.tr(),
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: enabled
+                                        ? Theme.of(
+                                            context,
+                                          ).textTheme.bodyMedium?.color
+                                        : Theme.of(context).disabledColor,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ).padding(horizontal: 16, vertical: 12),
+                    );
+                  }).toList(),
+              valueListenable: ValueNotifier(currentVisibility),
+              onChanged: (value) {
+                if (value != null) {
+                  state.visibility.value = value;
+                }
+              },
+              selectedItemBuilder: (context) {
+                return [
+                  (icon: Symbols.public, title: 'postVisibilityPublic'),
+                  (icon: Symbols.group, title: 'postVisibilityFriends'),
+                  (icon: Symbols.link_off, title: 'postVisibilityUnlisted'),
+                  (icon: Symbols.lock, title: 'postVisibilityPrivate'),
+                  (icon: Symbols.favorite, title: 'postVisibilityCloseFriends'),
+                  (icon: Symbols.public, title: 'postVisibilityQuitePublic'),
+                ].map((option) {
+                  return Row(
+                    children: [
+                      Icon(option.icon),
+                      const SizedBox(width: 12),
+                      Flexible(child: Text(option.title.tr())),
+                    ],
+                  );
+                }).toList();
+              },
+              buttonStyleData: const FormFieldButtonStyleData(
+                padding: EdgeInsets.only(left: 16, right: 8),
+                height: 40,
+              ),
+              menuItemStyleData: const MenuItemStyleData(
+                padding: EdgeInsets.zero,
               ),
             ),
           ],

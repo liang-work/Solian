@@ -41,6 +41,11 @@ class ChatRoomsRefreshEvent {
   const ChatRoomsRefreshEvent();
 }
 
+/// Event fired when chat groups need to be refreshed.
+class ChatGroupsRefreshEvent {
+  const ChatGroupsRefreshEvent();
+}
+
 /// Event fired when global chat message sync completes.
 class ChatMessagesSyncedEvent {
   final Set<String> roomIds;
@@ -79,11 +84,17 @@ class ChatTypingEvent {
   final String roomId;
   final SnChatMember sender;
   final bool isTyping;
+  final String activityType;
+  final double? progress;
+  final DateTime? timestamp;
 
   const ChatTypingEvent({
     required this.roomId,
     required this.sender,
     required this.isTyping,
+    this.activityType = 'typing',
+    this.progress,
+    this.timestamp,
   });
 }
 
@@ -92,6 +103,13 @@ class OidcAuthCallbackEvent {
   final String challengeId;
 
   const OidcAuthCallbackEvent(this.challengeId);
+}
+
+/// Event fired when a cross-device login approval request is received
+class ChallengePendingEvent {
+  final Map<String, dynamic> data;
+
+  const ChallengePendingEvent(this.data);
 }
 
 /// Event fired to trigger the command palette
@@ -104,9 +122,9 @@ class ShowComposeSheetEvent {
   const ShowComposeSheetEvent();
 }
 
-/// Event fired to show the notification sheet
-class ShowNotificationSheetEvent {
-  const ShowNotificationSheetEvent();
+/// Event fired to show the notification modal
+class ShowNotificationModalEvent {
+  const ShowNotificationModalEvent();
 }
 
 /// Event fired to show the thought sheet
@@ -203,4 +221,81 @@ class MlsE2eeCheckCompletedEvent {
     required this.mlsGroupId,
     required this.success,
   });
+}
+
+// ============================================
+// Wallet Real-time Events
+// ============================================
+
+/// Event fired when a wallet transaction is created
+class WalletTransactionCreatedEvent {
+  final SnTransaction transaction;
+
+  const WalletTransactionCreatedEvent(this.transaction);
+}
+
+/// Event fired when a wallet transaction is confirmed
+class WalletTransactionConfirmedEvent {
+  final SnTransaction transaction;
+
+  const WalletTransactionConfirmedEvent(this.transaction);
+}
+
+/// Event fired when a wallet transaction is refunded
+class WalletTransactionRefundedEvent {
+  final SnTransaction transaction;
+
+  const WalletTransactionRefundedEvent(this.transaction);
+}
+
+/// Event fired when a wallet transaction expires
+class WalletTransactionExpiredEvent {
+  final SnTransaction transaction;
+
+  const WalletTransactionExpiredEvent(this.transaction);
+}
+
+/// Event fired when a wallet pocket balance is updated
+class WalletPocketUpdatedEvent {
+  final String walletId;
+  final String currency;
+  final double amount;
+  final double heldAmount;
+  final double availableAmount;
+
+  const WalletPocketUpdatedEvent({
+    required this.walletId,
+    required this.currency,
+    required this.amount,
+    required this.heldAmount,
+    required this.availableAmount,
+  });
+}
+
+/// Event fired when a contribution is made to a raising fund
+class WalletFundContributedEvent {
+  final String fundId;
+  final String contributorAccountId;
+  final double amount;
+  final String currency;
+  final double raisedAmount;
+  final double targetAmount;
+  final int status;
+
+  const WalletFundContributedEvent({
+    required this.fundId,
+    required this.contributorAccountId,
+    required this.amount,
+    required this.currency,
+    required this.raisedAmount,
+    required this.targetAmount,
+    required this.status,
+  });
+}
+
+/// Event fired when a raising fund reaches its target
+class WalletFundCompletedEvent {
+  final String fundId;
+
+  const WalletFundCompletedEvent(this.fundId);
 }

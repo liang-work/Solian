@@ -12,12 +12,22 @@ _SnPublisher _$SnPublisherFromJson(Map<String, dynamic> json) => _SnPublisher(
   name: json['name'] as String? ?? '',
   nick: json['nick'] as String? ?? '',
   bio: json['bio'] as String? ?? '',
+  realmNick: json['realm_nick'] as String?,
+  realmBio: json['realm_bio'] as String?,
+  realmExperience: (json['realm_experience'] as num?)?.toInt(),
+  realmLevel: (json['realm_level'] as num?)?.toInt(),
+  realmLevelingProgress: (json['realm_leveling_progress'] as num?)?.toDouble(),
+  realmLabel: json['realm_label'] == null
+      ? null
+      : SnRealmLabel.fromJson(json['realm_label'] as Map<String, dynamic>),
   picture: json['picture'] == null
       ? null
-      : SnCloudFile.fromJson(json['picture'] as Map<String, dynamic>),
+      : SnCloudFileReference.fromJson(json['picture'] as Map<String, dynamic>),
   background: json['background'] == null
       ? null
-      : SnCloudFile.fromJson(json['background'] as Map<String, dynamic>),
+      : SnCloudFileReference.fromJson(
+          json['background'] as Map<String, dynamic>,
+        ),
   account: json['account'] == null
       ? null
       : SnAccount.fromJson(json['account'] as Map<String, dynamic>),
@@ -43,6 +53,8 @@ _SnPublisher _$SnPublisherFromJson(Map<String, dynamic> json) => _SnPublisher(
   isShadowbanned: json['is_shadowbanned'] as bool? ?? false,
   isGatekept: json['is_gatekept'] as bool? ?? false,
   isModerateSubscription: json['is_moderate_subscription'] as bool? ?? false,
+  rating: (json['rating'] as num?)?.toDouble() ?? 100.0,
+  ratingLevel: (json['rating_level'] as num?)?.toInt() ?? 0,
 );
 
 Map<String, dynamic> _$SnPublisherToJson(_SnPublisher instance) =>
@@ -52,6 +64,12 @@ Map<String, dynamic> _$SnPublisherToJson(_SnPublisher instance) =>
       'name': instance.name,
       'nick': instance.nick,
       'bio': instance.bio,
+      'realm_nick': instance.realmNick,
+      'realm_bio': instance.realmBio,
+      'realm_experience': instance.realmExperience,
+      'realm_level': instance.realmLevel,
+      'realm_leveling_progress': instance.realmLevelingProgress,
+      'realm_label': instance.realmLabel?.toJson(),
       'picture': instance.picture?.toJson(),
       'background': instance.background?.toJson(),
       'account': instance.account?.toJson(),
@@ -65,6 +83,8 @@ Map<String, dynamic> _$SnPublisherToJson(_SnPublisher instance) =>
       'is_shadowbanned': instance.isShadowbanned,
       'is_gatekept': instance.isGatekept,
       'is_moderate_subscription': instance.isModerateSubscription,
+      'rating': instance.rating,
+      'rating_level': instance.ratingLevel,
     };
 
 _SnPublisherMember _$SnPublisherMemberFromJson(Map<String, dynamic> json) =>

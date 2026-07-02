@@ -1,5 +1,6 @@
 import 'dart:math' as math;
 import 'dart:ui';
+import 'package:auto_route/auto_route.dart';
 import 'package:dismissible_page/dismissible_page.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter_blurhash/flutter_blurhash.dart';
@@ -8,15 +9,17 @@ import 'package:flutter_hooks/flutter_hooks.dart';
 import 'package:gap/gap.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 import 'package:island/core/config.dart';
-import 'package:island/drive/widgets/cloud_files.dart';
 import 'package:island/core/widgets/content/cloud_file_lightbox.dart';
 import 'package:island/core/widgets/content/sensitive.dart';
+import 'package:island/drive/widgets/cloud_files.dart';
+import 'package:island/route.gr.dart';
 import 'package:material_symbols_icons/symbols.dart';
 import 'package:styled_widget/styled_widget.dart';
 import 'package:solar_network_sdk/solar_network_sdk.dart';
 
 class CloudFileList extends HookConsumerWidget {
-  final List<SnCloudFile> files;
+  final List<IDisplayableCloudFile> files;
+  final SnPost? sourcePost;
   final double maxHeight;
   final double maxWidth;
   final double? minWidth;
@@ -25,9 +28,12 @@ class CloudFileList extends HookConsumerWidget {
   final EdgeInsets? padding;
   final bool isColumn;
   final bool initiallyCollapsed;
+  final String heroTagPrefix;
+  final double borderRadius;
   const CloudFileList({
     super.key,
     required this.files,
+    this.sourcePost,
     this.maxHeight = 560,
     this.maxWidth = double.infinity,
     this.minWidth,
@@ -36,26 +42,20 @@ class CloudFileList extends HookConsumerWidget {
     this.padding,
     this.isColumn = false,
     this.initiallyCollapsed = true,
+    this.heroTagPrefix = 'cloud-file',
+    this.borderRadius = 8,
   });
+
+  String _heroTag(String fileId) => '$heroTagPrefix-$fileId';
 
   double calculateAspectRatio() {
     final ratios = <double>[];
 
     // Collect all valid ratios
     for (final file in files) {
-      final meta = file.fileMeta;
-      if (meta is Map<String, dynamic> && meta.containsKey('ratio')) {
-        final ratioValue = meta['ratio'];
-        if (ratioValue is num && ratioValue > 0) {
-          ratios.add(ratioValue.toDouble());
-        } else if (ratioValue is String) {
-          try {
-            final parsed = double.parse(ratioValue);
-            if (parsed > 0) ratios.add(parsed);
-          } catch (_) {
-            // Skip invalid string ratios
-          }
-        }
+      final ratioValue = file.ratio;
+      if (ratioValue != null && ratioValue > 0) {
+        ratios.add(ratioValue.toDouble());
       }
     }
 
@@ -140,7 +140,7 @@ class CloudFileList extends HookConsumerWidget {
     final viewableFiles = files
         .asMap()
         .entries
-        .where((e) => e.value.mimeType?.startsWith('image') == true)
+        .where((e) => e.value.mimeType.startsWith('image') == true)
         .toList();
     final viewableIndex = viewableFiles.indexWhere((e) => e.key == index);
     if (viewableIndex == -1) return;
@@ -148,10 +148,15 @@ class CloudFileList extends HookConsumerWidget {
       CloudFileLightbox(
         items: viewableFiles.map((e) => e.value).toList(),
         initialIndex: viewableIndex,
-        heroTag: 'cloud-file-${files[index].id}',
+        heroTag: _heroTag(files[index].id),
+        sourcePost: sourcePost,
       ),
       rootNavigator: true,
     );
+  }
+
+  void _openFileDetail(BuildContext context, String fileId) {
+    context.router.push(FileDetailRoute(id: fileId, sourcePost: sourcePost));
   }
 
   @override
@@ -176,20 +181,22 @@ class CloudFileList extends HookConsumerWidget {
 
       for (var i = 0; i < filesToShow.length; i++) {
         final file = filesToShow[i];
-        final isImage = file.mimeType?.startsWith('image') ?? false;
-        final isAudio = file.mimeType?.startsWith('audio') ?? false;
+        final isImage = file.mimeType.startsWith('image');
+        final isAudio = file.mimeType.startsWith('audio');
         final widgetItem = ClipRRect(
-          borderRadius: const BorderRadius.all(Radius.circular(8)),
+          borderRadius: BorderRadius.all(Radius.circular(borderRadius)),
           child: _CloudFileListEntry(
             file: file,
-            heroTag: 'cloud-file-${files[i].id}',
+            heroTag: _heroTag(files[i].id),
             isImage: isImage,
             disableZoomIn: disableZoomIn,
+            sourcePost: sourcePost,
             onTap: () {
-              if (!isImage) {
+              if (isImage) {
+                _openLightbox(context, i);
                 return;
               }
-              _openLightbox(context, i);
+              _openFileDetail(context, file.id);
             },
           ),
         );
@@ -198,9 +205,12 @@ class CloudFileList extends HookConsumerWidget {
         if (isAudio) {
           item = SizedBox(height: 120, child: widgetItem);
         } else {
-          item = AspectRatio(
-            aspectRatio: (file.fileMeta?['ratio'] as num?)?.toDouble() ?? 1.0,
-            child: widgetItem,
+          item = ConstrainedBox(
+            constraints: BoxConstraints(maxHeight: maxHeight),
+            child: AspectRatio(
+              aspectRatio: (file.ratio as num?)?.toDouble() ?? 1.0,
+              child: widgetItem,
+            ),
           );
         }
         children.add(item);
@@ -238,44 +248,43 @@ class CloudFileList extends HookConsumerWidget {
                     ConstrainedBox(
                       constraints: BoxConstraints(
                         maxWidth: files.length == 1 ? double.infinity : 320,
+                        maxHeight: maxHeight,
                       ),
-                      child:
-                          filesToShow[i].mimeType?.startsWith('audio') ?? false
+                      child: filesToShow[i].mimeType.startsWith('audio')
                           ? SizedBox(
                               height: 120,
                               child: _CloudFileListEntry(
                                 file: filesToShow[i],
-                                heroTag: 'cloud-file-${files[i].id}',
+                                heroTag: _heroTag(files[i].id),
                                 isImage: false,
                                 disableZoomIn: disableZoomIn,
+                                sourcePost: sourcePost,
                               ),
                             )
                           : AspectRatio(
                               aspectRatio:
-                                  (filesToShow[i].fileMeta?['ratio'] as num?)
-                                      ?.toDouble() ??
+                                  (filesToShow[i].ratio as num?)?.toDouble() ??
                                   1.0,
                               child: _CloudFileListEntry(
                                 file: filesToShow[i],
-                                heroTag: 'cloud-file-${files[i].id}',
-                                isImage:
-                                    filesToShow[i].mimeType?.startsWith(
-                                      'image',
-                                    ) ??
-                                    false,
+                                heroTag: _heroTag(files[i].id),
+                                isImage: filesToShow[i].mimeType.startsWith(
+                                  'image',
+                                ),
                                 disableZoomIn: disableZoomIn,
+                                sourcePost: sourcePost,
                                 onTap: () {
-                                  if (!(filesToShow[i].mimeType?.startsWith(
-                                        'image',
-                                      ) ??
-                                      false)) {
+                                  if (filesToShow[i].mimeType.startsWith(
+                                    'image',
+                                  )) {
+                                    openLightbox(i);
                                     return;
                                   }
-                                  openLightbox(i);
+                                  _openFileDetail(context, filesToShow[i].id);
                                 },
                               ),
                             ),
-                    ).clipRRect(all: 8),
+                    ).clipRRect(all: borderRadius),
                 ],
               ),
             ),
@@ -327,21 +336,37 @@ class CloudFileList extends HookConsumerWidget {
     }
 
     if (files.length == 1) {
-      final isImage = files.first.mimeType?.startsWith('image') ?? false;
-      final isAudio = files.first.mimeType?.startsWith('audio') ?? false;
-      final ratio = files.first.fileMeta?['ratio'] as num?;
+      final isImage = files.first.mimeType.startsWith('image');
+      final isAudio = files.first.mimeType.startsWith('audio');
+      final opensInDetail = !isImage && !files.first.isFolder;
+      final ratio = files.first.ratio as num?;
       final widgetItem = ClipRRect(
-        borderRadius: const BorderRadius.all(Radius.circular(8)),
+        borderRadius: BorderRadius.all(Radius.circular(borderRadius)),
         child: _CloudFileListEntry(
           file: files.first,
-          heroTag: 'cloud-file-${files.first.id}',
+          heroTag: _heroTag(files.first.id),
           isImage: isImage,
           disableZoomIn: disableZoomIn,
+          sourcePost: sourcePost,
           onTap: () {
-            if (!isImage) {
+            if (files.first.isFolder) {
+              showModalBottomSheet(
+                context: context,
+                isScrollControlled: true,
+                builder: (_) => FolderContentsSheet(
+                  folderId: files.first.id,
+                  folderName: files.first.name,
+                ),
+              );
               return;
             }
-            openLightbox(0);
+            if (isImage) {
+              openLightbox(0);
+              return;
+            }
+            if (opensInDetail) {
+              _openFileDetail(context, files.first.id);
+            }
           },
         ),
       );
@@ -354,7 +379,7 @@ class CloudFileList extends HookConsumerWidget {
         ),
         child: (ratio == null && isImage)
             ? IntrinsicWidth(child: IntrinsicHeight(child: widgetItem))
-            : (ratio == null && isAudio)
+            : (ratio == null && (isAudio || opensInDetail))
             ? IntrinsicHeight(child: widgetItem)
             : AspectRatio(
                 aspectRatio: ratio?.toDouble() ?? 1,
@@ -363,9 +388,7 @@ class CloudFileList extends HookConsumerWidget {
       );
     }
 
-    final allImages = !files.any(
-      (e) => e.mimeType == null || !e.mimeType!.startsWith('image'),
-    );
+    final allImages = !files.any((e) => !e.mimeType.startsWith('image'));
 
     if (allImages) {
       return ConstrainedBox(
@@ -384,22 +407,20 @@ class CloudFileList extends HookConsumerWidget {
                   640.0,
                 );
 
-                return CarouselView(
-                  itemSnapping: true,
+                return _HoverCarouselGallery(
                   itemExtent: itemExtent,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: const BorderRadius.all(Radius.circular(16)),
-                  ),
+                  itemCount: files.length,
+                  borderRadius: borderRadius,
                   children: [
                     for (var i = 0; i < files.length; i++)
                       Stack(
                         children: [
                           _CloudFileListEntry(
                             file: files[i],
-                            heroTag: 'cloud-file-${files[i].id}',
-                            isImage:
-                                files[i].mimeType?.startsWith('image') ?? false,
+                            heroTag: _heroTag(files[i].id),
+                            isImage: files[i].mimeType.startsWith('image'),
                             disableZoomIn: disableZoomIn,
+                            sourcePost: sourcePost,
                           ),
                           Positioned(
                             bottom: 12,
@@ -415,11 +436,24 @@ class CloudFileList extends HookConsumerWidget {
                         ],
                       ),
                   ],
-                  onTap: (i) {
-                    if (!(files[i].mimeType?.startsWith('image') ?? false)) {
+                  onTap: (index) {
+                    if (files[index].isFolder) {
+                      showModalBottomSheet(
+                        context: context,
+                        isScrollControlled: true,
+                        builder: (_) => FolderContentsSheet(
+                          folderId: files[index].id,
+                          folderName: files[index].name,
+                        ),
+                      );
                       return;
                     }
-                    openLightbox(i);
+                    final isImage = files[index].mimeType.startsWith('image');
+                    if (isImage) {
+                      openLightbox(index);
+                      return;
+                    }
+                    _openFileDetail(context, files[index].id);
                   },
                 );
               },
@@ -433,50 +467,308 @@ class CloudFileList extends HookConsumerWidget {
       constraints: BoxConstraints(maxHeight: maxHeight, minWidth: maxWidth),
       child: AspectRatio(
         aspectRatio: calculateAspectRatio(),
-        child: ListView.separated(
-          scrollDirection: Axis.horizontal,
-          itemCount: files.length,
+        child: _HoverScrollableGallery(
           padding: padding,
-          itemBuilder: (context, index) {
-            return AspectRatio(
-              aspectRatio: files[index].fileMeta?['ratio'] is num
-                  ? files[index].fileMeta!['ratio'].toDouble()
-                  : 1.0,
-              child: Stack(
-                children: [
-                  ClipRRect(
-                    borderRadius: const BorderRadius.all(Radius.circular(16)),
-                    child: _CloudFileListEntry(
-                      file: files[index],
-                      heroTag: 'cloud-file-${files[index].id}',
-                      isImage:
-                          files[index].mimeType?.startsWith('image') ?? false,
-                      disableZoomIn: disableZoomIn,
-                      onTap: () {
-                        if (!(files[index].mimeType?.startsWith('image') ??
-                            false)) {
-                          return;
-                        }
-                        openLightbox(index);
-                      },
+          children: [
+            for (var index = 0; index < files.length; index++)
+              AspectRatio(
+                aspectRatio: files[index].ratio ?? 1.0,
+                child: Stack(
+                  children: [
+                    ClipRRect(
+                      borderRadius: BorderRadius.all(
+                        Radius.circular(borderRadius),
+                      ),
+                      child: _CloudFileListEntry(
+                        file: files[index],
+                        heroTag: _heroTag(files[index].id),
+                        isImage: files[index].mimeType.startsWith('image'),
+                        disableZoomIn: disableZoomIn,
+                        sourcePost: sourcePost,
+                        onTap: () {
+                          if (files[index].mimeType.startsWith('image')) {
+                            openLightbox(index);
+                            return;
+                          }
+                          _openFileDetail(context, files[index].id);
+                        },
+                      ),
                     ),
-                  ),
-                  Positioned(
-                    bottom: 12,
-                    left: 16,
-                    child: Text('${index + 1}/${files.length}')
-                        .textColor(Colors.white)
-                        .textShadow(
-                          color: Colors.black54,
-                          offset: Offset(1, 1),
-                          blurRadius: 3,
-                        ),
-                  ),
-                ],
+                    Positioned(
+                      bottom: 12,
+                      left: 16,
+                      child: Text('${index + 1}/${files.length}')
+                          .textColor(Colors.white)
+                          .textShadow(
+                            color: Colors.black54,
+                            offset: Offset(1, 1),
+                            blurRadius: 3,
+                          ),
+                    ),
+                  ],
+                ),
               ),
-            );
-          },
-          separatorBuilder: (_, _) => const Gap(8),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _HoverScrollableGallery extends HookWidget {
+  final List<Widget> children;
+  final EdgeInsets? padding;
+
+  const _HoverScrollableGallery({required this.children, this.padding});
+
+  @override
+  Widget build(BuildContext context) {
+    final controller = useScrollController();
+    final isHovered = useState(false);
+    final canScrollLeft = useState(false);
+    final canScrollRight = useState(false);
+
+    void updateScrollState() {
+      if (!controller.hasClients) {
+        canScrollLeft.value = false;
+        canScrollRight.value = false;
+        return;
+      }
+
+      final position = controller.position;
+      canScrollLeft.value = position.pixels > 0;
+      canScrollRight.value = position.pixels < position.maxScrollExtent;
+    }
+
+    useEffect(() {
+      void listener() => updateScrollState();
+
+      controller.addListener(listener);
+      WidgetsBinding.instance.addPostFrameCallback((_) => updateScrollState());
+
+      return () => controller.removeListener(listener);
+    }, [controller, children.length, padding]);
+
+    Future<void> scrollBy(double direction) async {
+      if (!controller.hasClients) return;
+      final position = controller.position;
+      final delta = math.max(position.viewportDimension * 0.8, 240.0);
+      final target = (position.pixels + delta * direction).clamp(
+        0.0,
+        position.maxScrollExtent,
+      );
+      await controller.animateTo(
+        target,
+        duration: const Duration(milliseconds: 220),
+        curve: Curves.easeOutCubic,
+      );
+    }
+
+    final scrollBehavior = ScrollConfiguration.of(context).copyWith(
+      dragDevices: {PointerDeviceKind.touch, PointerDeviceKind.trackpad},
+    );
+
+    return MouseRegion(
+      onEnter: (_) => isHovered.value = true,
+      onExit: (_) => isHovered.value = false,
+      child: Stack(
+        children: [
+          Positioned.fill(
+            child: ScrollConfiguration(
+              behavior: scrollBehavior,
+              child: ListView.separated(
+                controller: controller,
+                scrollDirection: Axis.horizontal,
+                padding: padding,
+                itemCount: children.length,
+                itemBuilder: (context, index) => children[index],
+                separatorBuilder: (_, _) => const Gap(8),
+              ),
+            ),
+          ),
+          Positioned(
+            left: 12,
+            top: 0,
+            bottom: 0,
+            child: Center(
+              child: _AnimatedScrollArrowButton(
+                icon: Symbols.chevron_left,
+                isVisible: isHovered.value && canScrollLeft.value,
+                hiddenOffset: const Offset(-0.4, 0),
+                onTap: () => scrollBy(-1),
+              ),
+            ),
+          ),
+          Positioned(
+            right: 12,
+            top: 0,
+            bottom: 0,
+            child: Center(
+              child: _AnimatedScrollArrowButton(
+                icon: Symbols.chevron_right,
+                isVisible: isHovered.value && canScrollRight.value,
+                hiddenOffset: const Offset(0.4, 0),
+                onTap: () => scrollBy(1),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _HoverCarouselGallery extends HookWidget {
+  final List<Widget> children;
+  final double itemExtent;
+  final int itemCount;
+  final ValueChanged<int>? onTap;
+  final double borderRadius;
+
+  const _HoverCarouselGallery({
+    required this.children,
+    required this.itemExtent,
+    required this.itemCount,
+    this.onTap,
+    this.borderRadius = 16,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final controller = useCarouselController();
+    final isHovered = useState(false);
+    final currentIndex = useState(0);
+
+    void updateCurrentIndex() {
+      if (!controller.hasClients) {
+        currentIndex.value = 0;
+        return;
+      }
+
+      final nextIndex = (controller.offset / itemExtent).round().clamp(
+        0,
+        itemCount - 1,
+      );
+      if (currentIndex.value != nextIndex) {
+        currentIndex.value = nextIndex;
+      }
+    }
+
+    useEffect(() {
+      void listener() => updateCurrentIndex();
+
+      controller.addListener(listener);
+      WidgetsBinding.instance.addPostFrameCallback((_) => updateCurrentIndex());
+
+      return () => controller.removeListener(listener);
+    }, [controller, itemExtent, itemCount]);
+
+    Future<void> scrollBy(int delta) async {
+      final targetIndex = (currentIndex.value + delta).clamp(0, itemCount - 1);
+      if (targetIndex == currentIndex.value) return;
+      await controller.animateToItem(
+        targetIndex,
+        duration: const Duration(milliseconds: 220),
+        curve: Curves.easeOutCubic,
+      );
+      currentIndex.value = targetIndex;
+    }
+
+    final scrollBehavior = ScrollConfiguration.of(context).copyWith(
+      dragDevices: {PointerDeviceKind.touch, PointerDeviceKind.trackpad},
+    );
+
+    return MouseRegion(
+      onEnter: (_) => isHovered.value = true,
+      onExit: (_) => isHovered.value = false,
+      child: Stack(
+        children: [
+          Positioned.fill(
+            child: ScrollConfiguration(
+              behavior: scrollBehavior,
+              child: CarouselView(
+                controller: controller,
+                itemSnapping: true,
+                itemExtent: itemExtent,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.all(Radius.circular(borderRadius)),
+                ),
+                onTap: onTap,
+                children: children,
+              ),
+            ),
+          ),
+          Positioned(
+            left: 12,
+            top: 0,
+            bottom: 0,
+            child: Center(
+              child: _AnimatedScrollArrowButton(
+                icon: Symbols.chevron_left,
+                isVisible: isHovered.value && currentIndex.value > 0,
+                hiddenOffset: const Offset(-0.4, 0),
+                onTap: () => scrollBy(-1),
+              ),
+            ),
+          ),
+          Positioned(
+            right: 12,
+            top: 0,
+            bottom: 0,
+            child: Center(
+              child: _AnimatedScrollArrowButton(
+                icon: Symbols.chevron_right,
+                isVisible:
+                    isHovered.value && currentIndex.value < itemCount - 1,
+                hiddenOffset: const Offset(0.4, 0),
+                onTap: () => scrollBy(1),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _AnimatedScrollArrowButton extends StatelessWidget {
+  final IconData icon;
+  final bool isVisible;
+  final Offset hiddenOffset;
+  final VoidCallback onTap;
+
+  const _AnimatedScrollArrowButton({
+    required this.icon,
+    required this.isVisible,
+    required this.hiddenOffset,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return IgnorePointer(
+      ignoring: !isVisible,
+      child: AnimatedSlide(
+        duration: const Duration(milliseconds: 180),
+        curve: Curves.easeOutCubic,
+        offset: isVisible ? Offset.zero : hiddenOffset,
+        child: AnimatedOpacity(
+          duration: const Duration(milliseconds: 180),
+          curve: Curves.easeOutCubic,
+          opacity: isVisible ? 1 : 0,
+          child: Material(
+            color: Colors.black45,
+            shape: const CircleBorder(),
+            clipBehavior: Clip.antiAlias,
+            child: InkWell(
+              onTap: onTap,
+              child: SizedBox(
+                width: 40,
+                height: 40,
+                child: Icon(icon, color: Colors.white, size: 20),
+              ),
+            ),
+          ),
         ),
       ),
     );
@@ -484,11 +776,12 @@ class CloudFileList extends HookConsumerWidget {
 }
 
 class _CloudFileListEntry extends HookConsumerWidget {
-  final SnCloudFile file;
+  final IDisplayableCloudFile file;
   final String heroTag;
   final bool isImage;
   final bool disableZoomIn;
   final VoidCallback? onTap;
+  final SnPost? sourcePost;
 
   const _CloudFileListEntry({
     required this.file,
@@ -496,6 +789,7 @@ class _CloudFileListEntry extends HookConsumerWidget {
     required this.isImage,
     required this.disableZoomIn,
     this.onTap,
+    this.sourcePost,
   });
 
   @override
@@ -507,14 +801,13 @@ class _CloudFileListEntry extends HookConsumerWidget {
     final showDataSaving = useState(!dataSaving);
     final lockedByDS = dataSaving && !showDataSaving.value;
     final lockedByMature = file.sensitiveMarks.isNotEmpty && !showMature.value;
-    final meta = file.fileMeta is Map ? file.fileMeta as Map : const {};
 
     final fit = BoxFit.cover;
 
     Widget bg = const SizedBox.shrink();
     if (isImage) {
-      if (meta['blur'] is String) {
-        bg = BlurHash(hash: meta['blur'] as String);
+      if (file.blurhash != null && file.blurhash!.isNotEmpty) {
+        bg = BlurHash(hash: file.blurhash!);
       } else if (!lockedByDS && !lockedByMature) {
         bg = ImageFiltered(
           imageFilter: ImageFilter.blur(sigmaX: 50, sigmaY: 50),
@@ -539,12 +832,14 @@ class _CloudFileListEntry extends HookConsumerWidget {
                   noBlurhash: true,
                   fit: fit,
                   useInternalGate: false,
+                  sourcePost: sourcePost,
                 )
               : CloudFileWidget(
                   item: file,
                   heroTag: heroTag,
                   fit: fit,
                   useInternalGate: false,
+                  sourcePost: sourcePost,
                 ))
         : const SizedBox.shrink();
 
@@ -602,6 +897,13 @@ class _CloudFileListEntry extends HookConsumerWidget {
           showDataSaving.value = true;
         } else if (lockedByMature) {
           showMature.value = true;
+        } else if (file.isFolder) {
+          showModalBottomSheet(
+            context: context,
+            isScrollControlled: true,
+            builder: (_) =>
+                FolderContentsSheet(folderId: file.id, folderName: file.name),
+          );
         } else {
           onTap?.call();
         }
@@ -612,7 +914,7 @@ class _CloudFileListEntry extends HookConsumerWidget {
 }
 
 class _SensitiveOverlay extends StatelessWidget {
-  final SnCloudFile file;
+  final IDisplayableCloudFile file;
 
   const _SensitiveOverlay({required this.file, super.key});
 

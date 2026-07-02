@@ -9,12 +9,17 @@ import 'package:flutter_hooks/flutter_hooks.dart';
 import 'package:gap/gap.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 import 'package:island/chat/e2ee_message_display.dart';
+import 'package:island/chat/models/redirect_data.dart';
 import 'package:island/chat/widgets/message_content.dart';
 import 'package:island/chat/widgets/chat_message_reaction_sheet.dart';
 import 'package:island/chat/widgets/chat_room_member_card.dart';
 import 'package:island/chat/widgets/message_indicators.dart';
 import 'package:island/chat/widgets/message_sender_info.dart';
+import 'package:island/chat/widgets/online_avatar_badge.dart';
 import 'package:island/chat/messages_notifier.dart';
+import 'package:island/accounts/account_pod.dart';
+import 'package:island/accounts/widgets/account/account_name.dart';
+import 'package:island/accounts/widgets/account/account_pfc.dart';
 import 'package:island/data/message.dart';
 import 'package:island/chat/pods/chat_room.dart';
 import 'package:island/core/translate.dart';
@@ -22,6 +27,7 @@ import 'package:island/core/config.dart';
 import 'package:island/core/services/time.dart';
 import 'package:island/shared/widgets/alert.dart';
 import 'package:island/core/widgets/content/cloud_file_collection.dart';
+import 'package:island/shared/widgets/content/markdown.dart';
 import 'package:island/shared/widgets/content/image.dart';
 import 'package:island/drive/widgets/cloud_files.dart';
 import 'package:island/core/widgets/embeds/embed_list.dart';
@@ -29,7 +35,10 @@ import 'package:island/posts/widgets/compose/post_shared.dart';
 import 'package:material_symbols_icons/material_symbols_icons.dart';
 import 'package:styled_widget/styled_widget.dart';
 import 'package:island/shared/widgets/layouts/sheet_scaffold.dart';
+import 'package:super_context_menu/super_context_menu.dart';
 import 'package:solar_network_sdk/solar_network_sdk.dart';
+
+final kTextSelectable = !kIsWeb && (Platform.isAndroid || Platform.isIOS);
 
 class MessageItemAction {
   static const String edit = "edit";
@@ -37,6 +46,9 @@ class MessageItemAction {
   static const String reply = "reply";
   static const String forward = "forward";
   static const String resend = "resend";
+  static const String redirect = "redirect";
+  static const String pin = "pin";
+  static const String unpin = "unpin";
 }
 
 Map<String, int> getMessageReactionsCount(LocalChatMessage message) {
@@ -60,6 +72,8 @@ class MessageItem extends HookConsumerWidget {
   final Function(String action)? onAction;
   final Map<int, double?>? progress;
   final bool showAvatar;
+  final bool showBubbleAvatar;
+  final bool showColumnAvatar;
   final Function(String messageId) onJump;
   final bool isSelectionMode;
   final bool isSelected;
@@ -73,6 +87,8 @@ class MessageItem extends HookConsumerWidget {
     required this.onAction,
     required this.progress,
     required this.showAvatar,
+    this.showBubbleAvatar = true,
+    this.showColumnAvatar = true,
     required this.onJump,
     this.isSelectionMode = false,
     this.isSelected = false,
@@ -80,8 +96,15 @@ class MessageItem extends HookConsumerWidget {
     this.onEnterSelectionMode,
   });
 
-  static const kFlashDuration = 300;
-  static const kFlashInterval = 120;
+  static const kFlashStepDuration = 120;
+  static const kFlashAnimationDuration = 100;
+
+  bool get _hasSelectableText {
+    final remoteMessage = message.toRemoteMessage();
+    final resolvedDisplay = resolveE2eeDisplayContentForMessage(remoteMessage);
+    final content = resolvedDisplay.content?.trim() ?? '';
+    return content.isNotEmpty;
+  }
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -92,7 +115,20 @@ class MessageItem extends HookConsumerWidget {
       messagesProvider(message.roomId).notifier,
     );
 
+    final isPinned = messagesNotifier.isMessagePinned(message.id);
+    final roomAsync = ref.watch(chatRoomProvider(message.roomId));
+    final identityAsync = ref.watch(chatRoomIdentityProvider(message.roomId));
+    final room = roomAsync.value;
+    final identity = identityAsync.value;
+    final canPin = room == null
+        ? false
+        : room.type ==
+              1 // DM: any member can pin
+        ? true
+        : room.accountId == identity?.accountId; // Group: owner only
+
     final isMobile = !kIsWeb && (Platform.isAndroid || Platform.isIOS);
+    final swipeEnabled = isMobile && onAction != null && !isSelectionMode;
 
     final currentLanguage = context.locale.toString();
     final translatableLanguage = resolvedDisplay.content?.isNotEmpty ?? false;
@@ -127,45 +163,50 @@ class MessageItem extends HookConsumerWidget {
       }
     }
 
-    final flashing = ref.watch(
-      flashingMessagesProvider.select((set) => set.contains(message.id)),
+    final flashToken = ref.watch(
+      flashingMessagesProvider.select((map) => map[message.id]),
     );
 
-    final isFlashing = useState(false);
+    final flashOpacity = useState(0.0);
     final flashTimer = useState<Timer?>(null);
 
     useEffect(() {
-      if (flashing) {
+      if (flashToken != null) {
+        const pulseSequence = [1.0, 0.0, 0.82, 0.0, 0.55, 0.0];
+        var step = 0;
+
         flashTimer.value?.cancel();
-        isFlashing.value = true;
+        flashOpacity.value = pulseSequence[step];
+
         flashTimer.value = Timer.periodic(
-          const Duration(milliseconds: kFlashInterval),
+          const Duration(milliseconds: kFlashStepDuration),
           (timer) {
-            isFlashing.value = !isFlashing.value;
-            if (timer.tick >= 6) {
-              // 6 ticks: 1, 0, 1, 0, 1, 0
+            step++;
+            if (step >= pulseSequence.length) {
               timer.cancel();
               flashTimer.value = null;
-              isFlashing.value = false;
+              flashOpacity.value = 0;
               ref
                   .read(flashingMessagesProvider.notifier)
-                  .update((set) => set.difference({message.id}));
+                  .clearMessage(message.id);
+              return;
             }
+            flashOpacity.value = pulseSequence[step];
           },
         );
       } else {
         flashTimer.value?.cancel();
         flashTimer.value = null;
-        isFlashing.value = false;
+        flashOpacity.value = 0;
       }
       return () {
         flashTimer.value?.cancel();
       };
-    }, [flashing]);
+    }, [flashToken, message.id, ref]);
 
-    final flashColor = isFlashing.value
-        ? Theme.of(context).colorScheme.primaryContainer.withOpacity(0.8)
-        : Colors.transparent;
+    final flashColor = Theme.of(
+      context,
+    ).colorScheme.primaryContainer.withOpacity(0.34 * flashOpacity.value);
 
     final isHovered = useState(false);
     final reacting = useState(false);
@@ -185,7 +226,7 @@ class MessageItem extends HookConsumerWidget {
       reacting.value = false;
     }
 
-    void openReactionSheet() {
+    void openReactionSheet({int initialTabIndex = 0}) {
       showModalBottomSheet(
         context: context,
         useRootNavigator: true,
@@ -194,8 +235,15 @@ class MessageItem extends HookConsumerWidget {
           reactionsCount: reactionsCount,
           reactionsMade: reactionsMade,
           onReact: reactMessage,
+          roomId: message.roomId,
+          messageId: message.id,
+          initialTabIndex: initialTabIndex,
         ),
       );
+    }
+
+    void openReactionHistorySheet() {
+      openReactionSheet(initialTabIndex: 1);
     }
 
     void showActionMenu() {
@@ -204,8 +252,14 @@ class MessageItem extends HookConsumerWidget {
         context: context,
         builder: (context) => MessageActionSheet(
           isCurrentUser: isCurrentUser,
+          isPinned: isPinned,
+          canPin: canPin,
           onAction: onAction,
           onReact: openReactionSheet,
+          onReactionHistory: openReactionHistorySheet,
+          onQuickReact: reactMessage,
+          reactionsCount: reactionsCount,
+          reactionsMade: reactionsMade,
           translatableLanguage: translatableLanguage,
           translating: translating.value,
           translatedText: translatedText.value,
@@ -259,9 +313,9 @@ class MessageItem extends HookConsumerWidget {
           key: ValueKey(
             'message-swipe-${message.clientMessageId ?? message.id}',
           ),
-          direction: onAction == null || isSelectionMode
-              ? DismissDirection.none
-              : DismissDirection.horizontal,
+          direction: swipeEnabled
+              ? DismissDirection.horizontal
+              : DismissDirection.none,
           dismissThresholds: const {
             DismissDirection.startToEnd: 0.22,
             DismissDirection.endToStart: 0.22,
@@ -276,9 +330,8 @@ class MessageItem extends HookConsumerWidget {
             isStartToEnd: false,
             icon: isCurrentUser ? Symbols.forward : Symbols.reply,
           ),
-          onUpdate: onAction == null || isSelectionMode
-              ? null
-              : (details) {
+          onUpdate: swipeEnabled
+              ? (details) {
                   final direction = details.direction;
                   if (direction == DismissDirection.startToEnd) {
                     swipeProgress.value = details.progress.clamp(0.0, 1.0);
@@ -287,10 +340,10 @@ class MessageItem extends HookConsumerWidget {
                   } else {
                     swipeProgress.value = 0.0;
                   }
-                },
-          confirmDismiss: onAction == null || isSelectionMode
-              ? null
-              : (direction) async {
+                }
+              : null,
+          confirmDismiss: swipeEnabled
+              ? (direction) async {
                   swipeProgress.value = 0.0;
                   if (direction == DismissDirection.startToEnd) {
                     showActionMenu();
@@ -302,84 +355,274 @@ class MessageItem extends HookConsumerWidget {
                     }
                   }
                   return false;
-                },
-          child: InkWell(
-            mouseCursor: MouseCursor.defer,
-            focusColor: Colors.transparent,
-            onLongPress: () {
-              if (isSelectionMode && onToggleSelection != null) {
-                onToggleSelection!(message.id);
-              } else {
-                showActionMenu();
-              }
-            },
-            onSecondaryTap: showActionMenu,
-            onTap: () {
-              if (isSelectionMode && onToggleSelection != null) {
-                onToggleSelection!(message.id);
-              } else {
-                // Jump to related message
-                if ([
-                      'messages.update',
-                      'messages.delete',
-                      'messages.reaction.added',
-                      'messages.reaction.removed',
-                    ].contains(message.type) &&
-                    message.meta['message_id'] is String &&
-                    message.meta['message_id'] != null) {
-                  onJump(message.meta['message_id']);
                 }
-              }
+              : null,
+          child: ContextMenuWidget(
+            previewBuilder: (_, child) {
+              return Material(
+                color: Theme.of(context).colorScheme.onSurface,
+                child: child,
+              );
             },
-            child: SizedBox(
-              width: double.infinity,
-              child: MouseRegion(
-                onEnter: (_) => isHovered.value = true,
-                onExit: (_) => isHovered.value = false,
-                child: AnimatedContainer(
-                  curve: Curves.easeInOut,
-                  duration: Duration.zero,
-                  decoration: BoxDecoration(color: flashColor),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      switch (settings.messageDisplayStyle) {
-                        'compact' => MessageItemDisplayIRC(
-                          message: message,
-                          isCurrentUser: isCurrentUser,
-                          progress: progress,
-                          showAvatar: showAvatar,
-                          onJump: onJump,
-                          translatedText: translatedText.value,
-                          translating: translating.value,
-                        ),
-                        'column' => MessageItemDisplayDiscord(
-                          message: message,
-                          isCurrentUser: isCurrentUser,
-                          progress: progress,
-                          showAvatar: showAvatar,
-                          onJump: onJump,
-                          translatedText: translatedText.value,
-                          translating: translating.value,
-                        ),
-                        _ => MessageItemDisplayBubble(
-                          message: message,
-                          isCurrentUser: isCurrentUser,
-                          progress: progress,
-                          showAvatar: showAvatar,
-                          onJump: onJump,
-                          translatedText: translatedText.value,
-                          translating: translating.value,
-                        ),
+            menuProvider: (_) {
+              return Menu(
+                children: [
+                  if (!isCurrentUser)
+                    MenuAction(
+                      title: 'reply'.tr(),
+                      image: MenuImage.icon(Symbols.reply),
+                      callback: () => onAction?.call(MessageItemAction.reply),
+                    ),
+                  MenuAction(
+                    title: 'forward'.tr(),
+                    image: MenuImage.icon(Symbols.forward),
+                    callback: () => onAction?.call(MessageItemAction.forward),
+                  ),
+                  if (message.type == 'text')
+                    MenuAction(
+                      title: 'redirect'.tr(),
+                      image: MenuImage.icon(Symbols.send),
+                      callback: () =>
+                          onAction?.call(MessageItemAction.redirect),
+                    ),
+                  MenuAction(
+                    title: 'react'.tr(),
+                    image: MenuImage.icon(Symbols.add_reaction),
+                    callback: () => openReactionSheet(),
+                  ),
+                  if (_hasSelectableText)
+                    MenuAction(
+                      title: 'chatSelectText'.tr(),
+                      image: MenuImage.icon(Symbols.text_select_start),
+                      callback: () {
+                        final text =
+                            translatedText.value ??
+                            resolvedDisplay.content ??
+                            '';
+                        if (text.trim().isEmpty) return;
+                        Navigator.of(context).push(
+                          PageRouteBuilder(
+                            opaque: false,
+                            barrierColor: Colors.black54,
+                            transitionDuration: const Duration(
+                              milliseconds: 260,
+                            ),
+                            reverseTransitionDuration: const Duration(
+                              milliseconds: 220,
+                            ),
+                            pageBuilder:
+                                (context, animation, secondaryAnimation) =>
+                                    _MessageTextSelectionView(
+                                      text: text,
+                                      sender: remoteMessage.sender,
+                                      roomId: message.roomId,
+                                      sentAt: message.createdAt.formatSystem(),
+                                    ),
+                            transitionsBuilder:
+                                (
+                                  context,
+                                  animation,
+                                  secondaryAnimation,
+                                  child,
+                                ) {
+                                  final curved = CurvedAnimation(
+                                    parent: animation,
+                                    curve: Curves.easeOutCubic,
+                                    reverseCurve: Curves.easeInCubic,
+                                  );
+                                  return FadeTransition(
+                                    opacity: curved,
+                                    child: SlideTransition(
+                                      position: Tween<Offset>(
+                                        begin: const Offset(0, 0.06),
+                                        end: Offset.zero,
+                                      ).animate(curved),
+                                      child: child,
+                                    ),
+                                  );
+                                },
+                          ),
+                        );
                       },
-                      MessageReactionChips(
-                        displayStyle: settings.messageDisplayStyle,
-                        isCurrentUser: isCurrentUser,
-                        reactionsCount: reactionsCount,
-                        reactionsMade: reactionsMade,
-                        isExpanded: isSystemInfoExpanded.value,
-                        submitting: reacting.value,
-                        onReact: reactMessage,
+                    ),
+                  MenuAction(
+                    title: 'chatSelectMessages'.tr(),
+                    image: MenuImage.icon(Symbols.select_all),
+                    callback: () {
+                      if (onEnterSelectionMode != null) {
+                        onEnterSelectionMode!();
+                        if (onToggleSelection != null) {
+                          onToggleSelection!(message.id);
+                        }
+                      }
+                    },
+                  ),
+                  if (canPin)
+                    MenuAction(
+                      title: isPinned ? 'unpinMessage'.tr() : 'pinMessage'.tr(),
+                      image: MenuImage.icon(
+                        isPinned ? Icons.push_pin_outlined : Symbols.push_pin,
+                      ),
+                      callback: () => onAction?.call(
+                        isPinned
+                            ? MessageItemAction.unpin
+                            : MessageItemAction.pin,
+                      ),
+                    ),
+                  if (translatableLanguage)
+                    MenuAction(
+                      title: translatedText.value?.isEmpty == null
+                          ? 'translate'.tr()
+                          : 'translated'.tr(),
+                      image: MenuImage.icon(Symbols.translate),
+                      callback: translate,
+                    ),
+                  if (isCurrentUser)
+                    MenuAction(
+                      title: 'edit'.tr(),
+                      image: MenuImage.icon(Symbols.edit),
+                      callback: () => onAction?.call(MessageItemAction.edit),
+                    ),
+                  if (isCurrentUser && message.status == MessageStatus.failed)
+                    MenuAction(
+                      title: 'resend'.tr(),
+                      image: MenuImage.icon(Symbols.refresh),
+                      callback: () => onAction?.call(MessageItemAction.resend),
+                    ),
+                  if (isCurrentUser)
+                    MenuAction(
+                      title: 'delete'.tr(),
+                      image: MenuImage.icon(Symbols.delete),
+                      callback: () => onAction?.call(MessageItemAction.delete),
+                    ),
+                ],
+              );
+            },
+            child: InkWell(
+              mouseCursor: MouseCursor.defer,
+              focusColor: Colors.transparent,
+              onSecondaryTap: isMobile ? showActionMenu : null,
+              onTap: () {
+                if (isSelectionMode && onToggleSelection != null) {
+                  onToggleSelection!(message.id);
+                } else {
+                  // Jump to related message
+                  if ([
+                        'messages.update',
+                        'messages.delete',
+                        'messages.reaction.added',
+                        'messages.reaction.removed',
+                        'messages.pinned',
+                        'messages.unpinned',
+                      ].contains(message.type) &&
+                      message.meta['message_id'] is String &&
+                      message.meta['message_id'] != null) {
+                    onJump(message.meta['message_id']);
+                  }
+                }
+              },
+              child: SizedBox(
+                width: double.infinity,
+                child: MouseRegion(
+                  onEnter: (_) => isHovered.value = true,
+                  onExit: (_) => isHovered.value = false,
+                  child: Stack(
+                    children: [
+                      SizedBox(
+                        width: double.infinity,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            if (isPinned)
+                              Padding(
+                                padding: EdgeInsets.only(
+                                  left: showAvatar ? 48 : 16,
+                                  right: 16,
+                                  bottom: 2,
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(
+                                      Symbols.push_pin,
+                                      size: 12,
+                                      color: Theme.of(context)
+                                          .colorScheme
+                                          .onSurfaceVariant
+                                          .withOpacity(0.6),
+                                    ),
+                                    const SizedBox(width: 4),
+                                    Text(
+                                      'pinnedMessage'.tr(),
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .labelSmall
+                                          ?.copyWith(
+                                            color: Theme.of(context)
+                                                .colorScheme
+                                                .onSurfaceVariant
+                                                .withOpacity(0.6),
+                                          ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            switch (settings.messageDisplayStyle) {
+                              'compact' => MessageItemDisplayIRC(
+                                message: message,
+                                isCurrentUser: isCurrentUser,
+                                progress: progress,
+                                showAvatar: showAvatar,
+                                onJump: onJump,
+                                translatedText: translatedText.value,
+                                translating: translating.value,
+                              ),
+                              'column' => MessageItemDisplayDiscord(
+                                message: message,
+                                isCurrentUser: isCurrentUser,
+                                progress: progress,
+                                showAvatar: showAvatar,
+                                showColumnAvatar: showColumnAvatar,
+                                onJump: onJump,
+                                translatedText: translatedText.value,
+                                translating: translating.value,
+                              ),
+                              _ => MessageItemDisplayBubble(
+                                message: message,
+                                isCurrentUser: isCurrentUser,
+                                progress: progress,
+                                showAvatar: showAvatar,
+                                showBubbleAvatar: showBubbleAvatar,
+                                onJump: onJump,
+                                translatedText: translatedText.value,
+                                translating: translating.value,
+                              ),
+                            },
+                            MessageReactionChips(
+                              displayStyle: settings.messageDisplayStyle,
+                              isCurrentUser: isCurrentUser,
+                              showAvatar: showAvatar,
+                              reactionsCount: reactionsCount,
+                              reactionsMade: reactionsMade,
+                              isExpanded: isSystemInfoExpanded.value,
+                              submitting: reacting.value,
+                              onReact: reactMessage,
+                            ),
+                          ],
+                        ),
+                      ),
+                      Positioned.fill(
+                        child: IgnorePointer(
+                          child: AnimatedContainer(
+                            curve: Curves.easeInOut,
+                            duration: MediaQuery.disableAnimationsOf(context)
+                                ? Duration.zero
+                                : const Duration(
+                                    milliseconds: kFlashAnimationDuration,
+                                  ),
+                            decoration: BoxDecoration(color: flashColor),
+                          ),
+                        ),
                       ),
                     ],
                   ),
@@ -397,6 +640,8 @@ class MessageItem extends HookConsumerWidget {
               onExit: (_) => isHovered.value = false,
               child: MessageHoverActionMenu(
                 isCurrentUser: isCurrentUser,
+                isPinned: isPinned,
+                canPin: canPin,
                 onAction: onAction,
                 onReact: openReactionSheet,
                 translatableLanguage: translatableLanguage,
@@ -414,8 +659,14 @@ class MessageItem extends HookConsumerWidget {
 
 class MessageActionSheet extends StatefulWidget {
   final bool isCurrentUser;
+  final bool isPinned;
+  final bool canPin;
   final Function(String action)? onAction;
   final VoidCallback onReact;
+  final VoidCallback onReactionHistory;
+  final Future<void> Function(String symbol, int attitude) onQuickReact;
+  final Map<String, int> reactionsCount;
+  final Map<String, bool> reactionsMade;
   final bool translatableLanguage;
   final bool translating;
   final String? translatedText;
@@ -429,8 +680,14 @@ class MessageActionSheet extends StatefulWidget {
   const MessageActionSheet({
     super.key,
     required this.isCurrentUser,
+    required this.isPinned,
+    required this.canPin,
     required this.onAction,
     required this.onReact,
+    required this.onReactionHistory,
+    required this.onQuickReact,
+    required this.reactionsCount,
+    required this.reactionsMade,
     required this.translatableLanguage,
     required this.translating,
     required this.translatedText,
@@ -447,8 +704,6 @@ class MessageActionSheet extends StatefulWidget {
 }
 
 class _MessageActionSheetState extends State<MessageActionSheet> {
-  bool _isExpanded = false;
-  static const int _maxPreviewLines = 3;
   E2eeDisplayContent get _resolved => resolveE2eeDisplayContent(
     roomId: widget.message.roomId,
     content:
@@ -468,14 +723,194 @@ class _MessageActionSheetState extends State<MessageActionSheet> {
     return '';
   }
 
-  bool get _shouldShowExpandButton {
-    // Simple check: show expand button if content is not empty
-    // The actual line limiting is handled by maxLines in SelectableText
-    return _displayContent.isNotEmpty;
+  bool get _hasSelectableText {
+    final content = _resolved.content?.trim() ?? '';
+    return content.isNotEmpty;
+  }
+
+  Future<void> _openTextSelectionView() async {
+    await Navigator.of(context).push(
+      PageRouteBuilder(
+        opaque: false,
+        barrierColor: Colors.black54,
+        transitionDuration: const Duration(milliseconds: 260),
+        reverseTransitionDuration: const Duration(milliseconds: 220),
+        pageBuilder: (context, animation, secondaryAnimation) =>
+            _MessageTextSelectionView(
+              text: _displayContent,
+              sender: widget.remoteMessage.sender,
+              roomId: widget.message.roomId,
+              sentAt: widget.message.createdAt.formatSystem(),
+            ),
+        transitionsBuilder: (context, animation, secondaryAnimation, child) {
+          final curved = CurvedAnimation(
+            parent: animation,
+            curve: Curves.easeOutCubic,
+            reverseCurve: Curves.easeInCubic,
+          );
+
+          return FadeTransition(
+            opacity: curved,
+            child: SlideTransition(
+              position: Tween<Offset>(
+                begin: const Offset(0, 0.06),
+                end: Offset.zero,
+              ).animate(curved),
+              child: child,
+            ),
+          );
+        },
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
+    const quickReactions = [
+      'thumb_up',
+      'heart',
+      'laugh',
+      'clap',
+      'party',
+      'confuse',
+    ];
+    final primaryActions = <Widget>[
+      _ActionListTile(
+        leading: Icon(Symbols.reply),
+        title: Text('reply'.tr()),
+        onTap: () {
+          widget.onAction!.call(MessageItemAction.reply);
+          Navigator.pop(context);
+        },
+      ),
+      _ActionListTile(
+        leading: Icon(Symbols.forward),
+        title: Text('forward'.tr()),
+        onTap: () {
+          widget.onAction!.call(MessageItemAction.forward);
+          Navigator.pop(context);
+        },
+      ),
+      if (widget.message.type == 'text')
+        _ActionListTile(
+          leading: Icon(Symbols.send),
+          title: Text('redirect'.tr()),
+          onTap: () {
+            widget.onAction!.call(MessageItemAction.redirect);
+            Navigator.pop(context);
+          },
+        ),
+      _ActionListTile(
+        leading: const Icon(Symbols.add_reaction),
+        title: Text('react'.tr()),
+        onTap: () {
+          Navigator.pop(context);
+          widget.onReact();
+        },
+      ),
+      _ActionListTile(
+        leading: const Icon(Symbols.history),
+        title: Text('reactionHistory'.tr()),
+        onTap: () {
+          Navigator.pop(context);
+          widget.onReactionHistory();
+        },
+      ),
+      if (_hasSelectableText)
+        _ActionListTile(
+          leading: const Icon(Symbols.text_select_start),
+          title: Text('chatSelectText'.tr()),
+          onTap: () {
+            Navigator.pop(context);
+            _openTextSelectionView();
+          },
+        ),
+      _ActionListTile(
+        leading: Icon(Symbols.select_all),
+        title: Text('chatSelectMessages'.tr()),
+        onTap: () {
+          if (widget.onEnterSelectionMode != null) {
+            widget.onEnterSelectionMode!();
+            if (widget.onToggleSelection != null) {
+              widget.onToggleSelection!(widget.message.id);
+            }
+          }
+          Navigator.pop(context);
+        },
+      ),
+      if (widget.canPin)
+        _ActionListTile(
+          leading: Icon(
+            widget.isPinned ? Icons.push_pin_outlined : Symbols.push_pin,
+          ),
+          title: Text(
+            widget.isPinned ? 'unpinMessage'.tr() : 'pinMessage'.tr(),
+          ),
+          onTap: () {
+            widget.onAction!.call(
+              widget.isPinned ? MessageItemAction.unpin : MessageItemAction.pin,
+            );
+            Navigator.pop(context);
+          },
+        ),
+    ];
+    final authorActions = <Widget>[
+      if (widget.isCurrentUser)
+        _ActionListTile(
+          leading: Icon(Symbols.edit),
+          title: Text('edit'.tr()),
+          onTap: () {
+            widget.onAction!.call(MessageItemAction.edit);
+            Navigator.pop(context);
+          },
+        ),
+      if (widget.isCurrentUser && widget.message.status == MessageStatus.failed)
+        _ActionListTile(
+          leading: Icon(Symbols.refresh),
+          title: Text('resend'.tr()),
+          onTap: () {
+            widget.onAction!.call(MessageItemAction.resend);
+            Navigator.pop(context);
+          },
+        ),
+      if (widget.isCurrentUser)
+        _ActionListTile(
+          leading: Icon(Symbols.delete),
+          title: Text('delete'.tr()),
+          onTap: () {
+            widget.onAction!.call(MessageItemAction.delete);
+            Navigator.pop(context);
+          },
+          isDanger: true,
+        ),
+    ];
+    final utilityActions = <Widget>[
+      if (widget.translatableLanguage)
+        _ActionListTile(
+          leading: Icon(Symbols.translate),
+          title: Text(
+            widget.translatedText == null
+                ? 'translate'.tr()
+                : widget.translating
+                ? 'translating'.tr()
+                : 'translated'.tr(),
+          ),
+          onTap: () {
+            widget.translate();
+            Navigator.pop(context);
+          },
+        ),
+      if (widget.isMobile)
+        _ActionListTile(
+          leading: Icon(Symbols.copy_all),
+          title: Text('copyMessage'.tr()),
+          onTap: () {
+            Clipboard.setData(ClipboardData(text: _displayContent));
+            Navigator.pop(context);
+          },
+        ),
+    ];
+
     return SheetScaffold(
       titleText: 'messageActions'.tr(),
       child: SingleChildScrollView(
@@ -483,473 +918,62 @@ class _MessageActionSheetState extends State<MessageActionSheet> {
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisSize: MainAxisSize.min,
           children: [
-            // Message content preview section
-            if (_displayContent.isNotEmpty || _isEncryptedMessage) ...[
-              Container(
-                margin: const EdgeInsets.fromLTRB(16, 16, 16, 0),
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 16,
-                  vertical: 12,
-                ),
-                decoration: BoxDecoration(
-                  color: Theme.of(
-                    context,
-                  ).colorScheme.surfaceContainerHighest.withOpacity(0.3),
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(
-                    color: Theme.of(
-                      context,
-                    ).colorScheme.outlineVariant.withOpacity(0.5),
-                    width: 1,
-                  ),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+              child: SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: Row(
+                  spacing: 8,
                   children: [
-                    // Header
-                    SizedBox(
-                      height: 24,
-                      child: Row(
-                        children: [
-                          Icon(
-                            Symbols.article,
-                            size: 16,
-                            color: Theme.of(context).colorScheme.primary,
-                          ),
-                          const Gap(6),
-                          Text(
-                            'messageContent'.tr(),
-                            style: TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.w500,
-                              color: Theme.of(context).colorScheme.primary,
-                            ),
-                          ),
-                          const Spacer(),
-                          if (_shouldShowExpandButton)
-                            IconButton(
-                              visualDensity: VisualDensity.compact,
-                              icon: Icon(
-                                _isExpanded
-                                    ? Symbols.expand_less
-                                    : Symbols.expand_more,
-                                size: 16,
-                              ),
-                              onPressed: () {
-                                setState(() {
-                                  _isExpanded = !_isExpanded;
-                                });
-                              },
-                              padding: EdgeInsets.zero,
-                              constraints: const BoxConstraints(
-                                minWidth: 32,
-                                minHeight: 24,
-                              ),
-                            ),
-                        ],
-                      ),
-                    ),
-                    const Gap(8),
-                    // Selectable content
-                    SelectableText(
-                      _displayContent,
-                      style: TextStyle(
-                        fontSize: 14,
-                        height: 1.4,
-                        color: Theme.of(context).colorScheme.onSurfaceVariant,
-                      ),
-                      minLines: 1,
-                      maxLines: _isExpanded ? null : _maxPreviewLines,
-                      textAlign: TextAlign.start,
-                    ),
-                    const Gap(8),
-                    Row(
-                      spacing: 6,
-                      children: [
-                        Icon(
-                          Symbols.send,
-                          size: 16,
-                          color: Theme.of(context).colorScheme.onSurfaceVariant,
-                        ),
-                        Text(
-                          'messageSentAt'.tr(
-                            args: [widget.message.createdAt.formatSystem()],
-                          ),
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: Theme.of(
-                              context,
-                            ).colorScheme.onSurfaceVariant,
-                          ),
-                        ),
-                      ],
-                    ),
-                    Row(
-                      spacing: 6,
-                      children: [
-                        Icon(
-                          _isEncryptedMessage
-                              ? Symbols.lock
-                              : Symbols.lock_open,
-                          size: 16,
-                          color: Theme.of(context).colorScheme.onSurfaceVariant,
-                        ),
-                        Text(
-                          'encrypted'.tr(
-                            args: [
-                              _isEncryptedMessage ? 'yes'.tr() : 'no'.tr(),
-                            ],
-                          ),
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: Theme.of(
-                              context,
-                            ).colorScheme.onSurfaceVariant,
-                          ),
-                        ),
-                      ],
-                    ),
-                    if (_isExpanded) ...[
-                      if (widget.message.meta['e2ee_scheme'] != null)
-                        Row(
-                          spacing: 6,
-                          children: [
-                            Icon(
-                              Symbols.security,
-                              size: 16,
-                              color: Theme.of(
-                                context,
-                              ).colorScheme.onSurfaceVariant,
-                            ),
-                            Text(
-                              'scheme'.tr(
-                                args: [
-                                  widget.message.meta['e2ee_scheme'].toString(),
-                                ],
-                              ),
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: Theme.of(
-                                  context,
-                                ).colorScheme.onSurfaceVariant,
-                              ),
-                            ),
-                          ],
-                        ),
-                      if (widget.message.meta['e2ee_epoch'] != null)
-                        Row(
-                          spacing: 6,
-                          children: [
-                            Icon(
-                              Symbols.history,
-                              size: 16,
-                              color: Theme.of(
-                                context,
-                              ).colorScheme.onSurfaceVariant,
-                            ),
-                            Text(
-                              'epoch'.tr(
-                                args: [
-                                  widget.message.meta['e2ee_epoch'].toString(),
-                                ],
-                              ),
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: Theme.of(
-                                  context,
-                                ).colorScheme.onSurfaceVariant,
-                              ),
-                            ),
-                          ],
-                        ),
-                      if (widget.message.meta['e2ee_message_type'] != null)
-                        Row(
-                          spacing: 6,
-                          children: [
-                            Icon(
-                              Symbols.message,
-                              size: 16,
-                              color: Theme.of(
-                                context,
-                              ).colorScheme.onSurfaceVariant,
-                            ),
-                            Text(
-                              'messageType'.tr(
-                                args: [
-                                  widget.message.meta['e2ee_message_type']
-                                      .toString(),
-                                ],
-                              ),
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: Theme.of(
-                                  context,
-                                ).colorScheme.onSurfaceVariant,
-                              ),
-                            ),
-                          ],
-                        ),
-                      if (widget.message.meta['e2ee_client_message_id'] != null)
-                        Row(
-                          spacing: 6,
-                          children: [
-                            Icon(
-                              Symbols.tag,
-                              size: 16,
-                              color: Theme.of(
-                                context,
-                              ).colorScheme.onSurfaceVariant,
-                            ),
-                            Text(
-                              'clientMessageId'.tr(
-                                args: [
-                                  widget.message.meta['e2ee_client_message_id']
-                                      .toString(),
-                                ],
-                              ),
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: Theme.of(
-                                  context,
-                                ).colorScheme.onSurfaceVariant,
-                              ),
-                            ),
-                          ],
-                        ),
-                      const Gap(8),
-                      const Divider(height: 1),
-                      const Gap(8),
-                      // Debug info section
-                      Row(
-                        children: [
-                          Icon(
-                            Symbols.bug_report,
-                            size: 16,
-                            color: Theme.of(context).colorScheme.error,
-                          ),
-                          const Gap(6),
-                          Text(
-                            'Debug Info',
-                            style: TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.w600,
-                              color: Theme.of(context).colorScheme.error,
-                            ),
-                          ),
-                        ],
-                      ),
-                      const Gap(4),
-                      // Message ID (tap to copy)
-                      InkWell(
-                        onTap: () {
-                          Clipboard.setData(
-                            ClipboardData(text: widget.message.id),
+                    for (final symbol in quickReactions)
+                      _QuickReactionChip(
+                        symbol: symbol,
+                        count: widget.reactionsCount[symbol] ?? 0,
+                        isMade: widget.reactionsMade[symbol] == true,
+                        onTap: () async {
+                          await widget.onQuickReact(
+                            symbol,
+                            kReactionTemplates[symbol]?.attitude ?? 1,
                           );
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                              content: Text('Message ID copied'),
-                              duration: const Duration(seconds: 1),
-                            ),
-                          );
+                          if (context.mounted) {
+                            Navigator.pop(context);
+                          }
                         },
-                        child: Row(
-                          spacing: 6,
-                          children: [
-                            Icon(
-                              Symbols.fingerprint,
-                              size: 14,
-                              color: Theme.of(
-                                context,
-                              ).colorScheme.onSurfaceVariant,
-                            ),
-                            Expanded(
-                              child: Text(
-                                'ID: ${widget.message.id}',
-                                style: TextStyle(
-                                  fontSize: 11,
-                                  fontFamily: 'monospace',
-                                  color: Theme.of(
-                                    context,
-                                  ).colorScheme.onSurfaceVariant,
-                                ),
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
-                            Icon(
-                              Icons.copy,
-                              size: 12,
-                              color: Theme.of(context).colorScheme.outline,
-                            ),
-                          ],
-                        ),
                       ),
-                      // Encryption header
-                      if (widget.message.meta['e2ee_header'] != null)
-                        Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const Gap(4),
-                            Row(
-                              spacing: 6,
-                              children: [
-                                Icon(
-                                  Symbols.key,
-                                  size: 14,
-                                  color: Theme.of(
-                                    context,
-                                  ).colorScheme.onSurfaceVariant,
-                                ),
-                                Expanded(
-                                  child: Text(
-                                    'Header: ${widget.message.meta['e2ee_header']}',
-                                    style: TextStyle(
-                                      fontSize: 11,
-                                      fontFamily: 'monospace',
-                                      color: Theme.of(
-                                        context,
-                                      ).colorScheme.onSurfaceVariant,
-                                    ),
-                                    overflow: TextOverflow.ellipsis,
-                                    maxLines: 2,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ],
-                        ),
-                      // Ciphertext length
-                      if (widget.message.meta['e2ee_ciphertext'] != null)
-                        Row(
-                          spacing: 6,
-                          children: [
-                            Icon(
-                              Symbols.terminal,
-                              size: 14,
-                              color: Theme.of(
-                                context,
-                              ).colorScheme.onSurfaceVariant,
-                            ),
-                            Text(
-                              'Ciphertext: ${widget.message.meta['e2ee_ciphertext'].toString().length} bytes',
-                              style: TextStyle(
-                                fontSize: 11,
-                                color: Theme.of(
-                                  context,
-                                ).colorScheme.onSurfaceVariant,
-                              ),
-                            ),
-                          ],
-                        ),
-                    ],
                   ],
                 ),
               ),
-              const Gap(4),
-            ],
-
-            // Action buttons
-            if (widget.isCurrentUser)
-              _ActionListTile(
-                leading: Icon(Symbols.edit),
-                title: Text('edit'.tr()),
-                onTap: () {
-                  widget.onAction!.call(MessageItemAction.edit);
-                  Navigator.pop(context);
-                },
-              ),
-            if (widget.isCurrentUser &&
-                widget.message.status == MessageStatus.failed)
-              _ActionListTile(
-                leading: Icon(Symbols.refresh),
-                title: Text('resend'.tr()),
-                onTap: () {
-                  widget.onAction!.call(MessageItemAction.resend);
-                  Navigator.pop(context);
-                },
-              ),
-            if (widget.isCurrentUser)
-              _ActionListTile(
-                leading: Icon(Symbols.delete),
-                title: Text('delete'.tr()),
-                onTap: () {
-                  widget.onAction!.call(MessageItemAction.delete);
-                  Navigator.pop(context);
-                },
-              ),
-            if (widget.isCurrentUser) const Divider(),
-
-            _ActionListTile(
-              leading: Icon(Symbols.reply),
-              title: Text('reply'.tr()),
-              onTap: () {
-                widget.onAction!.call(MessageItemAction.reply);
-                Navigator.pop(context);
-              },
             ),
-            _ActionListTile(
-              leading: Icon(Symbols.forward),
-              title: Text('forward'.tr()),
-              onTap: () {
-                widget.onAction!.call(MessageItemAction.forward);
-                Navigator.pop(context);
-              },
-            ),
-            _ActionListTile(
-              leading: const Icon(Symbols.add_reaction),
-              title: Text('react'.tr()),
-              onTap: () {
-                Navigator.pop(context);
-                widget.onReact();
-              },
-            ),
-
-            // AI Selection action
-            _ActionListTile(
-              leading: Icon(Symbols.smart_toy),
-              title: Text('Select for AI'),
-              onTap: () {
-                if (widget.onEnterSelectionMode != null) {
-                  widget.onEnterSelectionMode!();
-                  if (widget.onToggleSelection != null) {
-                    widget.onToggleSelection!(widget.message.id);
-                  }
-                }
-                Navigator.pop(context);
-              },
-            ),
-
-            if (widget.translatableLanguage) const Divider(),
-            if (widget.translatableLanguage)
-              _ActionListTile(
-                leading: Icon(Symbols.translate),
-                title: Text(
-                  widget.translatedText == null
-                      ? 'translate'.tr()
-                      : widget.translating
-                      ? 'translating'.tr()
-                      : 'translated'.tr(),
-                ),
-                onTap: () {
-                  widget.translate();
-                  Navigator.pop(context);
-                },
-              ),
-
-            if (widget.isMobile) const Divider(),
-            if (widget.isMobile)
-              _ActionListTile(
-                leading: Icon(Symbols.copy_all),
-                title: Text('copyMessage'.tr()),
-                onTap: () {
-                  Clipboard.setData(ClipboardData(text: _displayContent));
-                  Navigator.pop(context);
-                },
-              ),
-
+            if (primaryActions.isNotEmpty)
+              _ActionSection(children: primaryActions),
+            if (authorActions.isNotEmpty)
+              _ActionSection(children: authorActions),
+            if (utilityActions.isNotEmpty)
+              _ActionSection(children: utilityActions),
             Gap(MediaQuery.of(context).padding.bottom + 32),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _ActionSection extends StatelessWidget {
+  final List<Widget> children;
+
+  const _ActionSection({required this.children});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 0),
+      child: Material(
+        color: theme.colorScheme.surfaceContainer,
+        borderRadius: BorderRadius.circular(20),
+        clipBehavior: Clip.antiAlias,
+        child: Column(mainAxisSize: MainAxisSize.min, children: children),
       ),
     );
   }
@@ -959,30 +983,236 @@ class _ActionListTile extends StatelessWidget {
   final Widget leading;
   final Widget title;
   final VoidCallback onTap;
+  final bool isDanger;
 
   const _ActionListTile({
     required this.leading,
     required this.title,
     required this.onTap,
+    this.isDanger = false,
   });
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final foreground = isDanger
+        ? theme.colorScheme.error
+        : theme.colorScheme.onSurface;
+
     return InkWell(
       onTap: onTap,
+      borderRadius: BorderRadius.circular(16),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-        child: Row(
-          children: [
-            SizedBox(width: 24, height: 24, child: leading),
-            const Gap(12),
-            Expanded(child: title),
-            Icon(
-              Symbols.chevron_right,
-              size: 16,
-              color: Theme.of(context).colorScheme.outline,
+        child: DefaultTextStyle.merge(
+          style: TextStyle(color: foreground),
+          child: IconTheme.merge(
+            data: IconThemeData(color: foreground),
+            child: Row(
+              children: [
+                SizedBox(width: 24, height: 24, child: leading),
+                const Gap(12),
+                Expanded(child: title),
+                Icon(
+                  Symbols.chevron_right,
+                  size: 16,
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+              ],
             ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _QuickReactionChip extends StatelessWidget {
+  final String symbol;
+  final int count;
+  final bool isMade;
+  final VoidCallback onTap;
+
+  const _QuickReactionChip({
+    required this.symbol,
+    required this.count,
+    required this.isMade,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final backgroundColor = isMade
+        ? theme.colorScheme.primaryContainer
+        : theme.colorScheme.surfaceContainerHigh;
+    final foregroundColor = isMade
+        ? theme.colorScheme.onPrimaryContainer
+        : theme.colorScheme.onSurface;
+    final borderColor = isMade
+        ? theme.colorScheme.primary.withOpacity(0.4)
+        : theme.colorScheme.outlineVariant.withOpacity(0.4);
+
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(999),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+        decoration: BoxDecoration(
+          color: backgroundColor,
+          borderRadius: BorderRadius.circular(999),
+          border: Border.all(color: borderColor),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            buildReactionIcon(symbol, 22, iconSize: 16),
+            const Gap(6),
+            Text(
+              ReactInfo.getTranslationKey(symbol),
+              style: theme.textTheme.labelLarge?.copyWith(
+                color: foregroundColor,
+              ),
+            ).tr(),
+            if (count > 0) ...[
+              const Gap(6),
+              Text(
+                count.toString(),
+                style: theme.textTheme.labelMedium?.copyWith(
+                  color: foregroundColor.withOpacity(0.8),
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ],
           ],
+        ),
+      ),
+    );
+  }
+}
+
+class _MessageTextSelectionView extends HookConsumerWidget {
+  final String text;
+  final SnChatMember sender;
+  final String roomId;
+  final String sentAt;
+
+  const _MessageTextSelectionView({
+    required this.text,
+    required this.sender,
+    required this.roomId,
+    required this.sentAt,
+  });
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final colorScheme = Theme.of(context).colorScheme;
+
+    return Material(
+      color: colorScheme.surface,
+      child: SafeArea(
+        child: GestureDetector(
+          onVerticalDragEnd: (details) {
+            if (details.primaryVelocity != null &&
+                details.primaryVelocity! > 300) {
+              Navigator.of(context).pop();
+            }
+          },
+          child: Stack(
+            children: [
+              Positioned.fill(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 72, 20, 72),
+                  child: LayoutBuilder(
+                    builder: (context, constraints) {
+                      return SingleChildScrollView(
+                        child: ConstrainedBox(
+                          constraints: BoxConstraints(
+                            minHeight: constraints.maxHeight,
+                          ),
+                          child: Center(
+                            child: ConstrainedBox(
+                              constraints: const BoxConstraints(maxWidth: 860),
+                              child: MarkdownTextContent(
+                                content: text,
+                                isSelectable: true,
+                                textStyle: TextStyle(
+                                  fontSize: 20,
+                                  height: 1.6,
+                                  color: colorScheme.onSurface,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              ),
+              Positioned(
+                left: 16,
+                right: 16,
+                bottom: 12,
+                child: Row(
+                  children: [
+                    ChatRoomMemberRegion(
+                      roomId: roomId,
+                      member: sender,
+                      child: ProfilePictureWidget(
+                        file: sender.account.profile.picture,
+                        radius: 14,
+                      ),
+                    ),
+                    const Gap(8),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          AccountName(
+                            textOverride: (sender.nick?.isNotEmpty == true)
+                                ? sender.nick
+                                : (sender.realmNick?.isNotEmpty == true)
+                                ? sender.realmNick
+                                : sender.account.nick,
+                            account: sender.account,
+                            style: Theme.of(context).textTheme.bodySmall
+                                ?.copyWith(
+                                  color: colorScheme.onSurface,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                          ),
+                          Text(
+                            sentAt,
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: colorScheme.onSurface.withOpacity(0.8),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    IconButton(
+                      onPressed: () {
+                        Clipboard.setData(ClipboardData(text: text));
+                        showSnackBar('copiedToClipboard'.tr());
+                      },
+                      icon: const Icon(Symbols.copy_all),
+                    ),
+                  ],
+                ),
+              ),
+              Positioned(
+                top: 8,
+                right: 8,
+                child: IconButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  icon: Icon(Symbols.close, color: colorScheme.onSurface),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -991,6 +1221,8 @@ class _ActionListTile extends StatelessWidget {
 
 class MessageHoverActionMenu extends StatelessWidget {
   final bool isCurrentUser;
+  final bool isPinned;
+  final bool canPin;
   final Function(String action)? onAction;
   final VoidCallback onReact;
   final bool translatableLanguage;
@@ -1002,6 +1234,8 @@ class MessageHoverActionMenu extends StatelessWidget {
   const MessageHoverActionMenu({
     super.key,
     required this.isCurrentUser,
+    required this.isPinned,
+    required this.canPin,
     required this.onAction,
     required this.onReact,
     required this.translatableLanguage,
@@ -1056,6 +1290,19 @@ class MessageHoverActionMenu extends StatelessWidget {
           tooltip: translatedText == null
               ? 'translate'.tr()
               : 'translated'.tr(),
+          padding: const EdgeInsets.all(8),
+          constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+        ),
+      if (canPin)
+        IconButton(
+          icon: Icon(
+            isPinned ? Icons.push_pin_outlined : Symbols.push_pin,
+            size: 16,
+          ),
+          onPressed: () => onAction?.call(
+            isPinned ? MessageItemAction.unpin : MessageItemAction.pin,
+          ),
+          tooltip: isPinned ? 'unpinMessage'.tr() : 'pinMessage'.tr(),
           padding: const EdgeInsets.all(8),
           constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
         ),
@@ -1117,6 +1364,7 @@ class MessageHoverActionMenu extends StatelessWidget {
 class MessageReactionChips extends HookConsumerWidget {
   final String displayStyle;
   final bool isCurrentUser;
+  final bool showAvatar;
   final Map<String, int> reactionsCount;
   final Map<String, bool> reactionsMade;
   final bool isExpanded;
@@ -1127,6 +1375,7 @@ class MessageReactionChips extends HookConsumerWidget {
     super.key,
     required this.displayStyle,
     required this.isCurrentUser,
+    required this.showAvatar,
     required this.reactionsCount,
     required this.reactionsMade,
     required this.isExpanded,
@@ -1148,7 +1397,8 @@ class MessageReactionChips extends HookConsumerWidget {
 
     final sectionPadding = switch (displayStyle) {
       'compact' => const EdgeInsets.only(left: 12, right: 12, bottom: 2),
-      _ => const EdgeInsets.only(left: 12, right: 12, bottom: 6),
+      'column' => const EdgeInsets.only(left: 60, right: 12, bottom: 6),
+      _ => const EdgeInsets.only(left: 52, right: 12, bottom: 6),
     };
     final sectionAlign = Alignment.centerLeft;
 
@@ -1225,10 +1475,16 @@ class MessageReactionChips extends HookConsumerWidget {
 }
 
 class MessageItemDisplayBubble extends HookConsumerWidget {
+  static const double _avatarRadius = 16;
+  static const double _avatarSize = _avatarRadius * 2;
+  static const double _avatarGap = 8;
+  static const double _contentOffset = _avatarSize + _avatarGap;
+
   final LocalChatMessage message;
   final bool isCurrentUser;
   final Map<int, double?>? progress;
   final bool showAvatar;
+  final bool showBubbleAvatar;
   final Function(String messageId) onJump;
   final String? translatedText;
   final bool translating;
@@ -1239,6 +1495,7 @@ class MessageItemDisplayBubble extends HookConsumerWidget {
     required this.isCurrentUser,
     required this.progress,
     required this.showAvatar,
+    required this.showBubbleAvatar,
     required this.onJump,
     required this.translatedText,
     required this.translating,
@@ -1255,100 +1512,326 @@ class MessageItemDisplayBubble extends HookConsumerWidget {
 
     final remoteMessage = message.toRemoteMessage();
     final sender = remoteMessage.sender;
+    final isRedirect = remoteMessage.meta['redirect'] is Map;
+    final currentUserId = ref.watch(userInfoProvider).value?.id;
+    final isMentioningCurrentUser =
+        currentUserId != null &&
+        remoteMessage.membersMentioned.contains(currentUserId);
 
-    return Material(
-      color: Colors.transparent,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+    final avatar = ChatRoomMemberRegion(
+      roomId: message.roomId,
+      member: sender,
+      child: OnlineAvatarBadge(
+        roomId: message.roomId,
+        accountId: sender.accountId,
+        child: ProfilePictureWidget(
+          file: sender.account.profile.picture,
+          radius: _avatarRadius,
+        ),
+      ),
+    );
+
+    final header = MessageSenderInfo(
+      roomId: message.roomId,
+      sender: sender,
+      createdAt: message.createdAt,
+      textColor: textColor,
+      showAvatar: false,
+      isCompact: true,
+    );
+
+    final attachmentMaxH =
+        ref.watch(appSettingsProvider.select((s) => s.attachmentPreviewMode)) ==
+            'small'
+        ? 200.0
+        : 560.0;
+    final hasBodyContent =
+        remoteMessage.repliedMessageId != null ||
+        remoteMessage.meta['redirect'] is Map ||
+        (remoteMessage.forwardedMessageId != null && !isRedirect) ||
+        (!isRedirect && MessageContent.hasContent(remoteMessage)) ||
+        (remoteMessage.meta['embeds'] != null &&
+            kMessageEnableEmbedTypes.contains(message.type));
+    final hasProgress = progress != null && progress!.isNotEmpty;
+    final attachmentBorderRadius = hasBodyContent || hasProgress
+        ? const BorderRadius.only(
+            topLeft: Radius.circular(16),
+            topRight: Radius.circular(16),
+          )
+        : BorderRadius.circular(16);
+
+    Widget buildMessageBody() {
+      return Container(
+        decoration: BoxDecoration(
+          color: containerColor,
+          borderRadius: BorderRadius.circular(16),
+        ),
+        clipBehavior: Clip.antiAlias,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisSize: MainAxisSize.min,
           children: [
-            if (showAvatar) ...[
-              const Gap(8),
-              MessageSenderInfo(
-                roomId: message.roomId,
-                sender: sender,
-                createdAt: message.createdAt,
-                textColor: textColor,
+            if (!isRedirect && remoteMessage.attachments.isNotEmpty)
+              ClipRRect(
+                borderRadius: attachmentBorderRadius,
+                child: CloudFileList(
+                  files: remoteMessage.attachments,
+                  maxHeight: attachmentMaxH,
+                  maxWidth: double.infinity,
+                  padding: EdgeInsets.zero,
+                  borderRadius: 0,
+                ),
               ),
-              const Gap(4),
-            ],
-            const Gap(2),
-            Row(
-              spacing: 4,
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                Flexible(
-                  child: Container(
-                    decoration: BoxDecoration(
-                      color: containerColor,
-                      borderRadius: BorderRadius.circular(16),
+            if (hasBodyContent || hasProgress)
+              Padding(
+                padding: const EdgeInsets.only(
+                  left: 10,
+                  right: 10,
+                  top: 6,
+                  bottom: 6,
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (remoteMessage.repliedMessageId != null)
+                      MessageQuoteWidget(
+                        message: message,
+                        textColor: textColor,
+                        isReply: true,
+                      ).padding(vertical: 4),
+                    if (remoteMessage.meta['redirect'] is Map)
+                      (() {
+                        final data = SnRedirectData.fromJson(
+                          Map<String, dynamic>.from(
+                            remoteMessage.meta['redirect'] as Map,
+                          ),
+                        );
+                        return data.map(
+                          historySegment: (_) => RedirectMessageCard(
+                            redirect: data,
+                            textColor: textColor,
+                          ).padding(vertical: 4),
+                          singleMessage: (_) => RedirectInlineContent(
+                            redirect: data,
+                            textColor: textColor,
+                          ).padding(vertical: 4),
+                        );
+                      })(),
+                    if (remoteMessage.forwardedMessageId != null && !isRedirect)
+                      MessageQuoteWidget(
+                        message: message,
+                        textColor: textColor,
+                        isReply: false,
+                      ).padding(vertical: 4),
+                    if (!isRedirect && MessageContent.hasContent(remoteMessage))
+                      MessageContent(
+                        item: remoteMessage,
+                        translatedText: translatedText,
+                      ),
+                    if (remoteMessage.meta['embeds'] != null &&
+                        kMessageEnableEmbedTypes.contains(message.type))
+                      EmbedListWidget(
+                        embeds: remoteMessage.meta['embeds'] as List<dynamic>,
+                        isInteractive: true,
+                        isFullPost: false,
+                        renderingPadding: EdgeInsets.zero,
+                        maxWidth: 480,
+                      ),
+                    FileUploadProgressWidget(
+                      progress: progress,
+                      textColor: textColor,
+                      hasContent: MessageContent.hasContent(remoteMessage),
                     ),
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 6,
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+                  ],
+                ),
+              ),
+          ],
+        ),
+      );
+    }
+
+    return Material(
+      color: Colors.transparent,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (showAvatar)
+              Padding(
+                padding: const EdgeInsets.only(left: _contentOffset, bottom: 4),
+                child: header,
+              ),
+            _StickyAvatarMessageRow(
+              key: ValueKey(
+                'sticky-avatar-${message.clientMessageId ?? message.id}',
+              ),
+              showAvatar: showAvatar && showBubbleAvatar,
+              avatar: avatar,
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Flexible(
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      mainAxisSize: MainAxisSize.min,
                       children: [
-                        if (remoteMessage.repliedMessageId != null)
-                          MessageQuoteWidget(
-                            message: message,
-                            textColor: textColor,
-                            isReply: true,
-                          ).padding(vertical: 4),
-                        if (remoteMessage.forwardedMessageId != null)
-                          MessageQuoteWidget(
-                            message: message,
-                            textColor: textColor,
-                            isReply: false,
-                          ).padding(vertical: 4),
-                        if (MessageContent.hasContent(remoteMessage))
-                          MessageContent(
-                            item: remoteMessage,
-                            translatedText: translatedText,
-                          ),
-                        if (remoteMessage.attachments.isNotEmpty)
-                          LayoutBuilder(
-                            builder: (context, constraints) {
-                              return CloudFileList(
-                                files: remoteMessage.attachments,
-                                maxWidth: constraints.maxWidth,
-                                padding: EdgeInsets.symmetric(vertical: 4),
-                              );
-                            },
-                          ),
-                        if (remoteMessage.meta['embeds'] != null &&
-                            kMessageEnableEmbedTypes.contains(message.type))
-                          EmbedListWidget(
-                            embeds:
-                                remoteMessage.meta['embeds'] as List<dynamic>,
-                            isInteractive: true,
-                            isFullPost: false,
-                            renderingPadding: EdgeInsets.zero,
-                            maxWidth: 480,
-                          ),
-                        FileUploadProgressWidget(
-                          progress: progress,
+                        Flexible(child: buildMessageBody()),
+                        const Gap(4),
+                        MessageIndicators(
+                          editedAt: remoteMessage.editedAt,
+                          status: message.status,
+                          isCurrentUser: isCurrentUser,
                           textColor: textColor,
-                          hasContent: MessageContent.hasContent(remoteMessage),
                         ),
                       ],
                     ),
                   ),
-                ),
-                MessageIndicators(
-                  editedAt: remoteMessage.editedAt,
-                  status: message.status,
-                  isCurrentUser: isCurrentUser,
-                  textColor: textColor,
-                ),
-              ],
+                ],
+              ),
             ),
+            if (isMentioningCurrentUser)
+              Padding(
+                padding: const EdgeInsets.only(left: _contentOffset, top: 4),
+                child: _MentionHint(textColor: textColor),
+              ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _StickyAvatarMessageRow extends StatefulWidget {
+  static const double _size = MessageItemDisplayBubble._avatarSize;
+  static const double _contentOffset = MessageItemDisplayBubble._contentOffset;
+  static const double _viewportTopMargin = 12;
+  static const Duration _stickDuration = Duration(milliseconds: 70);
+
+  final bool showAvatar;
+  final Widget avatar;
+  final Widget child;
+
+  const _StickyAvatarMessageRow({
+    super.key,
+    required this.showAvatar,
+    required this.avatar,
+    required this.child,
+  });
+
+  @override
+  State<_StickyAvatarMessageRow> createState() =>
+      _StickyAvatarMessageRowState();
+}
+
+class _StickyAvatarMessageRowState extends State<_StickyAvatarMessageRow> {
+  final _key = GlobalKey();
+  ScrollPosition? _position;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _updateScrollPosition();
+  }
+
+  @override
+  void dispose() {
+    _position?.removeListener(_handleScroll);
+    super.dispose();
+  }
+
+  void _updateScrollPosition() {
+    final nextPosition = _readScrollPosition();
+    if (identical(_position, nextPosition)) return;
+
+    _position?.removeListener(_handleScroll);
+    _position = nextPosition;
+    _position?.addListener(_handleScroll);
+  }
+
+  ScrollPosition? _readScrollPosition() {
+    final scrollable = Scrollable.maybeOf(context);
+    if (scrollable == null) return null;
+
+    try {
+      return scrollable.position;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  void _handleScroll() {
+    if (!mounted || !widget.showAvatar) return;
+    setState(() {});
+  }
+
+  double _avatarOffset() {
+    final scrollable = Scrollable.maybeOf(context);
+    if (scrollable == null) return 0;
+
+    final box = _key.currentContext?.findRenderObject() as RenderBox?;
+    final viewportBox = scrollable.context.findRenderObject() as RenderBox?;
+    if (box == null || viewportBox == null || !box.hasSize) return 0;
+
+    final double rowTop;
+    try {
+      rowTop = box.localToGlobal(Offset.zero, ancestor: viewportBox).dy;
+    } catch (_) {
+      return 0;
+    }
+    final maxOffset = (box.size.height - _StickyAvatarMessageRow._size).clamp(
+      0.0,
+      double.infinity,
+    );
+    return (_StickyAvatarMessageRow._viewportTopMargin - rowTop).clamp(
+      0.0,
+      maxOffset,
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    _updateScrollPosition();
+    final offset = widget.showAvatar ? _avatarOffset() : 0.0;
+
+    return SizedBox(
+      key: _key,
+      width: double.infinity,
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          Padding(
+            padding: const EdgeInsets.only(
+              left: _StickyAvatarMessageRow._contentOffset,
+            ),
+            child: widget.child,
+          ),
+          if (widget.showAvatar)
+            Positioned(
+              left: 0,
+              top: 0,
+              child: TweenAnimationBuilder<double>(
+                tween: Tween<double>(end: offset),
+                duration: MediaQuery.disableAnimationsOf(context)
+                    ? Duration.zero
+                    : _StickyAvatarMessageRow._stickDuration,
+                curve: Curves.easeOutCubic,
+                builder: (context, value, child) =>
+                    Transform.translate(offset: Offset(0, value), child: child),
+                child: SizedBox(
+                  width: _StickyAvatarMessageRow._size,
+                  height: _StickyAvatarMessageRow._size,
+                  child: Align(
+                    alignment: Alignment.topCenter,
+                    child: widget.avatar,
+                  ),
+                ),
+              ),
+            ),
+        ],
       ),
     );
   }
@@ -1379,6 +1862,11 @@ class MessageItemDisplayIRC extends HookConsumerWidget {
     final remoteMessage = message.toRemoteMessage();
     final sender = remoteMessage.sender;
     final textColor = Theme.of(context).colorScheme.onSurfaceVariant;
+    final isRedirect = remoteMessage.meta['redirect'] is Map;
+    final currentUserId = ref.watch(userInfoProvider).value?.id;
+    final isMentioningCurrentUser =
+        currentUserId != null &&
+        remoteMessage.membersMentioned.contains(currentUserId);
 
     final isMultiline =
         message.type == 'text' ||
@@ -1402,9 +1890,13 @@ class MessageItemDisplayIRC extends HookConsumerWidget {
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.center,
               children: [
-                ProfilePictureWidget(
-                  file: sender.account.profile.picture,
-                  radius: 8,
+                OnlineAvatarBadge(
+                  roomId: message.roomId,
+                  accountId: sender.accountId,
+                  child: ProfilePictureWidget(
+                    file: sender.account.profile.picture,
+                    radius: 8,
+                  ),
                 ).padding(horizontal: 6, top: isMultiline ? 2 : 0),
                 Text(
                   sender.account.nick,
@@ -1417,64 +1909,108 @@ class MessageItemDisplayIRC extends HookConsumerWidget {
           ),
           const Gap(8),
           Expanded(
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.end,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Flexible(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      if (remoteMessage.repliedMessageId != null)
-                        MessageQuoteWidget(
-                          message: message,
-                          textColor: textColor,
-                          isReply: true,
-                        ).padding(vertical: 4),
-                      if (remoteMessage.forwardedMessageId != null)
-                        MessageQuoteWidget(
-                          message: message,
-                          textColor: textColor,
-                          isReply: false,
-                        ).padding(vertical: 4),
-                      if (MessageContent.hasContent(remoteMessage))
-                        MessageContent(
-                          item: remoteMessage,
-                          translatedText: translatedText,
-                        ),
-                      if (remoteMessage.attachments.isNotEmpty)
-                        LayoutBuilder(
-                          builder: (context, constraints) {
-                            return CloudFileList(
-                              files: remoteMessage.attachments,
-                              maxWidth: constraints.maxWidth,
-                              padding: EdgeInsets.symmetric(vertical: 4),
-                            );
-                          },
-                        ),
-                      if (remoteMessage.meta['embeds'] != null &&
-                          kMessageEnableEmbedTypes.contains(message.type))
-                        EmbedListWidget(
-                          embeds: remoteMessage.meta['embeds'] as List<dynamic>,
-                          isInteractive: true,
-                          isFullPost: false,
-                          renderingPadding: EdgeInsets.zero,
-                          maxWidth: 480,
-                        ),
-                      FileUploadProgressWidget(
-                        progress: progress,
-                        textColor: textColor,
-                        hasContent: MessageContent.hasContent(remoteMessage),
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Flexible(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          if (remoteMessage.repliedMessageId != null)
+                            MessageQuoteWidget(
+                              message: message,
+                              textColor: textColor,
+                              isReply: true,
+                            ).padding(vertical: 4),
+                          if (remoteMessage.meta['redirect'] is Map)
+                            (() {
+                              final data = SnRedirectData.fromJson(
+                                Map<String, dynamic>.from(
+                                  remoteMessage.meta['redirect'] as Map,
+                                ),
+                              );
+                              return data.map(
+                                historySegment: (_) => RedirectMessageCard(
+                                  redirect: data,
+                                  textColor: textColor,
+                                ).padding(vertical: 4),
+                                singleMessage: (_) => RedirectInlineContent(
+                                  redirect: data,
+                                  textColor: textColor,
+                                ).padding(vertical: 4),
+                              );
+                            })(),
+                          if (remoteMessage.forwardedMessageId != null &&
+                              !isRedirect)
+                            MessageQuoteWidget(
+                              message: message,
+                              textColor: textColor,
+                              isReply: false,
+                            ).padding(vertical: 4),
+                          if (!isRedirect &&
+                              remoteMessage.attachments.isNotEmpty)
+                            LayoutBuilder(
+                              builder: (context, constraints) {
+                                final amaxH =
+                                    ref.watch(
+                                          appSettingsProvider.select(
+                                            (s) => s.attachmentPreviewMode,
+                                          ),
+                                        ) ==
+                                        'small'
+                                    ? 200.0
+                                    : 560.0;
+                                return CloudFileList(
+                                  files: remoteMessage.attachments,
+                                  maxHeight: amaxH,
+                                  maxWidth: constraints.maxWidth,
+                                  padding: EdgeInsets.symmetric(vertical: 4),
+                                );
+                              },
+                            ),
+                          if (!isRedirect &&
+                              MessageContent.hasContent(remoteMessage))
+                            MessageContent(
+                              item: remoteMessage,
+                              translatedText: translatedText,
+                            ),
+                          if (remoteMessage.meta['embeds'] != null &&
+                              kMessageEnableEmbedTypes.contains(message.type))
+                            EmbedListWidget(
+                              embeds:
+                                  remoteMessage.meta['embeds'] as List<dynamic>,
+                              isInteractive: true,
+                              isFullPost: false,
+                              renderingPadding: EdgeInsets.zero,
+                              maxWidth: 480,
+                            ),
+                          FileUploadProgressWidget(
+                            progress: progress,
+                            textColor: textColor,
+                            hasContent: MessageContent.hasContent(
+                              remoteMessage,
+                            ),
+                          ),
+                        ],
                       ),
-                    ],
+                    ),
+                    MessageIndicators(
+                      editedAt: remoteMessage.editedAt,
+                      status: message.status,
+                      isCurrentUser: isCurrentUser,
+                      textColor: textColor,
+                    ),
+                  ],
+                ),
+                if (isMentioningCurrentUser)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 4),
+                    child: _MentionHint(textColor: textColor),
                   ),
-                ),
-                MessageIndicators(
-                  editedAt: remoteMessage.editedAt,
-                  status: message.status,
-                  isCurrentUser: isCurrentUser,
-                  textColor: textColor,
-                ),
               ],
             ),
           ),
@@ -1489,6 +2025,7 @@ class MessageItemDisplayDiscord extends HookConsumerWidget {
   final bool isCurrentUser;
   final Map<int, double?>? progress;
   final bool showAvatar;
+  final bool showColumnAvatar;
   final Function(String messageId) onJump;
   final String? translatedText;
   final bool translating;
@@ -1499,6 +2036,7 @@ class MessageItemDisplayDiscord extends HookConsumerWidget {
     required this.isCurrentUser,
     required this.progress,
     required this.showAvatar,
+    required this.showColumnAvatar,
     required this.onJump,
     required this.translatedText,
     required this.translating,
@@ -1509,6 +2047,11 @@ class MessageItemDisplayDiscord extends HookConsumerWidget {
     final textColor = Theme.of(context).colorScheme.onSurfaceVariant;
     final remoteMessage = message.toRemoteMessage();
     final sender = remoteMessage.sender;
+    final isRedirect = remoteMessage.meta['redirect'] is Map;
+    final currentUserId = ref.watch(userInfoProvider).value?.id;
+    final isMentioningCurrentUser =
+        currentUserId != null &&
+        remoteMessage.membersMentioned.contains(currentUserId);
 
     const kAvatarRadius = 12.0;
 
@@ -1521,14 +2064,21 @@ class MessageItemDisplayDiscord extends HookConsumerWidget {
                 Row(
                   spacing: 8,
                   children: [
-                    ChatRoomMemberRegion(
-                      roomId: message.roomId,
-                      member: sender,
-                      child: ProfilePictureWidget(
-                        file: sender.account.profile.picture,
-                        radius: kAvatarRadius,
-                      ),
-                    ),
+                    if (showColumnAvatar)
+                      ChatRoomMemberRegion(
+                        roomId: message.roomId,
+                        member: sender,
+                        child: OnlineAvatarBadge(
+                          roomId: message.roomId,
+                          accountId: sender.accountId,
+                          child: ProfilePictureWidget(
+                            file: sender.account.profile.picture,
+                            radius: kAvatarRadius,
+                          ),
+                        ),
+                      )
+                    else
+                      const SizedBox(width: kAvatarRadius * 2),
                     MessageSenderInfo(
                       roomId: message.roomId,
                       sender: sender,
@@ -1553,26 +2103,58 @@ class MessageItemDisplayDiscord extends HookConsumerWidget {
                               textColor: textColor,
                               isReply: true,
                             ).padding(vertical: 4),
-                          if (remoteMessage.forwardedMessageId != null)
+                          if (remoteMessage.meta['redirect'] is Map)
+                            (() {
+                              final data = SnRedirectData.fromJson(
+                                Map<String, dynamic>.from(
+                                  remoteMessage.meta['redirect'] as Map,
+                                ),
+                              );
+                              return data.map(
+                                historySegment: (_) => RedirectMessageCard(
+                                  redirect: data,
+                                  textColor: textColor,
+                                ).padding(vertical: 4),
+                                singleMessage: (_) => RedirectInlineContent(
+                                  redirect: data,
+                                  textColor: textColor,
+                                ).padding(vertical: 4),
+                              );
+                            })(),
+                          if (remoteMessage.forwardedMessageId != null &&
+                              !isRedirect)
                             MessageQuoteWidget(
                               message: message,
                               textColor: textColor,
                               isReply: false,
                             ).padding(vertical: 4),
-                          if (MessageContent.hasContent(remoteMessage))
+                          if (!isRedirect &&
+                              remoteMessage.attachments.isNotEmpty)
+                            LayoutBuilder(
+                              builder: (context, constraints) {
+                                final amaxH =
+                                    ref.watch(
+                                          appSettingsProvider.select(
+                                            (s) => s.attachmentPreviewMode,
+                                          ),
+                                        ) ==
+                                        'small'
+                                    ? 200.0
+                                    : 560.0;
+                                return CloudFileList(
+                                  files: remoteMessage.attachments,
+                                  maxHeight: amaxH,
+                                  maxWidth: constraints.maxWidth,
+                                  padding: EdgeInsets.symmetric(vertical: 4),
+                                  isColumn: true,
+                                );
+                              },
+                            ),
+                          if (!isRedirect &&
+                              MessageContent.hasContent(remoteMessage))
                             MessageContent(
                               item: remoteMessage,
                               translatedText: translatedText,
-                            ),
-                          if (remoteMessage.attachments.isNotEmpty)
-                            LayoutBuilder(
-                              builder: (context, constraints) {
-                                return CloudFileList(
-                                  files: remoteMessage.attachments,
-                                  maxWidth: constraints.maxWidth,
-                                  padding: EdgeInsets.symmetric(vertical: 4),
-                                );
-                              },
                             ),
                           if (remoteMessage.meta['embeds'] != null &&
                               kMessageEnableEmbedTypes.contains(message.type))
@@ -1602,72 +2184,156 @@ class MessageItemDisplayDiscord extends HookConsumerWidget {
                     ),
                   ],
                 ).padding(left: kAvatarRadius * 2 + 8),
+                if (isMentioningCurrentUser)
+                  Padding(
+                    padding: EdgeInsets.only(
+                      left: kAvatarRadius * 2 + 8,
+                      top: 4,
+                    ),
+                    child: _MentionHint(textColor: textColor),
+                  ),
               ],
             )
           : Padding(
               padding: EdgeInsets.only(left: kAvatarRadius * 2 + 8),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.end,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Flexible(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        if (remoteMessage.repliedMessageId != null)
-                          MessageQuoteWidget(
-                            message: message,
-                            textColor: textColor,
-                            isReply: true,
-                          ).padding(vertical: 4),
-                        if (remoteMessage.forwardedMessageId != null)
-                          MessageQuoteWidget(
-                            message: message,
-                            textColor: textColor,
-                            isReply: false,
-                          ).padding(vertical: 4),
-                        if (MessageContent.hasContent(remoteMessage))
-                          MessageContent(
-                            item: remoteMessage,
-                            translatedText: translatedText,
-                          ),
-                        if (remoteMessage.attachments.isNotEmpty)
-                          LayoutBuilder(
-                            builder: (context, constraints) {
-                              return CloudFileList(
-                                files: remoteMessage.attachments,
-                                maxWidth: constraints.maxWidth,
-                                padding: EdgeInsets.symmetric(vertical: 4),
-                              );
-                            },
-                          ),
-                        if (remoteMessage.meta['embeds'] != null &&
-                            kMessageEnableEmbedTypes.contains(message.type))
-                          EmbedListWidget(
-                            embeds:
-                                remoteMessage.meta['embeds'] as List<dynamic>,
-                            isInteractive: true,
-                            isFullPost: false,
-                            renderingPadding: EdgeInsets.zero,
-                            maxWidth: 480,
-                          ),
-                        FileUploadProgressWidget(
-                          progress: progress,
-                          textColor: textColor,
-                          hasContent: MessageContent.hasContent(remoteMessage),
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      Flexible(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            if (remoteMessage.repliedMessageId != null)
+                              MessageQuoteWidget(
+                                message: message,
+                                textColor: textColor,
+                                isReply: true,
+                              ).padding(vertical: 4),
+                            if (remoteMessage.meta['redirect'] is Map)
+                              (() {
+                                final data = SnRedirectData.fromJson(
+                                  Map<String, dynamic>.from(
+                                    remoteMessage.meta['redirect'] as Map,
+                                  ),
+                                );
+                                return data.map(
+                                  historySegment: (_) => RedirectMessageCard(
+                                    redirect: data,
+                                    textColor: textColor,
+                                  ).padding(vertical: 4),
+                                  singleMessage: (_) => RedirectInlineContent(
+                                    redirect: data,
+                                    textColor: textColor,
+                                  ).padding(vertical: 4),
+                                );
+                              })(),
+                            if (remoteMessage.forwardedMessageId != null &&
+                                !isRedirect)
+                              MessageQuoteWidget(
+                                message: message,
+                                textColor: textColor,
+                                isReply: false,
+                              ).padding(vertical: 4),
+                            if (!isRedirect &&
+                                remoteMessage.attachments.isNotEmpty)
+                              LayoutBuilder(
+                                builder: (context, constraints) {
+                                  final amaxH =
+                                      ref.watch(
+                                            appSettingsProvider.select(
+                                              (s) => s.attachmentPreviewMode,
+                                            ),
+                                          ) ==
+                                          'small'
+                                      ? 200.0
+                                      : 560.0;
+                                  return CloudFileList(
+                                    files: remoteMessage.attachments,
+                                    maxHeight: amaxH,
+                                    maxWidth: constraints.maxWidth,
+                                    padding: EdgeInsets.symmetric(vertical: 4),
+                                    isColumn: true,
+                                  );
+                                },
+                              ),
+                            if (!isRedirect &&
+                                MessageContent.hasContent(remoteMessage))
+                              MessageContent(
+                                item: remoteMessage,
+                                translatedText: translatedText,
+                              ),
+                            if (remoteMessage.meta['embeds'] != null &&
+                                kMessageEnableEmbedTypes.contains(message.type))
+                              EmbedListWidget(
+                                embeds:
+                                    remoteMessage.meta['embeds']
+                                        as List<dynamic>,
+                                isInteractive: true,
+                                isFullPost: false,
+                                renderingPadding: EdgeInsets.zero,
+                                maxWidth: 480,
+                              ),
+                            FileUploadProgressWidget(
+                              progress: progress,
+                              textColor: textColor,
+                              hasContent: MessageContent.hasContent(
+                                remoteMessage,
+                              ),
+                            ),
+                          ],
                         ),
-                      ],
+                      ),
+                      MessageIndicators(
+                        editedAt: remoteMessage.editedAt,
+                        status: message.status,
+                        isCurrentUser: isCurrentUser,
+                        textColor: textColor,
+                      ),
+                    ],
+                  ),
+                  if (isMentioningCurrentUser)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 4),
+                      child: _MentionHint(textColor: textColor),
                     ),
-                  ),
-                  MessageIndicators(
-                    editedAt: remoteMessage.editedAt,
-                    status: message.status,
-                    isCurrentUser: isCurrentUser,
-                    textColor: textColor,
-                  ),
                 ],
               ),
             ),
+    );
+  }
+}
+
+class _MentionHint extends StatelessWidget {
+  final Color textColor;
+
+  const _MentionHint({required this.textColor});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 4),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            Symbols.alternate_email,
+            size: 14,
+            color: textColor.withOpacity(0.8),
+          ),
+          const Gap(4),
+          Text(
+            'chatMentionedYou'.tr(),
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: textColor.withOpacity(0.85),
+              fontStyle: FontStyle.italic,
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -1749,19 +2415,18 @@ class MessageQuoteWidget extends HookConsumerWidget {
                     if (MessageContent.hasContent(remoteMessage))
                       MessageContent(item: remoteMessage),
                     if (remoteMessage.attachments.isNotEmpty)
-                      Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(Symbols.attach_file, size: 12, color: textColor),
-                          const SizedBox(width: 4),
-                          Text(
-                            'hasAttachments'.plural(
-                              remoteMessage.attachments.length,
-                            ),
-                            style: TextStyle(color: textColor, fontSize: 12),
-                          ),
-                        ],
-                      ).padding(vertical: 2),
+                      ConstrainedBox(
+                        constraints: const BoxConstraints(maxWidth: 180),
+                        child: CloudFileList(
+                          files: remoteMessage.attachments,
+                          maxWidth: 180,
+                          maxHeight: 96,
+                          minWidth: 120,
+                          initiallyCollapsed: false,
+                          heroTagPrefix: 'cloud-file-quote-${message.id}',
+                          padding: const EdgeInsets.only(top: 4),
+                        ),
+                      ),
                   ],
                 ),
               ),
@@ -1771,6 +2436,344 @@ class MessageQuoteWidget extends HookConsumerWidget {
           return SizedBox.shrink();
         }
       },
+    );
+  }
+}
+
+class RedirectMessageCard extends StatelessWidget {
+  final SnRedirectData redirect;
+  final Color textColor;
+
+  const RedirectMessageCard({
+    super.key,
+    required this.redirect,
+    required this.textColor,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final sourceRoomName = redirect.sourceRoomName;
+    final historyCount = redirect.messageCount;
+
+    final cardLabel = 'chatRedirectedHistoryFrom'.tr(args: [sourceRoomName]);
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: const BorderRadius.all(Radius.circular(8)),
+        onTap: () {
+          showModalBottomSheet(
+            context: context,
+            isScrollControlled: true,
+            builder: (ctx) => _RedirectHistorySheet(redirect: redirect),
+          );
+        },
+        child: Ink(
+          padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 10),
+          decoration: BoxDecoration(
+            color: Theme.of(
+              context,
+            ).colorScheme.primaryFixedDim.withOpacity(0.35),
+            borderRadius: const BorderRadius.all(Radius.circular(8)),
+          ),
+          child: Row(
+            children: [
+              Icon(Symbols.history, size: 16, color: textColor),
+              const Gap(6),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      cardLabel,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: textColor,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    if (historyCount > 0)
+                      Text(
+                        'chatRedirectMessagesCount'.plural(
+                          historyCount,
+                          args: [historyCount.toString()],
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: textColor.withOpacity(0.82),
+                          fontStyle: FontStyle.italic,
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+              const Gap(6),
+              Icon(
+                Symbols.chevron_right,
+                size: 16,
+                color: textColor.withOpacity(0.85),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class RedirectInlineContent extends StatelessWidget {
+  final SnRedirectData redirect;
+  final Color textColor;
+
+  const RedirectInlineContent({
+    super.key,
+    required this.redirect,
+    required this.textColor,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final sourceRoomName = redirect.sourceRoomName;
+    final content = redirect.resolvedSourceContent ?? '';
+    final parsedAttachments = redirect.resolvedSourceAttachments;
+    final sourceSenderName = redirect.resolvedSourceSenderName;
+    final sourceSenderProfilePicture = redirect.sourceSenderProfilePicture;
+    final sourceSenderPictureId = redirect.sourceSenderPictureId;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            Icon(
+              Symbols.subdirectory_arrow_right,
+              size: 14,
+              color: textColor.withOpacity(0.6),
+            ),
+            const Gap(4),
+            ProfilePictureWidget(
+              file: sourceSenderProfilePicture,
+              fileId: sourceSenderPictureId,
+              radius: 8,
+            ),
+            if (sourceSenderProfilePicture != null ||
+                sourceSenderPictureId != null)
+              const Gap(4),
+            Flexible(
+              child: Text.rich(
+                TextSpan(
+                  children: [
+                    if (sourceSenderName != null &&
+                        sourceSenderName.trim().isNotEmpty) ...[
+                      TextSpan(
+                        text: sourceSenderName,
+                        style: TextStyle(
+                          color: textColor.withOpacity(0.8),
+                          fontWeight: FontWeight.w600,
+                          fontStyle: FontStyle.italic,
+                          fontSize: 12,
+                        ),
+                      ),
+                      TextSpan(
+                        text: ' · ',
+                        style: TextStyle(
+                          color: textColor.withOpacity(0.5),
+                          fontSize: 12,
+                        ),
+                      ),
+                    ],
+                    TextSpan(
+                      text: 'chatRedirectedFromRoom'.tr(args: [sourceRoomName]),
+                      style: TextStyle(
+                        color: textColor.withOpacity(0.7),
+                        fontStyle: FontStyle.italic,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ],
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ],
+        ),
+        if (content.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.only(top: 4),
+            child: MarkdownTextContent(
+              content: content,
+              isSelectable: kTextSelectable,
+              linesMargin: EdgeInsets.zero,
+            ),
+          ),
+        if (parsedAttachments.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.only(top: 4),
+            child: CloudFileList(
+              files: parsedAttachments,
+              maxWidth: 240,
+              maxHeight: 120,
+              minWidth: 120,
+              initiallyCollapsed: false,
+              heroTagPrefix: 'redirect-att',
+              padding: EdgeInsets.zero,
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+class _RedirectHistorySheet extends StatelessWidget {
+  final SnRedirectData redirect;
+
+  const _RedirectHistorySheet({required this.redirect});
+
+  @override
+  Widget build(BuildContext context) {
+    final transcriptMessages = redirect.map(
+      singleMessage: (d) => [],
+      historySegment: (d) => d.messages,
+    );
+
+    return SheetScaffold(
+      titleText: 'chatRedirectHistoryTitle'.tr(args: [redirect.sourceRoomName]),
+      child: transcriptMessages.isNotEmpty
+          ? Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (redirect.messageCount > 0)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+                    child: Text(
+                      'chatRedirectMessagesCount'.plural(
+                        redirect.messageCount,
+                        args: [redirect.messageCount.toString()],
+                      ),
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        fontStyle: FontStyle.italic,
+                      ),
+                    ),
+                  ),
+                Expanded(
+                  child: ListView.separated(
+                    itemCount: transcriptMessages.length,
+                    separatorBuilder: (_, _) => Divider(
+                      height: 1,
+                      thickness: 1 / MediaQuery.devicePixelRatioOf(context),
+                    ),
+                    itemBuilder: (context, index) {
+                      final senderName =
+                          redirect.historyMessageSenderName(index) ??
+                          'unknown'.tr();
+                      final senderUname = redirect
+                          .historyMessageSenderAccountName(index);
+                      final pictureId = redirect.historyMessageSenderPictureId(
+                        index,
+                      );
+                      final senderAccount = redirect
+                          .historyMessageSenderAccount(index);
+
+                      final content =
+                          redirect.historyMessageContent(index) ?? '';
+                      final attachments = redirect
+                          .historyMessageResolvedAttachments(index);
+
+                      return Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 10,
+                        ),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            AccountPfcRegion(
+                              uname: senderUname,
+                              child: ProfilePictureWidget(
+                                fileId: pictureId,
+                                radius: 12,
+                              ),
+                            ),
+                            const Gap(10),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  if (senderAccount != null)
+                                    AccountName(
+                                      account: senderAccount,
+                                      textOverride: senderName,
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .bodySmall
+                                          ?.copyWith(
+                                            fontWeight: FontWeight.w600,
+                                          ),
+                                    )
+                                  else
+                                    Text(
+                                      senderName,
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .bodySmall
+                                          ?.copyWith(
+                                            fontWeight: FontWeight.w600,
+                                          ),
+                                    ),
+                                  if (content.trim().isNotEmpty)
+                                    Padding(
+                                      padding: const EdgeInsets.only(top: 4),
+                                      child: MarkdownTextContent(
+                                        content: content.trim(),
+                                        isSelectable: kTextSelectable,
+                                        linesMargin: EdgeInsets.zero,
+                                      ),
+                                    ),
+                                  if (attachments.isNotEmpty)
+                                    Padding(
+                                      padding: const EdgeInsets.only(top: 4),
+                                      child: CloudFileList(
+                                        files: attachments,
+                                        maxWidth: double.infinity,
+                                        maxHeight: 200,
+                                        minWidth: 120,
+                                        initiallyCollapsed: false,
+                                        heroTagPrefix: 'hist-att',
+                                        padding: EdgeInsets.zero,
+                                      ),
+                                    ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              ],
+            )
+          : Center(
+              child: Padding(
+                padding: const EdgeInsets.all(24),
+                child: Text(
+                  redirect.resolvedSourceContent?.trim().isNotEmpty == true
+                      ? redirect.resolvedSourceContent!
+                      : 'chatNoContent'.tr(),
+                  style: Theme.of(context).textTheme.bodyMedium,
+                  textAlign: TextAlign.center,
+                ),
+              ),
+            ),
     );
   }
 }

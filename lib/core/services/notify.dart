@@ -40,6 +40,17 @@ StreamSubscription? setupNotificationListener(
   }
 }
 
+Future<void> showDebugLocalNotification(WidgetRef ref) async {
+  if (kIsWeb) {
+    return;
+  }
+  if (Platform.isWindows) {
+    return windows_notify.showDebugLocalNotification(ref);
+  } else {
+    return universal_notify.showDebugLocalNotification(ref);
+  }
+}
+
 Future<void> subscribePushNotification(
   Dio apiClient, {
   bool detailedErrors = false,
@@ -60,15 +71,10 @@ Future<void> subscribePushNotification(
     effectiveContext,
     listen: false,
   ).read(sharedPreferencesProvider);
-  final provider = await resolvePushProvider(effectiveContext, prefs);
+  await resolvePushProvider(effectiveContext, prefs);
 
   if (Platform.isWindows) {
     return windows_notify.subscribePushNotification(
-      apiClient,
-      detailedErrors: detailedErrors,
-    );
-  } else if (provider == PushNotificationProvider.unifiedpush) {
-    return universal_notify.subscribeUnifiedPushNotification(
       apiClient,
       detailedErrors: detailedErrors,
     );

@@ -34,6 +34,8 @@ import 'package:super_sliver_list/super_sliver_list.dart';
 import 'package:island/core/widgets/content/cloud_file_lightbox.dart';
 import 'package:island/drive/widgets/cloud_files.dart';
 
+final RegExp _messageMetaOnlyTagPattern = RegExp(r'<message_meta\b[^>]*\/?>');
+
 class ThoughtChatInterface extends HookConsumerWidget {
   final List<SnThinkingThought>? initialThoughts;
   final String? initialSequenceId;
@@ -74,6 +76,9 @@ class ThoughtChatInterface extends HookConsumerWidget {
     // Watch the notifier
     final chatState = ref.watch(thoughtChatProvider(args));
     final notifier = ref.read(thoughtChatProvider(args).notifier);
+    final hasStartedConversation =
+        (chatState.sequenceId?.isNotEmpty ?? false) ||
+        chatState.localThoughts.isNotEmpty;
 
     // Sync external state changes
     useEffect(() {
@@ -133,71 +138,63 @@ class ThoughtChatInterface extends HookConsumerWidget {
         constraints: const BoxConstraints(maxWidth: 640),
         child: Column(
           children: [
-            Expanded(
-              child: SuperListView.builder(
-                listController: notifier.listController,
-                controller: notifier.scrollController,
-                padding: EdgeInsets.only(top: 16),
-                reverse: true,
-                itemCount:
-                    chatState.localThoughts.length +
-                    (chatState.isStreaming ? 1 : 0),
-                itemBuilder: (context, index) {
-                  if (chatState.isStreaming && index == 0) {
+            if (!hasStartedConversation)
+              Expanded(
+                child: Center(
+                  child: _ThoughtConversationControls(
+                    services: chatState.services,
+                    selectedServiceId: chatState.selectedServiceId,
+                    onServiceChanged: notifier.setSelectedServiceId,
+                    availableModels: chatState.availableModels,
+                    selectedModel: chatState.selectedModel,
+                    onModelChanged: notifier.setSelectedModel,
+                    isStreaming: chatState.isStreaming,
+                    isDisabled: isDisabled,
+                    hasStartedConversation: hasStartedConversation,
+                  ),
+                ),
+              )
+            else ...[
+              _ThoughtConversationControls(
+                services: chatState.services,
+                selectedServiceId: chatState.selectedServiceId,
+                onServiceChanged: notifier.setSelectedServiceId,
+                availableModels: chatState.availableModels,
+                selectedModel: chatState.selectedModel,
+                onModelChanged: notifier.setSelectedModel,
+                isStreaming: chatState.isStreaming,
+                isDisabled: isDisabled,
+                hasStartedConversation: hasStartedConversation,
+              ),
+              Expanded(
+                child: SuperListView.builder(
+                  listController: notifier.listController,
+                  controller: notifier.scrollController,
+                  padding: EdgeInsets.only(top: 16),
+                  reverse: true,
+                  itemCount:
+                      chatState.localThoughts.length +
+                      (chatState.isStreaming ? 1 : 0),
+                  itemBuilder: (context, index) {
+                    if (chatState.isStreaming && index == 0) {
+                      return ThoughtItem(
+                        isStreaming: true,
+                        streamingItems: chatState.streamingItems,
+                        agentService: chatState.selectedServiceId,
+                      );
+                    }
+                    final thoughtIndex = chatState.isStreaming
+                        ? index - 1
+                        : index;
+                    final thought = chatState.localThoughts[thoughtIndex];
                     return ThoughtItem(
-                      isStreaming: true,
-                      streamingItems: chatState.streamingItems,
+                      thought: thought,
                       agentService: chatState.selectedServiceId,
                     );
-                  }
-                  final thoughtIndex = chatState.isStreaming
-                      ? index - 1
-                      : index;
-                  final thought = chatState.localThoughts[thoughtIndex];
-                  return ThoughtItem(
-                    thought: thought,
-                    agentService: chatState.selectedServiceId,
-                  );
-                },
-              ),
-            ),
-            if (chatState.currentStatus != null)
-              Padding(
-                padding: const EdgeInsets.symmetric(vertical: 8),
-                child: Column(
-                  children: [
-                    Text(
-                      chatState.currentStatus!,
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: Theme.of(context).colorScheme.secondary,
-                      ),
-                    ),
-                    if (chatState.compactSummary != null)
-                      Padding(
-                        padding: const EdgeInsets.only(top: 4),
-                        child: Text(
-                          chatState.compactSummary!,
-                          style: Theme.of(context).textTheme.bodySmall
-                              ?.copyWith(
-                                color: Theme.of(context).colorScheme.secondary,
-                                fontStyle: FontStyle.italic,
-                              ),
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                    if (chatState.archivedCount != null)
-                      Text(
-                        'thoughtCompactArchived'.tr(
-                          args: [chatState.archivedCount.toString()],
-                        ),
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: Theme.of(context).colorScheme.tertiary,
-                        ),
-                      ),
-                  ],
+                  },
                 ),
               ),
+            ],
             Align(
               alignment: Alignment.bottomCenter,
               child: Container(
@@ -217,13 +214,6 @@ class ThoughtChatInterface extends HookConsumerWidget {
                   onUploadAttachment: notifier.uploadAttachment,
                   onDeleteAttachment: notifier.deleteAttachment,
                   onAttachmentsChanged: notifier.updateAttachments,
-                  // Service and model selection
-                  services: chatState.services,
-                  selectedServiceId: chatState.selectedServiceId,
-                  onServiceChanged: notifier.setSelectedServiceId,
-                  availableModels: chatState.availableModels,
-                  selectedModel: chatState.selectedModel,
-                  onModelChanged: notifier.setSelectedModel,
                 ),
               ),
             ),
@@ -232,6 +222,246 @@ class ThoughtChatInterface extends HookConsumerWidget {
       ),
     );
   }
+}
+
+class _ThoughtConversationControls extends StatelessWidget {
+  const _ThoughtConversationControls({
+    required this.services,
+    required this.selectedServiceId,
+    required this.onServiceChanged,
+    required this.availableModels,
+    required this.selectedModel,
+    required this.onModelChanged,
+    required this.isStreaming,
+    required this.isDisabled,
+    required this.hasStartedConversation,
+  });
+
+  final List<ThoughtService> services;
+  final String selectedServiceId;
+  final ValueChanged<String> onServiceChanged;
+  final List<ThoughtServiceModel> availableModels;
+  final String? selectedModel;
+  final ValueChanged<String?> onModelChanged;
+  final bool isStreaming;
+  final bool isDisabled;
+  final bool hasStartedConversation;
+
+  @override
+  Widget build(BuildContext context) {
+    final showServiceSelector = !hasStartedConversation && services.isNotEmpty;
+    final showModelSelector =
+        !hasStartedConversation && availableModels.isNotEmpty;
+
+    if (!showServiceSelector && !showModelSelector) {
+      return const SizedBox.shrink();
+    }
+
+    final colorScheme = Theme.of(context).colorScheme;
+    final isInteractive = !isStreaming && !isDisabled;
+    final card = Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: colorScheme.surfaceContainerLow,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+          color: colorScheme.outlineVariant.withOpacity(0.5),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (showServiceSelector) ...[
+            Text(
+              'thoughtBotLabel'.tr(),
+              style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                color: colorScheme.onSurfaceVariant,
+              ),
+            ),
+            const Gap(8),
+            _ThoughtServiceDropdown(
+              services: services,
+              selectedServiceId: selectedServiceId,
+              onServiceChanged: isInteractive ? onServiceChanged : null,
+            ),
+          ],
+          if (showServiceSelector && showModelSelector) const Gap(10),
+          if (showModelSelector) ...[
+            Text(
+              'thoughtModelLabel'.tr(),
+              style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                color: colorScheme.onSurfaceVariant,
+              ),
+            ),
+            const Gap(8),
+            _ThoughtModelDropdown(
+              models: availableModels,
+              selectedModel: selectedModel,
+              onModelChanged: isInteractive ? onModelChanged : null,
+            ),
+          ],
+        ],
+      ),
+    );
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          Text(
+            'thoughtEmptyStateTitle'.tr(),
+            textAlign: TextAlign.center,
+            style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+              fontWeight: FontWeight.w700,
+              letterSpacing: -0.6,
+            ),
+          ),
+          const Gap(22),
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 420),
+            child: card,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ThoughtServiceDropdown extends StatelessWidget {
+  const _ThoughtServiceDropdown({
+    required this.services,
+    required this.selectedServiceId,
+    required this.onServiceChanged,
+  });
+
+  final List<ThoughtService> services;
+  final String selectedServiceId;
+  final ValueChanged<String>? onServiceChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final selectedValue = services.any((s) => s.id == selectedServiceId)
+        ? selectedServiceId
+        : services.firstOrNull?.id;
+
+    return Container(
+      height: 40,
+      padding: const EdgeInsets.symmetric(horizontal: 12),
+      decoration: BoxDecoration(
+        color: colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: colorScheme.outline.withOpacity(0.2)),
+      ),
+      child: DropdownButtonHideUnderline(
+        child: DropdownButton<String>(
+          value: selectedValue,
+          isExpanded: true,
+          icon: Icon(
+            Symbols.arrow_drop_down,
+            color: onServiceChanged == null
+                ? colorScheme.outline
+                : colorScheme.onSurfaceVariant,
+          ),
+          onChanged: onServiceChanged == null
+              ? null
+              : (value) {
+                  if (value != null) onServiceChanged!(value);
+                },
+          items: services.map((service) {
+            return DropdownMenuItem<String>(
+              value: service.id,
+              child: Row(
+                children: [
+                  Icon(
+                    Symbols.smart_toy,
+                    size: 16,
+                    color: colorScheme.onSurfaceVariant,
+                  ),
+                  const Gap(8),
+                  Expanded(
+                    child: Text(
+                      service.name,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
+              ),
+            );
+          }).toList(),
+        ),
+      ),
+    );
+  }
+}
+
+class _ThoughtModelDropdown extends StatelessWidget {
+  const _ThoughtModelDropdown({
+    required this.models,
+    required this.selectedModel,
+    required this.onModelChanged,
+  });
+
+  final List<ThoughtServiceModel> models;
+  final String? selectedModel;
+  final ValueChanged<String?>? onModelChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+
+    return Container(
+      height: 40,
+      padding: const EdgeInsets.symmetric(horizontal: 12),
+      decoration: BoxDecoration(
+        color: colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: colorScheme.outline.withOpacity(0.2)),
+      ),
+      child: DropdownButtonHideUnderline(
+        child: DropdownButton<String>(
+          value: selectedModel ?? '__auto__',
+          isExpanded: true,
+          icon: Icon(
+            Symbols.arrow_drop_down,
+            color: onModelChanged == null
+                ? colorScheme.outline
+                : colorScheme.onSurfaceVariant,
+          ),
+          onChanged: onModelChanged == null
+              ? null
+              : (value) => onModelChanged!(value == '__auto__' ? null : value),
+          items: [
+            DropdownMenuItem<String>(
+              value: '__auto__',
+              child: Text('Auto'),
+            ),
+            ...models.map((model) {
+              return DropdownMenuItem<String>(
+                value: model.id,
+                child: Text(
+                  model.displayName,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              );
+            }),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ThoughtWidgetSections {
+  const _ThoughtWidgetSections({
+    this.bubbleWidgets = const [],
+    this.backgroundWidgets = const [],
+  });
+
+  final List<Widget> bubbleWidgets;
+  final List<Widget> backgroundWidgets;
 }
 
 List<Map<String, String>> _extractProposals(String content) {
@@ -384,14 +614,6 @@ class ThoughtInput extends HookWidget {
   final Function(int) onDeleteAttachment;
   final Function(List<UniversalFile>) onAttachmentsChanged;
 
-  // Service and model selection
-  final List<ThoughtService> services;
-  final String selectedServiceId;
-  final ValueChanged<String> onServiceChanged;
-  final List<ThoughtServiceModel> availableModels;
-  final String? selectedModel;
-  final ValueChanged<String?> onModelChanged;
-
   const ThoughtInput({
     super.key,
     required this.messageController,
@@ -407,13 +629,6 @@ class ThoughtInput extends HookWidget {
     required this.onUploadAttachment,
     required this.onDeleteAttachment,
     required this.onAttachmentsChanged,
-    // Service and model selection
-    required this.services,
-    required this.selectedServiceId,
-    required this.onServiceChanged,
-    this.availableModels = const [],
-    this.selectedModel,
-    required this.onModelChanged,
   });
 
   Future<void> _pickFile() async {
@@ -437,7 +652,7 @@ class ThoughtInput extends HookWidget {
       ...attachments,
       UniversalFile(
         data: cloudFile,
-        type: switch (cloudFile.mimeType?.split('/').firstOrNull) {
+        type: switch (cloudFile.mimeType.split('/').firstOrNull) {
           'image' => UniversalFileType.image,
           'video' => UniversalFileType.video,
           'audio' => UniversalFileType.audio,
@@ -473,109 +688,6 @@ class ThoughtInput extends HookWidget {
     final item = newAttachments.removeAt(index);
     newAttachments.insert(newIndex, item);
     onAttachmentsChanged(newAttachments);
-  }
-
-  Widget _buildDropdown<T>({
-    required BuildContext context,
-    required T? value,
-    required List<T> items,
-    required ValueChanged<T?>? onChanged,
-    required Widget Function(T) itemBuilder,
-  }) {
-    final colorScheme = Theme.of(context).colorScheme;
-    final isInteractive = onChanged != null;
-    final hasValue = items.contains(value);
-
-    return Container(
-      height: 36,
-      decoration: BoxDecoration(
-        color: colorScheme.surfaceContainerHigh,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: colorScheme.outline.withOpacity(0.2)),
-      ),
-      child: DropdownButtonHideUnderline(
-        child: DropdownButton<T>(
-          value: hasValue ? value : null,
-          isExpanded: true,
-          isDense: true,
-          icon: Icon(
-            Symbols.arrow_drop_down,
-            size: 18,
-            color: isInteractive
-                ? colorScheme.onSurfaceVariant
-                : colorScheme.outline,
-          ),
-          style: Theme.of(context).textTheme.bodyMedium,
-          padding: const EdgeInsets.symmetric(horizontal: 12),
-          borderRadius: BorderRadius.circular(20),
-          onChanged: onChanged,
-          items: items.map((item) {
-            return DropdownMenuItem<T>(value: item, child: itemBuilder(item));
-          }).toList(),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildNullableDropdown<T extends Object>({
-    required BuildContext context,
-    required T? value,
-    required String nullLabel,
-    required List<T> items,
-    required ValueChanged<T?>? onChanged,
-    required Widget Function(T) itemBuilder,
-  }) {
-    final colorScheme = Theme.of(context).colorScheme;
-    final isInteractive = onChanged != null;
-
-    return Container(
-      height: 36,
-      decoration: BoxDecoration(
-        color: colorScheme.surfaceContainerHigh,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: colorScheme.outline.withOpacity(0.2)),
-      ),
-      child: DropdownButtonHideUnderline(
-        child: DropdownButton<String>(
-          value: value?.toString() ?? '__null__',
-          isExpanded: true,
-          isDense: true,
-          icon: Icon(
-            Symbols.arrow_drop_down,
-            size: 18,
-            color: isInteractive
-                ? colorScheme.onSurfaceVariant
-                : colorScheme.outline,
-          ),
-          style: TextStyle(color: colorScheme.onSurface, fontSize: 12),
-          padding: const EdgeInsets.symmetric(horizontal: 12),
-          borderRadius: BorderRadius.circular(20),
-          onChanged: isInteractive
-              ? (v) => onChanged(
-                  v == '__null__'
-                      ? null
-                      : items.firstWhere((i) => i.toString() == v),
-                )
-              : null,
-          items: [
-            DropdownMenuItem<String>(
-              value: '__null__',
-              child: Text(
-                nullLabel,
-                style: Theme.of(context).textTheme.bodyMedium,
-                overflow: TextOverflow.ellipsis,
-              ),
-            ),
-            ...items.map((item) {
-              return DropdownMenuItem<String>(
-                value: item.toString(),
-                child: itemBuilder(item),
-              );
-            }),
-          ],
-        ),
-      ),
-    );
   }
 
   @override
@@ -804,93 +916,6 @@ class ThoughtInput extends HookWidget {
                       ),
                     ],
                   ),
-                  // Service and Model selectors
-                  if (services.isNotEmpty)
-                    Padding(
-                      padding: const EdgeInsets.only(
-                        left: 8,
-                        right: 8,
-                        top: 4,
-                        bottom: 8,
-                      ),
-                      child: Row(
-                        children: [
-                          // Bot/Service dropdown
-                          Expanded(
-                            child: Builder(
-                              builder: (ctx) {
-                                final currentService = services
-                                    .where((s) => s.id == selectedServiceId)
-                                    .firstOrNull;
-                                return _buildDropdown<ThoughtService>(
-                                  context: ctx,
-                                  value: currentService,
-                                  items: services,
-                                  onChanged: (isStreaming || isDisabled)
-                                      ? null
-                                      : (ThoughtService? value) {
-                                          if (value != null) {
-                                            onServiceChanged(value.id);
-                                          }
-                                        },
-                                  itemBuilder: (service) => Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      Icon(
-                                        service.id == 'michan'
-                                            ? Symbols.chat_bubble
-                                            : Symbols.smart_toy,
-                                        size: 14,
-                                        color: Theme.of(
-                                          ctx,
-                                        ).colorScheme.onSurfaceVariant,
-                                      ),
-                                      const Gap(6),
-                                      Flexible(
-                                        child: Text(
-                                          service.name,
-                                          overflow: TextOverflow.ellipsis,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                );
-                              },
-                            ),
-                          ),
-                          const Gap(8),
-                          // Model dropdown
-                          if (availableModels.isNotEmpty)
-                            Expanded(
-                              child:
-                                  _buildNullableDropdown<ThoughtServiceModel>(
-                                    context: context,
-                                    value: selectedModel != null
-                                        ? availableModels
-                                              .where(
-                                                (m) => m.id == selectedModel,
-                                              )
-                                              .firstOrNull
-                                        : null,
-                                    nullLabel: 'Auto',
-                                    items: availableModels,
-                                    onChanged: (isStreaming || isDisabled)
-                                        ? null
-                                        : (ThoughtServiceModel? value) {
-                                            onModelChanged(value?.id);
-                                          },
-                                    itemBuilder: (model) => Text(
-                                      model.displayName,
-                                      style: Theme.of(
-                                        context,
-                                      ).textTheme.bodyMedium,
-                                      overflow: TextOverflow.ellipsis,
-                                    ),
-                                  ),
-                            ),
-                        ],
-                      ),
-                    ),
                 ],
               ),
             ),
@@ -933,8 +958,10 @@ class ThoughtItem extends StatelessWidget {
       return _buildSystemBanner(context);
     }
 
+    final widgetSections = _buildWidgetSections(context);
+
     if (isMichanStyle) {
-      return _buildMichanChatItem(context, isUser);
+      return _buildMichanChatItem(context, isUser, widgetSections);
     }
 
     return Container(
@@ -951,28 +978,37 @@ class ThoughtItem extends StatelessWidget {
           ),
           const Gap(8),
           // Content
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            decoration: BoxDecoration(
-              color: Theme.of(context).colorScheme.surfaceContainerHighest,
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(
-                color: Theme.of(context).colorScheme.outline.withOpacity(0.2),
-                width: 1,
+          if (widgetSections.bubbleWidgets.isNotEmpty)
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                  color: Theme.of(context).colorScheme.outline.withOpacity(0.2),
+                  width: 1,
+                ),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                spacing: 8,
+                children: widgetSections.bubbleWidgets,
               ),
             ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              spacing: 8,
-              children: buildWidgetsList(context),
-            ),
-          ),
+          if (widgetSections.backgroundWidgets.isNotEmpty) ...[
+            const Gap(8),
+            ...widgetSections.backgroundWidgets,
+          ],
         ],
       ),
     );
   }
 
-  Widget _buildMichanChatItem(BuildContext context, bool isUser) {
+  Widget _buildMichanChatItem(
+    BuildContext context,
+    bool isUser,
+    _ThoughtWidgetSections widgetSections,
+  ) {
     final colorScheme = Theme.of(context).colorScheme;
     final bubbleColor = isUser
         ? colorScheme.primaryContainer.withOpacity(0.55)
@@ -980,6 +1016,10 @@ class ThoughtItem extends StatelessWidget {
     final bubbleBorderColor = isUser
         ? colorScheme.primary.withOpacity(0.18)
         : colorScheme.outline.withOpacity(0.18);
+    final bubbleGroups = isUser
+        ? [widgetSections.bubbleWidgets]
+        : _buildMichanSplitMessageWidgets(widgetSections.bubbleWidgets)
+              .map((widget) => [widget]);
 
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
@@ -1005,22 +1045,30 @@ class ThoughtItem extends StatelessWidget {
                     ),
                   ),
                   const Gap(4),
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 8,
-                    ),
-                    decoration: BoxDecoration(
-                      color: bubbleColor,
-                      borderRadius: BorderRadius.circular(16),
-                      border: Border.all(color: bubbleBorderColor, width: 1),
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      spacing: 8,
-                      children: buildWidgetsList(context),
-                    ),
-                  ),
+                  for (final group in bubbleGroups) ...[
+                    if (group.isNotEmpty)
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 8,
+                        ),
+                        decoration: BoxDecoration(
+                          color: bubbleColor,
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(color: bubbleBorderColor, width: 1),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          spacing: 8,
+                          children: group,
+                        ),
+                      ),
+                    if (group.isNotEmpty) const Gap(4),
+                  ],
+                  if (widgetSections.backgroundWidgets.isNotEmpty) ...[
+                    const Gap(2),
+                    ...widgetSections.backgroundWidgets,
+                  ],
                 ],
               ),
             ),
@@ -1030,81 +1078,113 @@ class ThoughtItem extends StatelessWidget {
     );
   }
 
-  List<Widget> buildWidgetsList(BuildContext context) {
+  List<Widget> _buildMichanSplitMessageWidgets(List<Widget> widgets) {
+    final splitWidgets = <Widget>[];
+
+    for (final widget in widgets) {
+      if (widget is! Row || widget.children.length != 1) {
+        splitWidgets.add(widget);
+        continue;
+      }
+
+      final child = widget.children.single;
+      if (child is! Flexible || child.child is! ThoughtContent) {
+        splitWidgets.add(widget);
+        continue;
+      }
+
+      final content = child.child as ThoughtContent;
+      final text = content.streamingText.isNotEmpty
+          ? content.streamingText
+          : content.thought != null
+          ? content.thought!.parts
+                .where((p) => p.type == ThinkingMessagePartType.text)
+                .map((p) => p.text ?? '')
+                .join('')
+          : '';
+      final lines = text
+          .split(RegExp(r'\r?\n'))
+          .map((line) => line.trim())
+          .where((line) => line.isNotEmpty)
+          .toList();
+
+      if (lines.length <= 1) {
+        final widget = buildTextRow(text, subdueParentheticalText: true);
+        if (widget is! SizedBox) {
+          splitWidgets.add(widget);
+        }
+        continue;
+      }
+
+      for (final line in lines) {
+        final widget = buildTextRow(line, subdueParentheticalText: true);
+        if (widget is! SizedBox) {
+          splitWidgets.add(widget);
+        }
+      }
+    }
+
+    return splitWidgets;
+  }
+
+  _ThoughtWidgetSections _buildWidgetSections(BuildContext context) {
     if (!isStreaming &&
         (thought?.parts.any(
               (e) => e.metadata?['compaction_summary'] == true,
             )) ==
             true) {
-      return [
-        Padding(
-          padding: const EdgeInsets.all(12),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Icon(
-                    Icons.compress,
-                    size: 16,
-                    color: Theme.of(context).colorScheme.secondary,
-                  ),
-                  const Gap(4),
-                  Text(
-                    'Context Compacted',
-                    style: Theme.of(context).textTheme.labelMedium?.copyWith(
+      return _ThoughtWidgetSections(
+        bubbleWidgets: [
+          Padding(
+            padding: const EdgeInsets.all(12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Icon(
+                      Icons.compress,
+                      size: 16,
                       color: Theme.of(context).colorScheme.secondary,
-                      fontWeight: FontWeight.w600,
+                    ),
+                    const Gap(4),
+                    Text(
+                      'Context Compacted',
+                      style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                        color: Theme.of(context).colorScheme.secondary,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+                Padding(
+                  padding: const EdgeInsets.only(top: 4),
+                  child: Text(
+                    '${thought!.parts.firstWhereOrNull((e) => e.metadata?['compaction_archived_count'] != null)?.metadata?['compaction_archived_count']} messages archived',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: Theme.of(context).colorScheme.tertiary,
+                    ),
+                  ),
+                ),
+                if (thought?.parts.isNotEmpty == true) ...[
+                  const Gap(8),
+                  Text(
+                    thought!.parts.first.text ?? '',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      fontStyle: FontStyle.italic,
                     ),
                   ),
                 ],
-              ),
-              Padding(
-                padding: const EdgeInsets.only(top: 4),
-                child: Text(
-                  '${thought!.parts.firstWhereOrNull((e) => e.metadata?['compaction_archived_count'] != null)?.metadata?['compaction_archived_count']} messages archived',
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: Theme.of(context).colorScheme.tertiary,
-                  ),
-                ),
-              ),
-              if (thought?.parts.isNotEmpty == true) ...[
-                const Gap(8),
-                Text(
-                  thought!.parts.first.text ?? '',
-                  style: Theme.of(
-                    context,
-                  ).textTheme.bodySmall?.copyWith(fontStyle: FontStyle.italic),
-                ),
               ],
-            ],
+            ),
           ),
-        ),
-      ];
+        ],
+      );
     }
 
     final List<StreamItem> items = isStreaming
         ? (streamingItems ?? [])
-        : thought!.parts.map((p) {
-            String type;
-            switch (p.type) {
-              case ThinkingMessagePartType.text:
-                type = 'text';
-                break;
-              case ThinkingMessagePartType.functionCall:
-                type = 'function_call';
-                break;
-              case ThinkingMessagePartType.functionResult:
-                type = 'function_result';
-                break;
-            }
-            return StreamItem(
-              type,
-              p.type == ThinkingMessagePartType.text
-                  ? p.text ?? ''
-                  : p.functionCall ?? p.functionResult,
-            );
-          }).toList();
+        : _buildItemsFromThoughtParts();
 
     final isAI =
         isStreaming ||
@@ -1118,7 +1198,9 @@ class ThoughtItem extends StatelessWidget {
           )
         : [];
 
-    final List<Widget> widgets = [];
+    final List<Widget> bubbleWidgets = [];
+    final List<Widget> backgroundWidgets = [];
+
     String currentText = '';
     bool hasOpenText = false;
     int i = 0;
@@ -1129,7 +1211,10 @@ class ThoughtItem extends StatelessWidget {
         hasOpenText = true;
       } else if (item.type == 'function_call') {
         if (hasOpenText) {
-          widgets.add(buildTextRow(currentText));
+          final textRow = buildTextRow(currentText);
+          if (textRow is! SizedBox) {
+            bubbleWidgets.add(textRow);
+          }
           currentText = '';
           hasOpenText = false;
         }
@@ -1139,7 +1224,7 @@ class ThoughtItem extends StatelessWidget {
           result = items[i + 1];
           i++; // skip it
         }
-        widgets.add(
+        backgroundWidgets.add(
           FunctionCallsSection(
             isFinish: result != null,
             isStreaming: isStreaming,
@@ -1151,12 +1236,15 @@ class ThoughtItem extends StatelessWidget {
         );
       } else if (item.type == 'function_result') {
         if (hasOpenText) {
-          widgets.add(buildTextRow(currentText));
+          final textRow = buildTextRow(currentText);
+          if (textRow is! SizedBox) {
+            bubbleWidgets.add(textRow);
+          }
           currentText = '';
           hasOpenText = false;
         }
         // orphan result, treat as finished with call
-        widgets.add(
+        backgroundWidgets.add(
           FunctionCallsSection(
             isFinish: true,
             isStreaming: isStreaming,
@@ -1168,32 +1256,38 @@ class ThoughtItem extends StatelessWidget {
         );
       } else if (item.type == 'reasoning') {
         if (hasOpenText) {
-          widgets.add(buildTextRow(currentText));
+          final textRow = buildTextRow(currentText);
+          if (textRow is! SizedBox) {
+            bubbleWidgets.add(textRow);
+          }
           currentText = '';
           hasOpenText = false;
         }
-        widgets.add(buildItemWidget(item));
-      } else {
-        // ignore
+        backgroundWidgets.add(
+          ReasoningSection(reasoningChunks: [item.data as String]),
+        );
       }
       i++;
     }
     if (hasOpenText) {
-      widgets.add(buildTextRow(currentText));
+      final textRow = buildTextRow(currentText);
+      if (textRow is! SizedBox) {
+        bubbleWidgets.add(textRow);
+      }
     }
 
     // Render files from thought parts (not streaming)
     if (!isStreaming && thought != null) {
       for (final part in thought!.parts) {
         if (part.files != null && part.files!.isNotEmpty) {
-          widgets.add(_buildFilesWidget(context, part.files!));
+          bubbleWidgets.add(_buildFilesWidget(context, part.files!));
         }
       }
     }
 
     // Add spinner at the end if streaming
     if (isStreaming) {
-      widgets.add(
+      bubbleWidgets.add(
         Row(
           mainAxisAlignment: MainAxisAlignment.end,
           children: [
@@ -1209,7 +1303,7 @@ class ThoughtItem extends StatelessWidget {
 
     // The proposals and token info at the end
     if (!isStreaming && proposals.isNotEmpty && isAI) {
-      widgets.add(
+      bubbleWidgets.add(
         ProposalsSection(
           proposals: proposals,
           onProposalAction: _handleProposalAction,
@@ -1220,12 +1314,21 @@ class ThoughtItem extends StatelessWidget {
         isAI &&
         thought != null &&
         !thought!.id.startsWith('error-')) {
-      widgets.add(TokenInfo(thought: thought!));
+      backgroundWidgets.add(TokenInfo(thought: thought!));
     }
-    return widgets;
+    return _ThoughtWidgetSections(
+      bubbleWidgets: bubbleWidgets,
+      backgroundWidgets: backgroundWidgets,
+    );
   }
 
-  Widget buildTextRow(String text) {
+  Widget buildTextRow(String text, {bool subdueParentheticalText = false}) {
+    final normalizedText =
+        text.replaceAll(_messageMetaOnlyTagPattern, '').trim();
+    if (normalizedText.isEmpty) {
+      return const SizedBox.shrink();
+    }
+
     return Row(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.end,
@@ -1233,12 +1336,46 @@ class ThoughtItem extends StatelessWidget {
         Flexible(
           child: ThoughtContent(
             isStreaming: isStreaming,
-            streamingText: text,
+            streamingText: normalizedText,
             thought: thought,
+            subdueParentheticalText: subdueParentheticalText,
           ),
         ),
       ],
     );
+  }
+
+  List<StreamItem> _buildItemsFromThoughtParts() {
+    if (thought == null) return const [];
+
+    final items = <StreamItem>[];
+    for (final part in thought!.parts) {
+      switch (part.type) {
+        case ThinkingMessagePartType.text:
+          if (part.text?.isNotEmpty ?? false) {
+            items.add(StreamItem('text', part.text!));
+          }
+          break;
+        case ThinkingMessagePartType.reasoning:
+          final reasoningText = part.reasoning ?? part.text;
+          if (reasoningText?.isNotEmpty ?? false) {
+            items.add(StreamItem('reasoning', reasoningText!));
+          }
+          break;
+        case ThinkingMessagePartType.functionCall:
+          if (part.functionCall != null) {
+            items.add(StreamItem('function_call', part.functionCall!));
+          }
+          break;
+        case ThinkingMessagePartType.functionResult:
+          if (part.functionResult != null) {
+            items.add(StreamItem('function_result', part.functionResult!));
+          }
+          break;
+      }
+    }
+
+    return items;
   }
 
   Widget buildItemWidget(StreamItem item) {
@@ -1250,7 +1387,7 @@ class ThoughtItem extends StatelessWidget {
     }
   }
 
-  Widget _buildFilesWidget(BuildContext context, List<SnCloudFile> files) {
+  Widget _buildFilesWidget(BuildContext context, List<IDisplayableCloudFile> files) {
     return Wrap(
       spacing: 8,
       runSpacing: 8,
@@ -1258,7 +1395,7 @@ class ThoughtItem extends StatelessWidget {
         final file = entry.value;
         return InkWell(
           onTap: () {
-            final isImage = file.mimeType?.startsWith('image') == true;
+            final isImage = file.mimeType.startsWith('image') == true;
             if (isImage) {
               context.pushTransparentRoute(
                 CloudFileLightbox(
@@ -1267,10 +1404,10 @@ class ThoughtItem extends StatelessWidget {
                   heroTag: 'cloud-file-thought-${file.id}',
                 ),
               );
-            } else {
+            } else if (file is SnCloudFile) {
               context.router.push(
                 FileDetailRoute(
-                  item: file,
+                  id: file.id,
                   heroTag: 'cloud-file-thought-${file.id}',
                 ),
               );

@@ -1,14 +1,20 @@
 import 'dart:convert';
+import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_callkit_incoming/flutter_callkit_incoming.dart';
 import 'package:gap/gap.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 import 'package:island/accounts/progression_ws.dart';
+import 'package:island/accounts/widgets/friend_status_toast.dart';
 import 'package:island/core/database.dart';
 import 'package:island/core/notification.dart';
 import 'package:island/core/network.dart';
 import 'package:island/core/services/update_service.dart';
+import 'package:island/core/services/notify.dart' as local_notify;
+import 'package:island/drive/drive_service.dart';
 import 'package:island/e2ee/mls_engine.dart';
 import 'package:island/e2ee/mls_storage.dart';
 import 'package:island/e2ee/mls_client.dart';
@@ -17,14 +23,53 @@ import 'package:island/shared/widgets/alert.dart';
 import 'package:island/core/widgets/content/network_status_sheet.dart';
 import 'package:material_symbols_icons/symbols.dart';
 import 'package:island/core/config.dart';
+import 'package:island/chat/pods/native_call_bridge.dart';
+import 'package:logging/logging.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:island/shared/widgets/app_onboarding_sheet.dart';
+import 'package:island/shared/widgets/app_wrapper.dart';
 import 'package:island/core/widgets/draggable_log_overlay.dart';
 import 'package:island/main.dart';
 import 'package:island/route.dart';
 import 'package:island/shared/widgets/layouts/sheet_scaffold.dart';
+import 'package:island/tasks/app_task.dart';
+import 'package:island/tasks/tasks_notifier.dart';
 
 import 'package:solar_network_sdk/solar_network_sdk.dart';
+
+SnAccount _createTestAccount({
+  required String id,
+  required String name,
+  String? nick,
+}) {
+  return SnAccount(
+    id: id,
+    name: name,
+    nick: nick ?? name,
+    language: 'en',
+    isSuperuser: false,
+    automatedId: null,
+    profile: SnAccountProfile(
+      id: 'profile-$id',
+      experience: 0,
+      level: 1,
+      levelingProgress: 0.0,
+      picture: null,
+      background: null,
+      verification: null,
+      createdAt: DateTime.now(),
+      updatedAt: DateTime.now(),
+      deletedAt: null,
+    ),
+    perkSubscription: null,
+    badges: [],
+    contacts: [],
+    activatedAt: DateTime.now(),
+    createdAt: DateTime.now(),
+    updatedAt: DateTime.now(),
+    deletedAt: null,
+  );
+}
 
 OverlayEntry? _debugOverlayEntry;
 
@@ -112,7 +157,11 @@ void hideDebugOverlay() {
   _debugOverlayEntry = null;
 }
 
-void toggleDebugOverlay() {
+void toggleDebugOverlay(WidgetRef ref) {
+  if (!ref.read(developerModeProvider)) {
+    Logger.root.info('[DeveloperMode] Blocked debug overlay toggle');
+    return;
+  }
   if (_debugOverlayEntry != null) {
     hideDebugOverlay();
   } else {
@@ -168,6 +217,126 @@ Future<void> _showSetTokenDialog(BuildContext context, WidgetRef ref) async {
   );
 }
 
+Future<String?> _promptForRoomId(BuildContext context, String title) async {
+  final TextEditingController controller = TextEditingController();
+
+  return showDialog<String>(
+    context: context,
+    builder: (BuildContext context) {
+      return AlertDialog(
+        title: Text('Room ID for $title'),
+        content: TextField(
+          controller: controller,
+          decoration: const InputDecoration(
+            hintText: 'Enter chat room ID',
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.all(Radius.circular(12)),
+            ),
+          ),
+          autofocus: true,
+        ),
+        actions: <Widget>[
+          TextButton(
+            child: const Text('Cancel'),
+            onPressed: () {
+              Navigator.of(context).pop();
+            },
+          ),
+          TextButton(
+            child: const Text('Start'),
+            onPressed: () {
+              final roomId = controller.text.trim();
+              if (roomId.isNotEmpty) {
+                Navigator.of(context).pop(roomId);
+              }
+            },
+          ),
+        ],
+      );
+    },
+  );
+}
+
+void _startDebugProgressTask(WidgetRef ref) {
+  final tasks = ref.read(tasksProvider.notifier);
+  final taskId = tasks.addTask(
+    title: 'Debug upload task',
+    type: AppTaskType.driveUpload,
+    status: AppTaskStatus.inProgress,
+    metadata: {
+      'fileSize': 16 * 1024 * 1024,
+      'totalChunks': 8,
+      'uploadedChunks': 0,
+      'transmissionProgress': 0.0,
+    },
+  );
+
+  Future<void>(() async {
+    for (var i = 1; i <= 5; i++) {
+      await Future<void>.delayed(const Duration(milliseconds: 650));
+      tasks.updateTask(
+        taskId,
+        status: AppTaskStatus.inProgress,
+        progress: i / 5,
+        statusMessage: 'Uploading debug payload ${i * 20}%',
+        metadata: {
+          'fileSize': 16 * 1024 * 1024,
+          'totalChunks': 8,
+          'uploadedChunks': (i * 8 / 5).round(),
+          'transmissionProgress': i / 5,
+        },
+      );
+    }
+    tasks.updateTask(
+      taskId,
+      status: AppTaskStatus.completed,
+      progress: 1,
+      statusMessage: 'Debug upload completed',
+      metadata: {
+        'fileSize': 16 * 1024 * 1024,
+        'totalChunks': 8,
+        'uploadedChunks': 8,
+        'transmissionProgress': 1.0,
+      },
+    );
+  });
+}
+
+void _addDebugSuccessTask(WidgetRef ref) {
+  final tasks = ref.read(tasksProvider.notifier);
+  final taskId = tasks.addTask(
+    title: 'Debug completed task',
+    type: AppTaskType.postPublish,
+    status: AppTaskStatus.inProgress,
+  );
+  tasks.updateTask(
+    taskId,
+    status: AppTaskStatus.completed,
+    progress: 1,
+    statusMessage: 'Debug task finished',
+  );
+}
+
+void _addDebugFailedTask(WidgetRef ref) {
+  final tasks = ref.read(tasksProvider.notifier);
+  final taskId = tasks.addTask(
+    title: 'Debug failed task',
+    type: AppTaskType.driveDownload,
+    status: AppTaskStatus.inProgress,
+  );
+  tasks.updateTask(
+    taskId,
+    status: AppTaskStatus.failed,
+    progress: 0.62,
+    statusMessage: 'Debug download failed',
+    errorMessage: 'Injected failure for overlay testing.',
+    metadata: {
+      'totalBytes': 20 * 1024 * 1024,
+      'downloadedBytes': (20 * 1024 * 1024 * 0.62).round(),
+    },
+  );
+}
+
 class _DraggableDebugPanel extends ConsumerStatefulWidget {
   final Offset initialPosition;
   final Size initialSize;
@@ -191,7 +360,6 @@ class _DraggableDebugPanelState extends ConsumerState<_DraggableDebugPanel>
   late bool _isCollapsed;
   late AnimationController _animController;
   late Animation<double> _expandAnim;
-  late Animation<double> _fadeAnim;
 
   @override
   void initState() {
@@ -208,10 +376,6 @@ class _DraggableDebugPanelState extends ConsumerState<_DraggableDebugPanel>
       parent: _animController,
       curve: Curves.easeOutCubic,
       reverseCurve: Curves.easeInCubic,
-    );
-    _fadeAnim = CurvedAnimation(
-      parent: _animController,
-      curve: Curves.easeInOut,
     );
   }
 
@@ -245,34 +409,34 @@ class _DraggableDebugPanelState extends ConsumerState<_DraggableDebugPanel>
     return Positioned(
       left: _position.dx,
       top: _position.dy,
-      child: FadeTransition(
-        opacity: _fadeAnim.value == 0 ? AlwaysStoppedAnimation(1.0) : _fadeAnim,
-        child: Material(
-          color: Colors.transparent,
-          child: GestureDetector(
-            onPanUpdate: (details) {
-              final screenSize = MediaQuery.of(context).size;
-              final overlayWidth = _isCollapsed ? collapsedWidth : _size.width;
-              final overlayHeight = _isCollapsed
-                  ? collapsedHeight
-                  : _size.height;
+      child: Material(
+        color: Colors.transparent,
+        child: GestureDetector(
+          onPanUpdate: (details) {
+            final screenSize = MediaQuery.of(context).size;
+            final overlayWidth = _isCollapsed ? collapsedWidth : _size.width;
+            final overlayHeight = _isCollapsed ? collapsedHeight : _size.height;
 
-              setState(() {
-                _position = Offset(
-                  (_position.dx + details.delta.dx).clamp(
-                    0,
-                    screenSize.width - overlayWidth,
-                  ),
-                  (_position.dy + details.delta.dy).clamp(
-                    0,
-                    screenSize.height - overlayHeight,
-                  ),
-                );
-              });
-              ref
-                  .read(_debugOverlayStateProvider.notifier)
-                  .updatePosition(details.delta);
-            },
+            setState(() {
+              _position = Offset(
+                (_position.dx + details.delta.dx).clamp(
+                  0,
+                  screenSize.width - overlayWidth,
+                ),
+                (_position.dy + details.delta.dy).clamp(
+                  0,
+                  screenSize.height - overlayHeight,
+                ),
+              );
+            });
+            ref
+                .read(_debugOverlayStateProvider.notifier)
+                .updatePosition(details.delta);
+          },
+          child: AnimatedSize(
+            duration: const Duration(milliseconds: 280),
+            curve: Curves.easeOutCubic,
+            alignment: Alignment.topLeft,
             child: SizedBox(
               width: currentWidth,
               height: currentHeight,
@@ -548,6 +712,29 @@ class _DraggableDebugPanelState extends ConsumerState<_DraggableDebugPanel>
             );
           },
         ),
+        _DebugItem(
+          icon: Symbols.splitscreen,
+          title: 'Force show startup splash',
+          onTap: () {
+            ref.read(forcedStartupSplashProvider.notifier).setVisible(true);
+          },
+        ),
+        _DebugItem(
+          icon: Symbols.visibility_off,
+          title: 'Hide startup splash',
+          onTap: () {
+            ref.read(forcedStartupSplashProvider.notifier).setVisible(false);
+          },
+        ),
+        _DebugItem(
+          icon: Symbols.check_circle,
+          title: 'Show startup splash (after done)',
+          onTap: () {
+            ref
+                .read(forcedStartupSplashProvider.notifier)
+                .setVisible(true, afterDone: true);
+          },
+        ),
         _Divider(),
         _DebugItem(
           icon: Symbols.wifi,
@@ -588,6 +775,15 @@ class _DraggableDebugPanelState extends ConsumerState<_DraggableDebugPanel>
           },
         ),
         _DebugItem(
+          icon: Symbols.storage,
+          title: 'Test drive quota sheet',
+          onTap: () async {
+            await ref
+                .read(driveFileUploaderProvider)
+                .showQuotaExceededSheetPreview();
+          },
+        ),
+        _DebugItem(
           icon: Symbols.chat_bubble,
           title: 'Test snackbar',
           onTap: () {
@@ -600,15 +796,12 @@ class _DraggableDebugPanelState extends ConsumerState<_DraggableDebugPanel>
           onTap: () {
             final notification = SnNotification(
               createdAt: DateTime.now(),
-              updatedAt: DateTime.now(),
-              deletedAt: null,
               id: 'local_${DateTime.now().millisecondsSinceEpoch}',
               topic: 'local',
               title: 'Test Notification',
               subtitle: '',
-              content: 'This is a test notification for debugging.',
+              body: 'This is a test notification for debugging.',
               meta: const {},
-              priority: 0,
               viewedAt: null,
               accountId: 'local',
             );
@@ -616,8 +809,188 @@ class _DraggableDebugPanelState extends ConsumerState<_DraggableDebugPanel>
           },
         ),
         _DebugItem(
+          icon: Symbols.notifications_active,
+          title: 'Test local notification',
+          onTap: () {
+            local_notify.showDebugLocalNotification(ref);
+          },
+        ),
+        _DebugItem(
+          icon: Symbols.progress_activity,
+          title: 'Test task overlay progress',
+          onTap: () {
+            _startDebugProgressTask(ref);
+          },
+        ),
+        _DebugItem(
+          icon: Symbols.check_circle,
+          title: 'Test task overlay success',
+          onTap: () {
+            _addDebugSuccessTask(ref);
+          },
+        ),
+        _DebugItem(
+          icon: Symbols.error,
+          title: 'Test task overlay failure',
+          onTap: () {
+            _addDebugFailedTask(ref);
+          },
+        ),
+        _Divider(),
+        _DebugItem(
+          icon: Symbols.person_add,
+          title: 'Test friend online update',
+          onTap: () {
+            final event = FriendStatusChangeEvent(
+              account: _createTestAccount(
+                id: 'test-friend-1',
+                name: 'alice',
+                nick: 'Alice',
+              ),
+              status: SnAccountStatus(
+                id: 'status-1',
+                attitude: 2,
+                isOnline: true,
+                isCustomized: false,
+                type: 0,
+                label: '',
+                symbol: null,
+                meta: null,
+                clearedAt: null,
+                appIdentifier: null,
+                isAutomated: false,
+                accountId: 'test-friend-1',
+                createdAt: DateTime.now(),
+                updatedAt: DateTime.now(),
+                deletedAt: null,
+              ),
+              changeType: FriendStatusChangeType.online,
+            );
+            ref.read(notificationStateProvider.notifier).addFriendStatus(event);
+          },
+        ),
+        _DebugItem(
+          icon: Symbols.person_remove,
+          title: 'Test friend offline update',
+          onTap: () {
+            final event = FriendStatusChangeEvent(
+              account: _createTestAccount(
+                id: 'test-friend-2',
+                name: 'bob',
+                nick: 'Bob',
+              ),
+              changeType: FriendStatusChangeType.offline,
+            );
+            ref.read(notificationStateProvider.notifier).addFriendStatus(event);
+          },
+        ),
+        _DebugItem(
+          icon: Symbols.sports_esports,
+          title: 'Test friend gaming activity',
+          onTap: () {
+            final event = FriendStatusChangeEvent(
+              account: _createTestAccount(
+                id: 'test-friend-3',
+                name: 'carol',
+                nick: 'Carol',
+              ),
+              activities: [
+                SnPresenceActivity(
+                  id: 'activity-1',
+                  type: 1,
+                  manualId: 'steam',
+                  title: 'Dyson Sphere Program',
+                  subtitle: 'Playing Dyson Sphere Program',
+                  caption: null,
+                  titleUrl: null,
+                  subtitleUrl: null,
+                  smallImage: null,
+                  largeImage: null,
+                  meta: null,
+                  leaseMinutes: 5,
+                  leaseExpiresAt: DateTime.now().add(Duration(hours: 1)),
+                  accountId: 'test-friend-3',
+                  createdAt: DateTime.now(),
+                  updatedAt: DateTime.now(),
+                  deletedAt: null,
+                ),
+              ],
+              changeType: FriendStatusChangeType.activityStarted,
+            );
+            ref.read(notificationStateProvider.notifier).addFriendStatus(event);
+          },
+        ),
+        _DebugItem(
+          icon: Symbols.music_note,
+          title: 'Test friend music activity',
+          onTap: () {
+            final event = FriendStatusChangeEvent(
+              account: _createTestAccount(
+                id: 'test-friend-4',
+                name: 'david',
+                nick: 'David',
+              ),
+              activities: [
+                SnPresenceActivity(
+                  id: 'activity-2',
+                  type: 2,
+                  manualId: 'spotify',
+                  title: 'Blinding Lights',
+                  subtitle: 'The Weeknd - Blinding Lights',
+                  caption: null,
+                  titleUrl: null,
+                  subtitleUrl: null,
+                  smallImage: null,
+                  largeImage: null,
+                  meta: {'progress_ms': 120000, 'track_duration_ms': 200000},
+                  leaseMinutes: 5,
+                  leaseExpiresAt: DateTime.now().add(Duration(hours: 1)),
+                  accountId: 'test-friend-4',
+                  createdAt: DateTime.now(),
+                  updatedAt: DateTime.now(),
+                  deletedAt: null,
+                ),
+              ],
+              changeType: FriendStatusChangeType.activityStarted,
+            );
+            ref.read(notificationStateProvider.notifier).addFriendStatus(event);
+          },
+        ),
+        _DebugItem(
+          icon: Symbols.do_not_disturb_on,
+          title: 'Test friend busy status',
+          onTap: () {
+            final event = FriendStatusChangeEvent(
+              account: _createTestAccount(
+                id: 'test-friend-5',
+                name: 'eve',
+                nick: 'Eve',
+              ),
+              status: SnAccountStatus(
+                id: 'status-2',
+                attitude: 2,
+                isOnline: true,
+                isCustomized: true,
+                type: 1,
+                label: 'In a meeting',
+                symbol: 'calendar',
+                meta: null,
+                clearedAt: null,
+                appIdentifier: null,
+                isAutomated: false,
+                accountId: 'test-friend-5',
+                createdAt: DateTime.now(),
+                updatedAt: DateTime.now(),
+                deletedAt: null,
+              ),
+              changeType: FriendStatusChangeType.busy,
+            );
+            ref.read(notificationStateProvider.notifier).addFriendStatus(event);
+          },
+        ),
+        _DebugItem(
           icon: Symbols.military_tech,
-          title: 'Test achievement completed',
+          title: 'Test achievement celebration',
           onTap: () {
             final notifier = ref.read(progressionWebSocketProvider.notifier);
             notifier.testShowCompletion(
@@ -819,6 +1192,68 @@ class _DraggableDebugPanelState extends ConsumerState<_DraggableDebugPanel>
             }
           },
         ),
+        if (!kIsWeb && Platform.isIOS) ...[
+          _Divider(),
+          _DebugItem(
+            icon: Symbols.call,
+            title: '[CallKit] Fake Incoming Call',
+            onTap: () async {
+              try {
+                final roomId = await _promptForRoomId(context, 'Incoming Call');
+                if (roomId == null) return;
+                await ref
+                    .read(nativeCallBridgeProvider.notifier)
+                    .showIncomingCall(roomId: roomId, callerName: 'Test User');
+                if (!context.mounted) return;
+                showSnackBar('Fake incoming call triggered for room: $roomId');
+              } catch (e) {
+                if (!context.mounted) return;
+                showErrorAlert(e);
+              }
+            },
+          ),
+          _DebugItem(
+            icon: Symbols.call_end,
+            title: '[CallKit] Fake Outgoing Call',
+            onTap: () async {
+              try {
+                final roomId = await _promptForRoomId(context, 'Outgoing Call');
+                if (roomId == null) return;
+                await ref
+                    .read(nativeCallBridgeProvider.notifier)
+                    .startOutgoingCall(
+                      roomId: roomId,
+                      callerName: 'Debug Call',
+                    );
+                if (!context.mounted) return;
+                showSnackBar('Fake outgoing call triggered for room: $roomId');
+              } catch (e) {
+                if (!context.mounted) return;
+                showErrorAlert(e);
+              }
+            },
+          ),
+          _DebugItem(
+            icon: Symbols.copy_all,
+            title: '[CallKit] Copy VoIP Token',
+            onTap: () async {
+              try {
+                final token = await FlutterCallkitIncoming.getDevicePushTokenVoIP();
+                if (token != null) {
+                  await Clipboard.setData(ClipboardData(text: token));
+                  if (!context.mounted) return;
+                  showSnackBar('VoIP token copied');
+                } else {
+                  if (!context.mounted) return;
+                  showSnackBar('No VoIP token available');
+                }
+              } catch (e) {
+                if (!context.mounted) return;
+                showErrorAlert(e);
+              }
+            },
+          ),
+        ],
         const Gap(8),
       ],
     );
@@ -924,6 +1359,40 @@ class DebugSheet extends HookConsumerWidget {
             const Gap(4),
             ListTile(
               minTileHeight: 48,
+              leading: const Icon(Symbols.progress_activity),
+              trailing: const Icon(Symbols.chevron_right),
+              contentPadding: const EdgeInsets.symmetric(horizontal: 24),
+              title: const Text('Test task overlay progress'),
+              onTap: () {
+                _startDebugProgressTask(ref);
+                Navigator.pop(context);
+              },
+            ),
+            ListTile(
+              minTileHeight: 48,
+              leading: const Icon(Symbols.check_circle),
+              trailing: const Icon(Symbols.chevron_right),
+              contentPadding: const EdgeInsets.symmetric(horizontal: 24),
+              title: const Text('Test task overlay success'),
+              onTap: () {
+                _addDebugSuccessTask(ref);
+                Navigator.pop(context);
+              },
+            ),
+            ListTile(
+              minTileHeight: 48,
+              leading: const Icon(Symbols.error),
+              trailing: const Icon(Symbols.chevron_right),
+              contentPadding: const EdgeInsets.symmetric(horizontal: 24),
+              title: const Text('Test task overlay failure'),
+              onTap: () {
+                _addDebugFailedTask(ref);
+                Navigator.pop(context);
+              },
+            ),
+            const Divider(height: 8),
+            ListTile(
+              minTileHeight: 48,
               leading: const Icon(Symbols.update),
               trailing: const Icon(Symbols.chevron_right),
               title: Text('Force update'),
@@ -979,6 +1448,40 @@ class DebugSheet extends HookConsumerWidget {
                 );
               },
             ),
+            ListTile(
+              minTileHeight: 48,
+              leading: const Icon(Symbols.splitscreen),
+              trailing: const Icon(Symbols.chevron_right),
+              title: const Text('Force show startup splash'),
+              contentPadding: const EdgeInsets.symmetric(horizontal: 24),
+              onTap: () {
+                ref.read(forcedStartupSplashProvider.notifier).setVisible(true);
+              },
+            ),
+            ListTile(
+              minTileHeight: 48,
+              leading: const Icon(Symbols.visibility_off),
+              trailing: const Icon(Symbols.chevron_right),
+              title: const Text('Hide startup splash'),
+              contentPadding: const EdgeInsets.symmetric(horizontal: 24),
+              onTap: () {
+                ref
+                    .read(forcedStartupSplashProvider.notifier)
+                    .setVisible(false);
+              },
+            ),
+            ListTile(
+              minTileHeight: 48,
+              leading: const Icon(Symbols.check_circle),
+              trailing: const Icon(Symbols.chevron_right),
+              title: const Text('Show startup splash (after done)'),
+              contentPadding: const EdgeInsets.symmetric(horizontal: 24),
+              onTap: () {
+                ref
+                    .read(forcedStartupSplashProvider.notifier)
+                    .setVisible(true, afterDone: true);
+              },
+            ),
             const Divider(height: 8),
             ListTile(
               minTileHeight: 48,
@@ -1032,6 +1535,18 @@ class DebugSheet extends HookConsumerWidget {
             ),
             ListTile(
               minTileHeight: 48,
+              leading: const Icon(Symbols.storage),
+              trailing: const Icon(Symbols.chevron_right),
+              contentPadding: const EdgeInsets.symmetric(horizontal: 24),
+              title: const Text('Test drive quota sheet'),
+              onTap: () async {
+                await ref
+                    .read(driveFileUploaderProvider)
+                    .showQuotaExceededSheetPreview();
+              },
+            ),
+            ListTile(
+              minTileHeight: 48,
               leading: const Icon(Symbols.chat_bubble),
               trailing: const Icon(Symbols.chevron_right),
               contentPadding: const EdgeInsets.symmetric(horizontal: 24),
@@ -1050,15 +1565,12 @@ class DebugSheet extends HookConsumerWidget {
               onTap: () {
                 final notification = SnNotification(
                   createdAt: DateTime.now(),
-                  updatedAt: DateTime.now(),
-                  deletedAt: null,
                   id: 'local_${DateTime.now().millisecondsSinceEpoch}',
                   topic: 'local',
                   title: 'Test Notification',
                   subtitle: '',
-                  content: 'This is a test notification for debugging.',
+                  body: 'This is a test notification for debugging.',
                   meta: const {},
-                  priority: 0,
                   viewedAt: null,
                   accountId: 'local',
                 );
@@ -1068,10 +1580,201 @@ class DebugSheet extends HookConsumerWidget {
             ),
             ListTile(
               minTileHeight: 48,
+              leading: const Icon(Symbols.notifications_active),
+              trailing: const Icon(Symbols.chevron_right),
+              contentPadding: const EdgeInsets.symmetric(horizontal: 24),
+              title: const Text('Test local notification'),
+              onTap: () {
+                local_notify.showDebugLocalNotification(ref);
+                Navigator.pop(context);
+              },
+            ),
+            const Divider(height: 8),
+            ListTile(
+              minTileHeight: 48,
+              leading: const Icon(Symbols.person_add),
+              trailing: const Icon(Symbols.chevron_right),
+              contentPadding: const EdgeInsets.symmetric(horizontal: 24),
+              title: const Text('Test friend online update'),
+              onTap: () {
+                final event = FriendStatusChangeEvent(
+                  account: _createTestAccount(
+                    id: 'test-friend-1',
+                    name: 'alice',
+                    nick: 'Alice',
+                  ),
+                  status: SnAccountStatus(
+                    id: 'status-1',
+                    attitude: 2,
+                    isOnline: true,
+                    isCustomized: false,
+                    type: 0,
+                    label: '',
+                    symbol: null,
+                    meta: null,
+                    clearedAt: null,
+                    appIdentifier: null,
+                    isAutomated: false,
+                    accountId: 'test-friend-1',
+                    createdAt: DateTime.now(),
+                    updatedAt: DateTime.now(),
+                    deletedAt: null,
+                  ),
+                  changeType: FriendStatusChangeType.online,
+                );
+                ref
+                    .read(notificationStateProvider.notifier)
+                    .addFriendStatus(event);
+              },
+            ),
+            ListTile(
+              minTileHeight: 48,
+              leading: const Icon(Symbols.person_remove),
+              trailing: const Icon(Symbols.chevron_right),
+              contentPadding: const EdgeInsets.symmetric(horizontal: 24),
+              title: const Text('Test friend offline update'),
+              onTap: () {
+                final event = FriendStatusChangeEvent(
+                  account: _createTestAccount(
+                    id: 'test-friend-2',
+                    name: 'bob',
+                    nick: 'Bob',
+                  ),
+                  changeType: FriendStatusChangeType.offline,
+                );
+                ref
+                    .read(notificationStateProvider.notifier)
+                    .addFriendStatus(event);
+              },
+            ),
+            ListTile(
+              minTileHeight: 48,
+              leading: const Icon(Symbols.sports_esports),
+              trailing: const Icon(Symbols.chevron_right),
+              contentPadding: const EdgeInsets.symmetric(horizontal: 24),
+              title: const Text('Test friend gaming activity'),
+              onTap: () {
+                final event = FriendStatusChangeEvent(
+                  account: _createTestAccount(
+                    id: 'test-friend-3',
+                    name: 'carol',
+                    nick: 'Carol',
+                  ),
+                  activities: [
+                    SnPresenceActivity(
+                      id: 'activity-1',
+                      type: 1,
+                      manualId: 'steam',
+                      title: 'Dyson Sphere Program',
+                      subtitle: 'Playing Dyson Sphere Program',
+                      caption: null,
+                      titleUrl: null,
+                      subtitleUrl: null,
+                      smallImage: null,
+                      largeImage: null,
+                      meta: null,
+                      leaseMinutes: 5,
+                      leaseExpiresAt: DateTime.now().add(Duration(hours: 1)),
+                      accountId: 'test-friend-3',
+                      createdAt: DateTime.now(),
+                      updatedAt: DateTime.now(),
+                      deletedAt: null,
+                    ),
+                  ],
+                  changeType: FriendStatusChangeType.activityStarted,
+                );
+                ref
+                    .read(notificationStateProvider.notifier)
+                    .addFriendStatus(event);
+              },
+            ),
+            ListTile(
+              minTileHeight: 48,
+              leading: const Icon(Symbols.music_note),
+              trailing: const Icon(Symbols.chevron_right),
+              contentPadding: const EdgeInsets.symmetric(horizontal: 24),
+              title: const Text('Test friend music activity'),
+              onTap: () {
+                final event = FriendStatusChangeEvent(
+                  account: _createTestAccount(
+                    id: 'test-friend-4',
+                    name: 'david',
+                    nick: 'David',
+                  ),
+                  activities: [
+                    SnPresenceActivity(
+                      id: 'activity-2',
+                      type: 2,
+                      manualId: 'spotify',
+                      title: 'Blinding Lights',
+                      subtitle: 'The Weeknd - Blinding Lights',
+                      caption: null,
+                      titleUrl: null,
+                      subtitleUrl: null,
+                      smallImage: null,
+                      largeImage: null,
+                      meta: {
+                        'progress_ms': 120000,
+                        'track_duration_ms': 200000,
+                      },
+                      leaseMinutes: 5,
+                      leaseExpiresAt: DateTime.now().add(Duration(hours: 1)),
+                      accountId: 'test-friend-4',
+                      createdAt: DateTime.now(),
+                      updatedAt: DateTime.now(),
+                      deletedAt: null,
+                    ),
+                  ],
+                  changeType: FriendStatusChangeType.activityStarted,
+                );
+                ref
+                    .read(notificationStateProvider.notifier)
+                    .addFriendStatus(event);
+              },
+            ),
+            ListTile(
+              minTileHeight: 48,
+              leading: const Icon(Symbols.do_not_disturb_on),
+              trailing: const Icon(Symbols.chevron_right),
+              contentPadding: const EdgeInsets.symmetric(horizontal: 24),
+              title: const Text('Test friend busy status'),
+              onTap: () {
+                final event = FriendStatusChangeEvent(
+                  account: _createTestAccount(
+                    id: 'test-friend-5',
+                    name: 'eve',
+                    nick: 'Eve',
+                  ),
+                  status: SnAccountStatus(
+                    id: 'status-2',
+                    attitude: 2,
+                    isOnline: true,
+                    isCustomized: true,
+                    type: 1,
+                    label: 'In a meeting',
+                    symbol: 'calendar',
+                    meta: null,
+                    clearedAt: null,
+                    appIdentifier: null,
+                    isAutomated: false,
+                    accountId: 'test-friend-5',
+                    createdAt: DateTime.now(),
+                    updatedAt: DateTime.now(),
+                    deletedAt: null,
+                  ),
+                  changeType: FriendStatusChangeType.busy,
+                );
+                ref
+                    .read(notificationStateProvider.notifier)
+                    .addFriendStatus(event);
+              },
+            ),
+            ListTile(
+              minTileHeight: 48,
               leading: const Icon(Symbols.military_tech),
               trailing: const Icon(Symbols.chevron_right),
               contentPadding: const EdgeInsets.symmetric(horizontal: 24),
-              title: const Text('Test achievement completed'),
+              title: const Text('Test achievement celebration'),
               onTap: () {
                 final notifier = ref.read(
                   progressionWebSocketProvider.notifier,
@@ -1326,6 +2029,90 @@ class DebugSheet extends HookConsumerWidget {
                 }
               },
             ),
+            const Divider(height: 8),
+            if (!kIsWeb && Platform.isIOS) ...[
+              ListTile(
+                minTileHeight: 48,
+                leading: const Icon(Symbols.call),
+                trailing: const Icon(Symbols.chevron_right),
+                contentPadding: const EdgeInsets.symmetric(horizontal: 24),
+                title: const Text('[CallKit] Fake Incoming Call'),
+                onTap: () async {
+                  try {
+                    final roomId = await _promptForRoomId(
+                      context,
+                      'Incoming Call',
+                    );
+                    if (roomId == null) return;
+                    await ref
+                        .read(nativeCallBridgeProvider.notifier)
+                        .showIncomingCall(
+                          roomId: roomId,
+                          callerName: 'Test User',
+                        );
+                    if (!context.mounted) return;
+                    showSnackBar(
+                      'Fake incoming call triggered for room: $roomId',
+                    );
+                  } catch (e) {
+                    if (!context.mounted) return;
+                    showErrorAlert(e);
+                  }
+                },
+              ),
+              ListTile(
+                minTileHeight: 48,
+                leading: const Icon(Symbols.call_end),
+                trailing: const Icon(Symbols.chevron_right),
+                contentPadding: const EdgeInsets.symmetric(horizontal: 24),
+                title: const Text('[CallKit] Fake Outgoing Call'),
+                onTap: () async {
+                  try {
+                    final roomId = await _promptForRoomId(
+                      context,
+                      'Outgoing Call',
+                    );
+                    if (roomId == null) return;
+                    await ref
+                        .read(nativeCallBridgeProvider.notifier)
+                        .startOutgoingCall(
+                          roomId: roomId,
+                          callerName: 'Debug Call',
+                        );
+                    if (!context.mounted) return;
+                    showSnackBar(
+                      'Fake outgoing call triggered for room: $roomId',
+                    );
+                  } catch (e) {
+                    if (!context.mounted) return;
+                    showErrorAlert(e);
+                  }
+                },
+              ),
+              ListTile(
+                minTileHeight: 48,
+                leading: const Icon(Symbols.copy_all),
+                trailing: const Icon(Symbols.chevron_right),
+                contentPadding: const EdgeInsets.symmetric(horizontal: 24),
+                title: const Text('[CallKit] Copy VoIP Token'),
+                onTap: () async {
+                  try {
+                    final token = await FlutterCallkitIncoming.getDevicePushTokenVoIP();
+                    if (token != null) {
+                      await Clipboard.setData(ClipboardData(text: token));
+                      if (!context.mounted) return;
+                      showSnackBar('VoIP token copied');
+                    } else {
+                      if (!context.mounted) return;
+                      showSnackBar('No VoIP token available');
+                    }
+                  } catch (e) {
+                    if (!context.mounted) return;
+                    showErrorAlert(e);
+                  }
+                },
+              ),
+            ],
           ],
         ),
       ),

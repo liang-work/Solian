@@ -6,15 +6,14 @@ import 'package:flutter_hooks/flutter_hooks.dart';
 import 'package:freezed_annotation/freezed_annotation.dart';
 import 'package:gap/gap.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
-import 'package:island/accounts/widgets/account/account_pfc.dart';
 import 'package:island/accounts/widgets/account/account_picker.dart';
-import 'package:island/accounts/widgets/account/status.dart';
+import 'package:island/chat/messages_notifier.dart';
 import 'package:island/chat/pods/chat_room.dart';
+import 'package:island/chat/widgets/chat_member_list_tile.dart';
 import 'package:island/chat/widgets/chat_room_form.dart';
 import 'package:island/chat/widgets/chat_room_member_card.dart';
 import 'package:island/chat/widgets/chat_search_screen.dart';
 import 'package:island/core/database.dart';
-import 'package:island/realms/widgets/realm_label.dart';
 import 'package:island/core/network.dart';
 import 'package:island/e2ee/mls_client.dart';
 import 'package:island/route.gr.dart';
@@ -85,7 +84,7 @@ class _ChatBasisWidget extends HookConsumerWidget {
         : data.name ?? 'Chat';
 
     // Get chat picture
-    SnCloudFile? pictureFile;
+    IDisplayableCloudFile? pictureFile;
     if (data.picture != null) {
       pictureFile = data.picture;
     } else if (data.type == 1 && data.members?.isNotEmpty == true) {
@@ -262,7 +261,7 @@ class _ChatBasisWidget extends HookConsumerWidget {
 @RoutePage()
 class ChatDetailScreen extends HookConsumerWidget {
   final String id;
-  const ChatDetailScreen({super.key, required this.id});
+  const ChatDetailScreen({super.key, @PathParam("id") required this.id});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -301,19 +300,6 @@ class ChatDetailScreen extends HookConsumerWidget {
             'chatNotifyLevelUpdated'.tr(args: [kNotifyLevelText[level].tr()]),
           );
         }
-      } catch (err) {
-        showErrorAlert(err);
-      }
-    }
-
-    void setChatBreak(DateTime until) async {
-      try {
-        final client = ref.watch(apiClientProvider);
-        await client.patch(
-          '/messager/chat/$id/members/me/notify',
-          data: {'break_until': until.toUtc().toIso8601String()},
-        );
-        ref.invalidate(chatRoomIdentityProvider(id));
       } catch (err) {
         showErrorAlert(err);
       }
@@ -365,126 +351,6 @@ class ChatDetailScreen extends HookConsumerWidget {
       );
     }
 
-    void showChatBreakDialog() {
-      final now = DateTime.now();
-      final durationController = TextEditingController();
-
-      showDialog(
-        context: context,
-        builder: (context) => AlertDialog(
-          title: const Text('chatBreak').tr(),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Text('chatBreakDescription').tr(),
-              const Gap(16),
-              ListTile(
-                title: const Text('chatBreakClearButton').tr(),
-                subtitle: const Text('chatBreakClear').tr(),
-                leading: const Icon(Icons.notifications_active),
-                onTap: () {
-                  setChatBreak(now);
-                  Navigator.pop(context);
-                  if (context.mounted) {
-                    showSnackBar('chatBreakCleared'.tr());
-                  }
-                },
-              ),
-              ListTile(
-                title: const Text('chatBreak5m').tr(),
-                subtitle: const Text(
-                  'chatBreakHour',
-                ).tr(args: ['chatBreak5m'.tr()]),
-                leading: const Icon(Symbols.circle),
-                onTap: () {
-                  setChatBreak(now.add(const Duration(minutes: 5)));
-                  Navigator.pop(context);
-                  if (context.mounted) {
-                    showSnackBar('chatBreakSet'.tr(args: ['5m']));
-                  }
-                },
-              ),
-              ListTile(
-                title: const Text('chatBreak10m').tr(),
-                subtitle: const Text(
-                  'chatBreakHour',
-                ).tr(args: ['chatBreak10m'.tr()]),
-                leading: const Icon(Symbols.circle),
-                onTap: () {
-                  setChatBreak(now.add(const Duration(minutes: 10)));
-                  Navigator.pop(context);
-                  if (context.mounted) {
-                    showSnackBar('chatBreakSet'.tr(args: ['10m']));
-                  }
-                },
-              ),
-              ListTile(
-                title: const Text('chatBreak15m').tr(),
-                subtitle: const Text(
-                  'chatBreakHour',
-                ).tr(args: ['chatBreak15m'.tr()]),
-                leading: const Icon(Symbols.timer_3),
-                onTap: () {
-                  setChatBreak(now.add(const Duration(minutes: 15)));
-                  Navigator.pop(context);
-                  if (context.mounted) {
-                    showSnackBar('chatBreakSet'.tr(args: ['15m']));
-                  }
-                },
-              ),
-              ListTile(
-                title: const Text('chatBreak30m').tr(),
-                subtitle: const Text(
-                  'chatBreakHour',
-                ).tr(args: ['chatBreak30m'.tr()]),
-                leading: const Icon(Symbols.timer),
-                onTap: () {
-                  setChatBreak(now.add(const Duration(minutes: 30)));
-                  Navigator.pop(context);
-                  if (context.mounted) {
-                    showSnackBar('chatBreakSet'.tr(args: ['30m']));
-                  }
-                },
-              ),
-              const Gap(8),
-              TextField(
-                controller: durationController,
-                decoration: InputDecoration(
-                  labelText: 'chatBreakCustomMinutes'.tr(),
-                  hintText: 'chatBreakEnterMinutes'.tr(),
-
-                  suffixIcon: IconButton(
-                    icon: const Icon(Icons.check),
-                    onPressed: () {
-                      final minutes = int.tryParse(durationController.text);
-                      if (minutes != null && minutes > 0) {
-                        setChatBreak(now.add(Duration(minutes: minutes)));
-                        Navigator.pop(context);
-                        if (context.mounted) {
-                          showSnackBar(
-                            'chatBreakSet'.tr(args: ['${minutes}m']),
-                          );
-                        }
-                      }
-                    },
-                  ),
-                ),
-                keyboardType: TextInputType.number,
-                onTapOutside: (_) =>
-                    FocusManager.instance.primaryFocus?.unfocus(),
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('cancel').tr(),
-            ),
-          ],
-        ),
-      );
-    }
-
     return AppScaffold(
       appBar: AppBar(
         leading: AutoLeadingButton(),
@@ -496,7 +362,7 @@ class ChatDetailScreen extends HookConsumerWidget {
                 : currentRoom?.name ?? 'Chat',
           ),
           loading: () => const SizedBox.shrink(),
-          error: (_, __) => const SizedBox.shrink(),
+          error: (_, _) => const SizedBox.shrink(),
         ),
         actions: [
           IconButton(
@@ -618,7 +484,16 @@ class ChatDetailScreen extends HookConsumerWidget {
                                     ).format(identity.breakUntil!),
                                   )
                                 : const Text('chatBreakNone').tr(),
-                            onTap: () => showChatBreakDialog(),
+                            onTap: () {
+                              showModalBottomSheet(
+                                context: context,
+                                isScrollControlled: true,
+                                builder: (context) => _ChatBreakSheet(
+                                  roomId: id,
+                                  currentBreakUntil: identity.breakUntil,
+                                ),
+                              );
+                            },
                           ),
                         ],
                         ListTile(
@@ -644,6 +519,23 @@ class ChatDetailScreen extends HookConsumerWidget {
                                 context.pop(result);
                               }
                             }
+                          },
+                        ),
+                        ListTile(
+                          contentPadding: EdgeInsets.symmetric(horizontal: 24),
+                          leading: const Icon(Symbols.cloud_download),
+                          trailing: const Icon(Symbols.chevron_right),
+                          title: const Text('downloadMoreMessages').tr(),
+                          subtitle: const Text(
+                            'downloadMoreMessagesDescription',
+                          ).tr(),
+                          onTap: () {
+                            showModalBottomSheet(
+                              context: context,
+                              isScrollControlled: true,
+                              builder: (context) =>
+                                  _DownloadMessagesSheet(roomId: id),
+                            );
                           },
                         ),
                       ],
@@ -691,8 +583,7 @@ class _ChatRoomActionMenu extends HookConsumerWidget {
                 builder: (context) => EditChatScreen(id: id),
               ).then((value) {
                 if (value != null) {
-                  // Invalidate to refresh room data after edit
-                  ref.invalidate(chatMemberListProvider(id));
+                  ref.read(chatMemberListProvider(id).notifier).refresh();
                 }
               });
             },
@@ -972,16 +863,44 @@ class MlsUserReadyStatus {
   });
 }
 
+class ChatMemberListFilter {
+  final String? accountName;
+
+  const ChatMemberListFilter({this.accountName});
+
+  bool get hasFilters => accountName != null && accountName!.isNotEmpty;
+
+  ChatMemberListFilter normalized() {
+    final normalizedName = accountName?.trim();
+    return ChatMemberListFilter(
+      accountName: normalizedName?.isEmpty == true ? null : normalizedName,
+    );
+  }
+
+  @override
+  bool operator ==(Object other) {
+    return other is ChatMemberListFilter && other.accountName == accountName;
+  }
+
+  @override
+  int get hashCode => accountName.hashCode;
+}
+
 class ChatMemberListNotifier
     extends AsyncNotifier<PaginationState<SnChatMember>>
-    with AsyncPaginationController<SnChatMember> {
+    with
+        AsyncPaginationController<SnChatMember>,
+        AsyncPaginationFilter<ChatMemberListFilter, SnChatMember> {
   static const pageSize = 20;
 
   final String arg;
   ChatMemberListNotifier(this.arg);
+  @override
+  ChatMemberListFilter currentFilter = const ChatMemberListFilter();
 
   @override
   Future<List<SnChatMember>> fetch() async {
+    final filter = currentFilter.normalized();
     final apiClient = ref.watch(apiClientProvider);
     final response = await apiClient.get(
       '/messager/chat/$arg/members',
@@ -989,6 +908,7 @@ class ChatMemberListNotifier
         'offset': fetchedCount.toString(),
         'take': pageSize,
         'withStatus': true,
+        if (filter.accountName != null) 'accountName': filter.accountName,
       },
     );
 
@@ -1009,9 +929,25 @@ class _ChatMemberListSheet extends HookConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final memberState = ref.watch(chatMemberListProvider(roomId));
-    final memberNotifier = ref.watch(chatMemberListProvider(roomId).notifier);
+    final memberNotifier = ref.read(chatMemberListProvider(roomId).notifier);
 
     final chatRoom = ref.watch(chatRoomProvider(roomId));
+    final searchController = useTextEditingController(
+      text: memberNotifier.currentFilter.accountName ?? '',
+    );
+    useListenable(searchController);
+    final currentFilter = memberNotifier.currentFilter.normalized();
+
+    Future<void> applyMemberFilter() async {
+      await memberNotifier.applyFilter(
+        ChatMemberListFilter(accountName: searchController.text).normalized(),
+      );
+    }
+
+    Future<void> clearMemberFilters() async {
+      searchController.clear();
+      await memberNotifier.applyFilter(const ChatMemberListFilter());
+    }
 
     Future<void> invitePerson() async {
       final result = await showModalBottomSheet(
@@ -1053,7 +989,7 @@ class _ChatMemberListSheet extends HookConsumerWidget {
           }
         }
 
-        memberNotifier.refresh();
+        await memberNotifier.refresh();
       } catch (err) {
         showErrorAlert(err);
       }
@@ -1067,36 +1003,69 @@ class _ChatMemberListSheet extends HookConsumerWidget {
         children: [
           Padding(
             padding: EdgeInsets.only(top: 16, left: 20, right: 16, bottom: 12),
-            child: Row(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Text(
-                  'members'.plural(memberState.value?.totalCount ?? 0),
-                  style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                    fontWeight: FontWeight.w600,
-                    letterSpacing: -0.5,
+                Row(
+                  children: [
+                    Text(
+                      'members'.plural(memberState.value?.totalCount ?? 0),
+                      style: Theme.of(context).textTheme.headlineSmall
+                          ?.copyWith(
+                            fontWeight: FontWeight.w600,
+                            letterSpacing: -0.5,
+                          ),
+                    ),
+                    const Spacer(),
+                    IconButton(
+                      icon: const Icon(Symbols.person_add),
+                      onPressed: invitePerson,
+                      style: IconButton.styleFrom(
+                        minimumSize: const Size(36, 36),
+                      ),
+                    ),
+                    IconButton(
+                      icon: const Icon(Symbols.refresh),
+                      onPressed: memberNotifier.refresh,
+                    ),
+                    IconButton(
+                      icon: const Icon(Symbols.close),
+                      onPressed: () => Navigator.pop(context),
+                      style: IconButton.styleFrom(
+                        minimumSize: const Size(36, 36),
+                      ),
+                    ),
+                  ],
+                ),
+                const Gap(12),
+                SearchBar(
+                  controller: searchController,
+                  hintText: 'Search member account',
+                  leading: const Icon(Symbols.search),
+                  padding: WidgetStateProperty.all(
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 0),
                   ),
-                ),
-                const Spacer(),
-                IconButton(
-                  icon: const Icon(Symbols.person_add),
-                  onPressed: invitePerson,
-                  style: IconButton.styleFrom(minimumSize: const Size(36, 36)),
-                ),
-                IconButton(
-                  icon: const Icon(Symbols.refresh),
-                  onPressed: () {
-                    memberNotifier.refresh();
-                  },
-                ),
-                IconButton(
-                  icon: const Icon(Symbols.close),
-                  onPressed: () => Navigator.pop(context),
-                  style: IconButton.styleFrom(minimumSize: const Size(36, 36)),
+                  trailing: [
+                    if (searchController.text.isNotEmpty)
+                      IconButton(
+                        icon: const Icon(Symbols.close),
+                        onPressed: () async {
+                          searchController.clear();
+                          await applyMemberFilter();
+                        },
+                      ),
+                    if (currentFilter.hasFilters)
+                      IconButton(
+                        tooltip: 'Clear filters',
+                        icon: const Icon(Symbols.filter_alt_off),
+                        onPressed: clearMemberFilters,
+                      ),
+                  ],
+                  onSubmitted: (_) => applyMemberFilter(),
                 ),
               ],
             ),
           ),
-          const Divider(height: 1),
           Expanded(
             child: PaginationList(
               provider: chatMemberListProvider(roomId),
@@ -1142,49 +1111,11 @@ class _MemberListTile extends HookConsumerWidget {
     final isManagable =
         chatRoom.value?.accountId == roomIdentity.value?.accountId ||
         chatRoom.value?.type == 1;
-    final memberNotifier = ref.watch(chatMemberListProvider(roomId).notifier);
+    final memberNotifier = ref.read(chatMemberListProvider(roomId).notifier);
 
-    return ListTile(
-      contentPadding: EdgeInsets.only(left: 16, right: 12),
-      leading: AccountPfcRegion(
-        uname: member.account.name,
-        child: ProfilePictureWidget(file: member.account.profile.picture),
-      ),
-      title: Row(
-        spacing: 6,
-        children: [
-          Flexible(child: Text(member.account.nick)),
-          if (member.status != null)
-            AccountStatusLabel(
-              status: member.status!,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-            ),
-          if (member.realmLabel != null)
-            RealmLabelWidget(label: member.realmLabel!, fontSize: 10),
-          if (member.joinedAt == null)
-            const Icon(Symbols.pending_actions, size: 20),
-          if (isE2eeReady)
-            Tooltip(
-              message: 'E2EE Ready',
-              child: Icon(
-                Symbols.lock,
-                size: 16,
-                color: Theme.of(context).colorScheme.primary,
-              ),
-            )
-          else
-            Tooltip(
-              message: 'E2EE Not Available',
-              child: Icon(
-                Symbols.lock_open,
-                size: 16,
-                color: Theme.of(context).colorScheme.outline,
-              ),
-            ),
-        ],
-      ),
-      subtitle: Text("@${member.account.name}"),
+    return ChatMemberListTile(
+      member: member,
+      isE2eeReady: isE2eeReady,
       trailing: IconButton(
         icon: const Icon(Symbols.more_horiz),
         onPressed: () {
@@ -1194,7 +1125,7 @@ class _MemberListTile extends HookConsumerWidget {
             member: member,
             canModerate: isManagable,
             onUpdated: () async {
-              memberNotifier.refresh();
+              await memberNotifier.refresh();
             },
           );
         },
@@ -1206,7 +1137,7 @@ class _MemberListTile extends HookConsumerWidget {
           member: member,
           canModerate: isManagable,
           onUpdated: () async {
-            memberNotifier.refresh();
+            await memberNotifier.refresh();
           },
         );
       },
@@ -1255,7 +1186,7 @@ class _ChatIdentityEditorSheet extends HookConsumerWidget {
                       try {
                         final apiClient = ref.read(apiClientProvider);
                         await apiClient.patch(
-                          '/messager/chat/$roomId/members/me',
+                          '/messager/chat/$roomId/members/me/profile',
                           data: {
                             'nick': nickController.text.trim().isEmpty
                                 ? null
@@ -1263,7 +1194,9 @@ class _ChatIdentityEditorSheet extends HookConsumerWidget {
                           },
                         );
                         ref.invalidate(chatRoomIdentityProvider(roomId));
-                        ref.invalidate(chatMemberListProvider(roomId));
+                        await ref
+                            .read(chatMemberListProvider(roomId).notifier)
+                            .refresh();
                         if (context.mounted) {
                           showSnackBar('saveChanges'.tr());
                           Navigator.pop(context, true);
@@ -1292,7 +1225,9 @@ class _ChatIdentityEditorSheet extends HookConsumerWidget {
                               '/messager/chat/$roomId/members/me/profile',
                             );
                             ref.invalidate(chatRoomIdentityProvider(roomId));
-                            ref.invalidate(chatMemberListProvider(roomId));
+                            await ref
+                                .read(chatMemberListProvider(roomId).notifier)
+                                .refresh();
                             if (context.mounted) {
                               showSnackBar('cleared'.tr());
                               Navigator.pop(context, true);
@@ -1306,6 +1241,416 @@ class _ChatIdentityEditorSheet extends HookConsumerWidget {
                 ),
               ],
             ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ChatBreakSheet extends HookConsumerWidget {
+  final String roomId;
+  final DateTime? currentBreakUntil;
+
+  const _ChatBreakSheet({required this.roomId, this.currentBreakUntil});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final customMinutesController = useTextEditingController();
+    final isSettingBreak = useState(false);
+    final now = DateTime.now();
+    final hasActiveBreak =
+        currentBreakUntil != null && currentBreakUntil!.isAfter(now);
+
+    Future<void> setChatBreak(DateTime until) async {
+      isSettingBreak.value = true;
+      try {
+        final client = ref.read(apiClientProvider);
+        await client.patch(
+          '/messager/chat/$roomId/members/me/notify',
+          data: {'break_until': until.toUtc().toIso8601String()},
+        );
+        ref.invalidate(chatRoomIdentityProvider(roomId));
+        if (context.mounted) {
+          if (until.isBefore(now) || until.isAtSameMomentAs(now)) {
+            showSnackBar('chatBreakCleared'.tr());
+          } else {
+            final diff = until.difference(now);
+            String duration;
+            if (diff.inHours > 0) {
+              duration = '${diff.inHours}h ${diff.inMinutes % 60}m';
+            } else {
+              duration = '${diff.inMinutes}m';
+            }
+            showSnackBar('chatBreakSet'.tr(args: [duration]));
+          }
+          Navigator.pop(context);
+        }
+      } catch (err) {
+        if (context.mounted) {
+          showErrorAlert(err);
+        }
+      } finally {
+        isSettingBreak.value = false;
+      }
+    }
+
+    void setCustomBreak() {
+      final minutes = int.tryParse(customMinutesController.text);
+      if (minutes != null && minutes > 0) {
+        setChatBreak(now.add(Duration(minutes: minutes)));
+      }
+    }
+
+    final quickBreakOptions = [
+      {
+        'titleKey': 'chatBreak5m',
+        'icon': Symbols.alarm,
+        'duration': const Duration(minutes: 5),
+      },
+      {
+        'titleKey': 'chatBreak10m',
+        'icon': Symbols.alarm,
+        'duration': const Duration(minutes: 10),
+      },
+      {
+        'titleKey': 'chatBreak15m',
+        'icon': Symbols.timer_3,
+        'duration': const Duration(minutes: 15),
+      },
+      {
+        'titleKey': 'chatBreak30m',
+        'icon': Symbols.timer,
+        'duration': const Duration(minutes: 30),
+      },
+      {
+        'titleKey': 'chatBreak1h',
+        'icon': Symbols.timer_10,
+        'duration': const Duration(hours: 1),
+      },
+      {
+        'titleKey': 'chatBreak2h',
+        'icon': Symbols.timer_10,
+        'duration': const Duration(hours: 2),
+      },
+    ];
+
+    return SheetScaffold(
+      heightFactor: 0.6,
+      titleText: 'chatBreak'.tr(),
+      child: SingleChildScrollView(
+        padding: EdgeInsets.only(
+          top: 8,
+          bottom: MediaQuery.of(context).viewInsets.bottom + 16,
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            // Current break status
+            if (hasActiveBreak) ...[
+              Card(
+                color: Theme.of(context).colorScheme.secondaryContainer,
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Row(
+                    children: [
+                      Icon(
+                        Symbols.do_not_disturb_on,
+                        color: Theme.of(context).colorScheme.secondary,
+                      ),
+                      const Gap(12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'chatBreakActive'.tr(),
+                              style: Theme.of(context).textTheme.titleSmall
+                                  ?.copyWith(
+                                    color: Theme.of(
+                                      context,
+                                    ).colorScheme.onSecondaryContainer,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                            ),
+                            const Gap(4),
+                            Text(
+                              DateFormat(
+                                'yyyy-MM-dd HH:mm',
+                              ).format(currentBreakUntil!),
+                              style: Theme.of(context).textTheme.bodySmall
+                                  ?.copyWith(
+                                    color: Theme.of(
+                                      context,
+                                    ).colorScheme.onSecondaryContainer,
+                                  ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      FilledButton.tonal(
+                        onPressed: isSettingBreak.value
+                            ? null
+                            : () => setChatBreak(now),
+                        child: isSettingBreak.value
+                            ? const SizedBox(
+                                width: 16,
+                                height: 16,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
+                              )
+                            : const Text('chatBreakClearButton').tr(),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const Gap(16),
+            ],
+
+            // Quick duration section
+            Text(
+              'chatBreakQuickOptions'.tr(),
+              style: Theme.of(
+                context,
+              ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600),
+            ).padding(horizontal: 20),
+            const Gap(4),
+            Column(
+              children: [
+                for (final option in quickBreakOptions)
+                  ListTile(
+                    leading: Icon(option['icon'] as IconData),
+                    title: Text(option['titleKey'] as String).tr(),
+                    trailing: Icon(
+                      Symbols.chevron_right,
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 20,
+                      vertical: 0,
+                    ),
+                    onTap: isSettingBreak.value
+                        ? null
+                        : () => setChatBreak(
+                            now.add(option['duration'] as Duration),
+                          ),
+                  ),
+              ],
+            ),
+            const Gap(24),
+
+            // Custom duration section
+            Text(
+              'chatBreakCustom'.tr(),
+              style: Theme.of(
+                context,
+              ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600),
+            ).padding(horizontal: 20),
+            const Gap(12),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              child: Column(
+                children: [
+                  TextField(
+                    controller: customMinutesController,
+                    decoration: InputDecoration(
+                      labelText: 'chatBreakCustomMinutes'.tr(),
+                      hintText: 'chatBreakEnterMinutes'.tr(),
+                      prefixIcon: const Icon(Symbols.timer),
+                      suffixText: 'minutes'.tr(),
+                    ),
+                    keyboardType: TextInputType.number,
+                    onTapOutside: (_) =>
+                        FocusManager.instance.primaryFocus?.unfocus(),
+                    onSubmitted: (_) => setCustomBreak(),
+                  ),
+                  const Gap(12),
+                  SizedBox(
+                    width: double.infinity,
+                    child: FilledButton.icon(
+                      onPressed: isSettingBreak.value ? null : setCustomBreak,
+                      icon: isSettingBreak.value
+                          ? const SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Colors.white,
+                              ),
+                            )
+                          : const Icon(Symbols.check),
+                      label: Text('setBreak'.tr()),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const Gap(16),
+
+            // Description
+            Text(
+              'chatBreakDescription'.tr(),
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+            ).padding(horizontal: 20),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _DownloadMessagesSheet extends HookConsumerWidget {
+  final String roomId;
+  const _DownloadMessagesSheet({required this.roomId});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final isDownloading = useState(false);
+    final downloadProgress = useState<String?>(null);
+    final totalDownloaded = useState<int>(0);
+    final totalMessages = ref.watch(totalMessagesCountProvider(roomId));
+
+    Future<void> downloadMessages(int requestedCount) async {
+      isDownloading.value = true;
+      downloadProgress.value = 'downloading'.tr();
+      totalDownloaded.value = 0;
+
+      const batchSize = 100;
+
+      try {
+        final database = ref.read(databaseProvider);
+        final initialCount = await database.getTotalMessagesForRoom(roomId);
+
+        // Sync messages from server in batches – this fetches and caches to DB
+        final messagesNotifier = ref.read(messagesProvider(roomId).notifier);
+        var currentOffset = initialCount;
+        var downloaded = 0;
+        var remaining = requestedCount;
+
+        while (remaining > 0) {
+          final take = remaining > batchSize ? batchSize : remaining;
+          await messagesNotifier.listMessages(
+            take: take,
+            offset: currentOffset,
+          );
+
+          final afterSyncCount = await database.getTotalMessagesForRoom(roomId);
+          final downloadedThisBatch = afterSyncCount - currentOffset;
+
+          if (downloadedThisBatch <= 0) {
+            break;
+          }
+
+          downloaded += downloadedThisBatch;
+          currentOffset = afterSyncCount;
+          remaining = requestedCount - downloaded;
+
+          if (downloadedThisBatch < take) {
+            break;
+          }
+        }
+
+        totalDownloaded.value = downloaded;
+
+        // Refresh the local count display
+        ref.invalidate(totalMessagesCountProvider(roomId));
+
+        if (context.mounted) {
+          if (downloaded > 0) {
+            showSnackBar('downloadComplete'.tr(args: [downloaded.toString()]));
+          } else {
+            showSnackBar('noNewMessages'.tr());
+          }
+          Navigator.pop(context);
+        }
+      } catch (err) {
+        if (context.mounted) {
+          showErrorAlert(err);
+        }
+      } finally {
+        isDownloading.value = false;
+        downloadProgress.value = null;
+      }
+    }
+
+    return SheetScaffold(
+      heightFactor: 0.5,
+      titleText: 'downloadMoreMessages'.tr(),
+      child: SingleChildScrollView(
+        padding: EdgeInsets.only(
+          top: 16,
+          bottom: MediaQuery.of(context).viewInsets.bottom + 16,
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(
+              'downloadMoreMessagesDescription'.tr(),
+              style: Theme.of(context).textTheme.bodyMedium,
+            ).padding(horizontal: 24),
+            totalMessages
+                .when(
+                  data: (count) => Text(
+                    'currentMessagesCount'.tr(args: [count.toString()]),
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                  loading: () => const SizedBox.shrink(),
+                  error: (_, _) => const SizedBox.shrink(),
+                )
+                .padding(horizontal: 24),
+            const Gap(24),
+            if (isDownloading.value) ...[
+              const Center(
+                child: Column(
+                  children: [CircularProgressIndicator(), SizedBox(height: 16)],
+                ),
+              ),
+              if (downloadProgress.value != null)
+                Center(
+                  child: Text(
+                    downloadProgress.value!,
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      color: Theme.of(context).colorScheme.primary,
+                    ),
+                  ),
+                ),
+              const Gap(16),
+            ] else ...[
+              Text(
+                'selectBatchSize'.tr(),
+                style: Theme.of(context).textTheme.titleSmall,
+              ).padding(horizontal: 24),
+              const Gap(4),
+              Column(
+                children: [
+                  for (final count in [100, 500, 1000, 2000, 5000])
+                    ListTile(
+                      leading: const Icon(Symbols.download),
+                      title: Text('$count messages'),
+                      trailing: const Icon(Symbols.chevron_right),
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 20,
+                        vertical: 0,
+                      ),
+                      onTap: isDownloading.value
+                          ? null
+                          : () => downloadMessages(count),
+                    ),
+                ],
+              ),
+              Text(
+                'downloadBatchSizeHint'.tr(),
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+              ).padding(horizontal: 24),
+            ],
           ],
         ),
       ),

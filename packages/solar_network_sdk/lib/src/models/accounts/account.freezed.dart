@@ -237,8 +237,8 @@ return $default(_that.id,_that.name,_that.nick,_that.language,_that.region,_that
 /// @nodoc
 @JsonSerializable()
 
-class _SnAccount implements SnAccount {
-  const _SnAccount({required this.id, required this.name, required this.nick, required this.language, this.region = "", required this.isSuperuser, required this.automatedId, required this.profile, required this.perkSubscription, final  List<SnAccountBadge> badges = const [], final  List<SnContactMethod> contacts = const [], required this.activatedAt, required this.createdAt, required this.updatedAt, required this.deletedAt}): _badges = badges,_contacts = contacts;
+class _SnAccount extends SnAccount {
+  const _SnAccount({required this.id, required this.name, required this.nick, required this.language, this.region = "", required this.isSuperuser, required this.automatedId, required this.profile, required this.perkSubscription, final  List<SnAccountBadge> badges = const [], final  List<SnContactMethod> contacts = const [], required this.activatedAt, required this.createdAt, required this.updatedAt, required this.deletedAt}): _badges = badges,_contacts = contacts,super._();
   factory _SnAccount.fromJson(Map<String, dynamic> json) => _$SnAccountFromJson(json);
 
 @override final  String id;
@@ -902,7 +902,7 @@ as List<String>?,
 /// @nodoc
 mixin _$SnAccountProfile {
 
- String get id; String get firstName; String get middleName; String get lastName; String get bio; String get gender; String get pronouns; String get location; String get timeZone; DateTime? get birthday;@ProfileLinkConverter() List<ProfileLink> get links; DateTime? get lastSeenAt; SnAccountBadge? get activeBadge; int get experience; int get level; double get socialCredits; int get socialCreditsLevel; double get levelingProgress; SnCloudFile? get picture; SnCloudFile? get background; SnVerificationMark? get verification; UsernameColor? get usernameColor; DateTime get createdAt; DateTime get updatedAt; DateTime? get deletedAt;
+ String get id; String get firstName; String get middleName; String get lastName; String get bio; String get gender; String get pronouns; String get location; String get timeZone; DateTime? get birthday;@ProfileLinkConverter() List<ProfileLink> get links; DateTime? get lastSeenAt; SnAccountBadge? get activeBadge; int get experience; int get level; double get socialCredits; int get socialCreditsLevel; double get levelingProgress; SnCloudFileReference? get picture; SnCloudFileReference? get background; SnVerificationMark? get verification; UsernameColor? get usernameColor; DateTime get createdAt; DateTime get updatedAt; DateTime? get deletedAt;
 /// Create a copy of SnAccountProfile
 /// with the given fields replaced by the non-null parameter values.
 @JsonKey(includeFromJson: false, includeToJson: false)
@@ -935,11 +935,11 @@ abstract mixin class $SnAccountProfileCopyWith<$Res>  {
   factory $SnAccountProfileCopyWith(SnAccountProfile value, $Res Function(SnAccountProfile) _then) = _$SnAccountProfileCopyWithImpl;
 @useResult
 $Res call({
- String id, String firstName, String middleName, String lastName, String bio, String gender, String pronouns, String location, String timeZone, DateTime? birthday,@ProfileLinkConverter() List<ProfileLink> links, DateTime? lastSeenAt, SnAccountBadge? activeBadge, int experience, int level, double socialCredits, int socialCreditsLevel, double levelingProgress, SnCloudFile? picture, SnCloudFile? background, SnVerificationMark? verification, UsernameColor? usernameColor, DateTime createdAt, DateTime updatedAt, DateTime? deletedAt
+ String id, String firstName, String middleName, String lastName, String bio, String gender, String pronouns, String location, String timeZone, DateTime? birthday,@ProfileLinkConverter() List<ProfileLink> links, DateTime? lastSeenAt, SnAccountBadge? activeBadge, int experience, int level, double socialCredits, int socialCreditsLevel, double levelingProgress, SnCloudFileReference? picture, SnCloudFileReference? background, SnVerificationMark? verification, UsernameColor? usernameColor, DateTime createdAt, DateTime updatedAt, DateTime? deletedAt
 });
 
 
-$SnAccountBadgeCopyWith<$Res>? get activeBadge;$SnCloudFileCopyWith<$Res>? get picture;$SnCloudFileCopyWith<$Res>? get background;$SnVerificationMarkCopyWith<$Res>? get verification;$UsernameColorCopyWith<$Res>? get usernameColor;
+$SnAccountBadgeCopyWith<$Res>? get activeBadge;$SnCloudFileReferenceCopyWith<$Res>? get picture;$SnCloudFileReferenceCopyWith<$Res>? get background;$SnVerificationMarkCopyWith<$Res>? get verification;$UsernameColorCopyWith<$Res>? get usernameColor;
 
 }
 /// @nodoc
@@ -973,8 +973,8 @@ as int,socialCredits: null == socialCredits ? _self.socialCredits : socialCredit
 as double,socialCreditsLevel: null == socialCreditsLevel ? _self.socialCreditsLevel : socialCreditsLevel // ignore: cast_nullable_to_non_nullable
 as int,levelingProgress: null == levelingProgress ? _self.levelingProgress : levelingProgress // ignore: cast_nullable_to_non_nullable
 as double,picture: freezed == picture ? _self.picture : picture // ignore: cast_nullable_to_non_nullable
-as SnCloudFile?,background: freezed == background ? _self.background : background // ignore: cast_nullable_to_non_nullable
-as SnCloudFile?,verification: freezed == verification ? _self.verification : verification // ignore: cast_nullable_to_non_nullable
+as SnCloudFileReference?,background: freezed == background ? _self.background : background // ignore: cast_nullable_to_non_nullable
+as SnCloudFileReference?,verification: freezed == verification ? _self.verification : verification // ignore: cast_nullable_to_non_nullable
 as SnVerificationMark?,usernameColor: freezed == usernameColor ? _self.usernameColor : usernameColor // ignore: cast_nullable_to_non_nullable
 as UsernameColor?,createdAt: null == createdAt ? _self.createdAt : createdAt // ignore: cast_nullable_to_non_nullable
 as DateTime,updatedAt: null == updatedAt ? _self.updatedAt : updatedAt // ignore: cast_nullable_to_non_nullable
@@ -998,24 +998,24 @@ $SnAccountBadgeCopyWith<$Res>? get activeBadge {
 /// with the given fields replaced by the non-null parameter values.
 @override
 @pragma('vm:prefer-inline')
-$SnCloudFileCopyWith<$Res>? get picture {
+$SnCloudFileReferenceCopyWith<$Res>? get picture {
     if (_self.picture == null) {
     return null;
   }
 
-  return $SnCloudFileCopyWith<$Res>(_self.picture!, (value) {
+  return $SnCloudFileReferenceCopyWith<$Res>(_self.picture!, (value) {
     return _then(_self.copyWith(picture: value));
   });
 }/// Create a copy of SnAccountProfile
 /// with the given fields replaced by the non-null parameter values.
 @override
 @pragma('vm:prefer-inline')
-$SnCloudFileCopyWith<$Res>? get background {
+$SnCloudFileReferenceCopyWith<$Res>? get background {
     if (_self.background == null) {
     return null;
   }
 
-  return $SnCloudFileCopyWith<$Res>(_self.background!, (value) {
+  return $SnCloudFileReferenceCopyWith<$Res>(_self.background!, (value) {
     return _then(_self.copyWith(background: value));
   });
 }/// Create a copy of SnAccountProfile
@@ -1121,7 +1121,7 @@ return $default(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( String id,  String firstName,  String middleName,  String lastName,  String bio,  String gender,  String pronouns,  String location,  String timeZone,  DateTime? birthday, @ProfileLinkConverter()  List<ProfileLink> links,  DateTime? lastSeenAt,  SnAccountBadge? activeBadge,  int experience,  int level,  double socialCredits,  int socialCreditsLevel,  double levelingProgress,  SnCloudFile? picture,  SnCloudFile? background,  SnVerificationMark? verification,  UsernameColor? usernameColor,  DateTime createdAt,  DateTime updatedAt,  DateTime? deletedAt)?  $default,{required TResult orElse(),}) {final _that = this;
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( String id,  String firstName,  String middleName,  String lastName,  String bio,  String gender,  String pronouns,  String location,  String timeZone,  DateTime? birthday, @ProfileLinkConverter()  List<ProfileLink> links,  DateTime? lastSeenAt,  SnAccountBadge? activeBadge,  int experience,  int level,  double socialCredits,  int socialCreditsLevel,  double levelingProgress,  SnCloudFileReference? picture,  SnCloudFileReference? background,  SnVerificationMark? verification,  UsernameColor? usernameColor,  DateTime createdAt,  DateTime updatedAt,  DateTime? deletedAt)?  $default,{required TResult orElse(),}) {final _that = this;
 switch (_that) {
 case _SnAccountProfile() when $default != null:
 return $default(_that.id,_that.firstName,_that.middleName,_that.lastName,_that.bio,_that.gender,_that.pronouns,_that.location,_that.timeZone,_that.birthday,_that.links,_that.lastSeenAt,_that.activeBadge,_that.experience,_that.level,_that.socialCredits,_that.socialCreditsLevel,_that.levelingProgress,_that.picture,_that.background,_that.verification,_that.usernameColor,_that.createdAt,_that.updatedAt,_that.deletedAt);case _:
@@ -1142,7 +1142,7 @@ return $default(_that.id,_that.firstName,_that.middleName,_that.lastName,_that.b
 /// }
 /// ```
 
-@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( String id,  String firstName,  String middleName,  String lastName,  String bio,  String gender,  String pronouns,  String location,  String timeZone,  DateTime? birthday, @ProfileLinkConverter()  List<ProfileLink> links,  DateTime? lastSeenAt,  SnAccountBadge? activeBadge,  int experience,  int level,  double socialCredits,  int socialCreditsLevel,  double levelingProgress,  SnCloudFile? picture,  SnCloudFile? background,  SnVerificationMark? verification,  UsernameColor? usernameColor,  DateTime createdAt,  DateTime updatedAt,  DateTime? deletedAt)  $default,) {final _that = this;
+@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( String id,  String firstName,  String middleName,  String lastName,  String bio,  String gender,  String pronouns,  String location,  String timeZone,  DateTime? birthday, @ProfileLinkConverter()  List<ProfileLink> links,  DateTime? lastSeenAt,  SnAccountBadge? activeBadge,  int experience,  int level,  double socialCredits,  int socialCreditsLevel,  double levelingProgress,  SnCloudFileReference? picture,  SnCloudFileReference? background,  SnVerificationMark? verification,  UsernameColor? usernameColor,  DateTime createdAt,  DateTime updatedAt,  DateTime? deletedAt)  $default,) {final _that = this;
 switch (_that) {
 case _SnAccountProfile():
 return $default(_that.id,_that.firstName,_that.middleName,_that.lastName,_that.bio,_that.gender,_that.pronouns,_that.location,_that.timeZone,_that.birthday,_that.links,_that.lastSeenAt,_that.activeBadge,_that.experience,_that.level,_that.socialCredits,_that.socialCreditsLevel,_that.levelingProgress,_that.picture,_that.background,_that.verification,_that.usernameColor,_that.createdAt,_that.updatedAt,_that.deletedAt);}
@@ -1159,7 +1159,7 @@ return $default(_that.id,_that.firstName,_that.middleName,_that.lastName,_that.b
 /// }
 /// ```
 
-@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( String id,  String firstName,  String middleName,  String lastName,  String bio,  String gender,  String pronouns,  String location,  String timeZone,  DateTime? birthday, @ProfileLinkConverter()  List<ProfileLink> links,  DateTime? lastSeenAt,  SnAccountBadge? activeBadge,  int experience,  int level,  double socialCredits,  int socialCreditsLevel,  double levelingProgress,  SnCloudFile? picture,  SnCloudFile? background,  SnVerificationMark? verification,  UsernameColor? usernameColor,  DateTime createdAt,  DateTime updatedAt,  DateTime? deletedAt)?  $default,) {final _that = this;
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( String id,  String firstName,  String middleName,  String lastName,  String bio,  String gender,  String pronouns,  String location,  String timeZone,  DateTime? birthday, @ProfileLinkConverter()  List<ProfileLink> links,  DateTime? lastSeenAt,  SnAccountBadge? activeBadge,  int experience,  int level,  double socialCredits,  int socialCreditsLevel,  double levelingProgress,  SnCloudFileReference? picture,  SnCloudFileReference? background,  SnVerificationMark? verification,  UsernameColor? usernameColor,  DateTime createdAt,  DateTime updatedAt,  DateTime? deletedAt)?  $default,) {final _that = this;
 switch (_that) {
 case _SnAccountProfile() when $default != null:
 return $default(_that.id,_that.firstName,_that.middleName,_that.lastName,_that.bio,_that.gender,_that.pronouns,_that.location,_that.timeZone,_that.birthday,_that.links,_that.lastSeenAt,_that.activeBadge,_that.experience,_that.level,_that.socialCredits,_that.socialCreditsLevel,_that.levelingProgress,_that.picture,_that.background,_that.verification,_that.usernameColor,_that.createdAt,_that.updatedAt,_that.deletedAt);case _:
@@ -1201,8 +1201,8 @@ class _SnAccountProfile implements SnAccountProfile {
 @override@JsonKey() final  double socialCredits;
 @override@JsonKey() final  int socialCreditsLevel;
 @override final  double levelingProgress;
-@override final  SnCloudFile? picture;
-@override final  SnCloudFile? background;
+@override final  SnCloudFileReference? picture;
+@override final  SnCloudFileReference? background;
 @override final  SnVerificationMark? verification;
 @override final  UsernameColor? usernameColor;
 @override final  DateTime createdAt;
@@ -1242,11 +1242,11 @@ abstract mixin class _$SnAccountProfileCopyWith<$Res> implements $SnAccountProfi
   factory _$SnAccountProfileCopyWith(_SnAccountProfile value, $Res Function(_SnAccountProfile) _then) = __$SnAccountProfileCopyWithImpl;
 @override @useResult
 $Res call({
- String id, String firstName, String middleName, String lastName, String bio, String gender, String pronouns, String location, String timeZone, DateTime? birthday,@ProfileLinkConverter() List<ProfileLink> links, DateTime? lastSeenAt, SnAccountBadge? activeBadge, int experience, int level, double socialCredits, int socialCreditsLevel, double levelingProgress, SnCloudFile? picture, SnCloudFile? background, SnVerificationMark? verification, UsernameColor? usernameColor, DateTime createdAt, DateTime updatedAt, DateTime? deletedAt
+ String id, String firstName, String middleName, String lastName, String bio, String gender, String pronouns, String location, String timeZone, DateTime? birthday,@ProfileLinkConverter() List<ProfileLink> links, DateTime? lastSeenAt, SnAccountBadge? activeBadge, int experience, int level, double socialCredits, int socialCreditsLevel, double levelingProgress, SnCloudFileReference? picture, SnCloudFileReference? background, SnVerificationMark? verification, UsernameColor? usernameColor, DateTime createdAt, DateTime updatedAt, DateTime? deletedAt
 });
 
 
-@override $SnAccountBadgeCopyWith<$Res>? get activeBadge;@override $SnCloudFileCopyWith<$Res>? get picture;@override $SnCloudFileCopyWith<$Res>? get background;@override $SnVerificationMarkCopyWith<$Res>? get verification;@override $UsernameColorCopyWith<$Res>? get usernameColor;
+@override $SnAccountBadgeCopyWith<$Res>? get activeBadge;@override $SnCloudFileReferenceCopyWith<$Res>? get picture;@override $SnCloudFileReferenceCopyWith<$Res>? get background;@override $SnVerificationMarkCopyWith<$Res>? get verification;@override $UsernameColorCopyWith<$Res>? get usernameColor;
 
 }
 /// @nodoc
@@ -1280,8 +1280,8 @@ as int,socialCredits: null == socialCredits ? _self.socialCredits : socialCredit
 as double,socialCreditsLevel: null == socialCreditsLevel ? _self.socialCreditsLevel : socialCreditsLevel // ignore: cast_nullable_to_non_nullable
 as int,levelingProgress: null == levelingProgress ? _self.levelingProgress : levelingProgress // ignore: cast_nullable_to_non_nullable
 as double,picture: freezed == picture ? _self.picture : picture // ignore: cast_nullable_to_non_nullable
-as SnCloudFile?,background: freezed == background ? _self.background : background // ignore: cast_nullable_to_non_nullable
-as SnCloudFile?,verification: freezed == verification ? _self.verification : verification // ignore: cast_nullable_to_non_nullable
+as SnCloudFileReference?,background: freezed == background ? _self.background : background // ignore: cast_nullable_to_non_nullable
+as SnCloudFileReference?,verification: freezed == verification ? _self.verification : verification // ignore: cast_nullable_to_non_nullable
 as SnVerificationMark?,usernameColor: freezed == usernameColor ? _self.usernameColor : usernameColor // ignore: cast_nullable_to_non_nullable
 as UsernameColor?,createdAt: null == createdAt ? _self.createdAt : createdAt // ignore: cast_nullable_to_non_nullable
 as DateTime,updatedAt: null == updatedAt ? _self.updatedAt : updatedAt // ignore: cast_nullable_to_non_nullable
@@ -1306,24 +1306,24 @@ $SnAccountBadgeCopyWith<$Res>? get activeBadge {
 /// with the given fields replaced by the non-null parameter values.
 @override
 @pragma('vm:prefer-inline')
-$SnCloudFileCopyWith<$Res>? get picture {
+$SnCloudFileReferenceCopyWith<$Res>? get picture {
     if (_self.picture == null) {
     return null;
   }
 
-  return $SnCloudFileCopyWith<$Res>(_self.picture!, (value) {
+  return $SnCloudFileReferenceCopyWith<$Res>(_self.picture!, (value) {
     return _then(_self.copyWith(picture: value));
   });
 }/// Create a copy of SnAccountProfile
 /// with the given fields replaced by the non-null parameter values.
 @override
 @pragma('vm:prefer-inline')
-$SnCloudFileCopyWith<$Res>? get background {
+$SnCloudFileReferenceCopyWith<$Res>? get background {
     if (_self.background == null) {
     return null;
   }
 
-  return $SnCloudFileCopyWith<$Res>(_self.background!, (value) {
+  return $SnCloudFileReferenceCopyWith<$Res>(_self.background!, (value) {
     return _then(_self.copyWith(background: value));
   });
 }/// Create a copy of SnAccountProfile
@@ -1357,7 +1357,7 @@ $UsernameColorCopyWith<$Res>? get usernameColor {
 /// @nodoc
 mixin _$SnAccountStatus {
 
- String get id; int get attitude; bool get isOnline; bool get isCustomized;@JsonKey(readValue: _readStatusType, fromJson: _statusTypeFromJson) int get type; String get label; String? get symbol; Map<String, dynamic>? get meta; DateTime? get clearedAt; String? get appIdentifier; bool get isAutomated; String get accountId; DateTime get createdAt; DateTime get updatedAt; DateTime? get deletedAt;
+ String get id; int get attitude; bool get isOnline; bool get isIdle; DateTime? get idleSince; bool get isCustomized;@JsonKey(readValue: _readStatusType, fromJson: _statusTypeFromJson) int get type; String get label; String? get symbol; SnCloudFileReference? get icon; SnCloudFileReference? get background; Map<String, dynamic>? get meta; DateTime? get clearedAt; String? get appIdentifier; bool get isAutomated; String get accountId; SnAccount? get account; DateTime get createdAt; DateTime get updatedAt; DateTime? get deletedAt;
 /// Create a copy of SnAccountStatus
 /// with the given fields replaced by the non-null parameter values.
 @JsonKey(includeFromJson: false, includeToJson: false)
@@ -1370,16 +1370,16 @@ $SnAccountStatusCopyWith<SnAccountStatus> get copyWith => _$SnAccountStatusCopyW
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is SnAccountStatus&&(identical(other.id, id) || other.id == id)&&(identical(other.attitude, attitude) || other.attitude == attitude)&&(identical(other.isOnline, isOnline) || other.isOnline == isOnline)&&(identical(other.isCustomized, isCustomized) || other.isCustomized == isCustomized)&&(identical(other.type, type) || other.type == type)&&(identical(other.label, label) || other.label == label)&&(identical(other.symbol, symbol) || other.symbol == symbol)&&const DeepCollectionEquality().equals(other.meta, meta)&&(identical(other.clearedAt, clearedAt) || other.clearedAt == clearedAt)&&(identical(other.appIdentifier, appIdentifier) || other.appIdentifier == appIdentifier)&&(identical(other.isAutomated, isAutomated) || other.isAutomated == isAutomated)&&(identical(other.accountId, accountId) || other.accountId == accountId)&&(identical(other.createdAt, createdAt) || other.createdAt == createdAt)&&(identical(other.updatedAt, updatedAt) || other.updatedAt == updatedAt)&&(identical(other.deletedAt, deletedAt) || other.deletedAt == deletedAt));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is SnAccountStatus&&(identical(other.id, id) || other.id == id)&&(identical(other.attitude, attitude) || other.attitude == attitude)&&(identical(other.isOnline, isOnline) || other.isOnline == isOnline)&&(identical(other.isIdle, isIdle) || other.isIdle == isIdle)&&(identical(other.idleSince, idleSince) || other.idleSince == idleSince)&&(identical(other.isCustomized, isCustomized) || other.isCustomized == isCustomized)&&(identical(other.type, type) || other.type == type)&&(identical(other.label, label) || other.label == label)&&(identical(other.symbol, symbol) || other.symbol == symbol)&&(identical(other.icon, icon) || other.icon == icon)&&(identical(other.background, background) || other.background == background)&&const DeepCollectionEquality().equals(other.meta, meta)&&(identical(other.clearedAt, clearedAt) || other.clearedAt == clearedAt)&&(identical(other.appIdentifier, appIdentifier) || other.appIdentifier == appIdentifier)&&(identical(other.isAutomated, isAutomated) || other.isAutomated == isAutomated)&&(identical(other.accountId, accountId) || other.accountId == accountId)&&(identical(other.account, account) || other.account == account)&&(identical(other.createdAt, createdAt) || other.createdAt == createdAt)&&(identical(other.updatedAt, updatedAt) || other.updatedAt == updatedAt)&&(identical(other.deletedAt, deletedAt) || other.deletedAt == deletedAt));
 }
 
 @JsonKey(includeFromJson: false, includeToJson: false)
 @override
-int get hashCode => Object.hash(runtimeType,id,attitude,isOnline,isCustomized,type,label,symbol,const DeepCollectionEquality().hash(meta),clearedAt,appIdentifier,isAutomated,accountId,createdAt,updatedAt,deletedAt);
+int get hashCode => Object.hashAll([runtimeType,id,attitude,isOnline,isIdle,idleSince,isCustomized,type,label,symbol,icon,background,const DeepCollectionEquality().hash(meta),clearedAt,appIdentifier,isAutomated,accountId,account,createdAt,updatedAt,deletedAt]);
 
 @override
 String toString() {
-  return 'SnAccountStatus(id: $id, attitude: $attitude, isOnline: $isOnline, isCustomized: $isCustomized, type: $type, label: $label, symbol: $symbol, meta: $meta, clearedAt: $clearedAt, appIdentifier: $appIdentifier, isAutomated: $isAutomated, accountId: $accountId, createdAt: $createdAt, updatedAt: $updatedAt, deletedAt: $deletedAt)';
+  return 'SnAccountStatus(id: $id, attitude: $attitude, isOnline: $isOnline, isIdle: $isIdle, idleSince: $idleSince, isCustomized: $isCustomized, type: $type, label: $label, symbol: $symbol, icon: $icon, background: $background, meta: $meta, clearedAt: $clearedAt, appIdentifier: $appIdentifier, isAutomated: $isAutomated, accountId: $accountId, account: $account, createdAt: $createdAt, updatedAt: $updatedAt, deletedAt: $deletedAt)';
 }
 
 
@@ -1390,11 +1390,11 @@ abstract mixin class $SnAccountStatusCopyWith<$Res>  {
   factory $SnAccountStatusCopyWith(SnAccountStatus value, $Res Function(SnAccountStatus) _then) = _$SnAccountStatusCopyWithImpl;
 @useResult
 $Res call({
- String id, int attitude, bool isOnline, bool isCustomized,@JsonKey(readValue: _readStatusType, fromJson: _statusTypeFromJson) int type, String label, String? symbol, Map<String, dynamic>? meta, DateTime? clearedAt, String? appIdentifier, bool isAutomated, String accountId, DateTime createdAt, DateTime updatedAt, DateTime? deletedAt
+ String id, int attitude, bool isOnline, bool isIdle, DateTime? idleSince, bool isCustomized,@JsonKey(readValue: _readStatusType, fromJson: _statusTypeFromJson) int type, String label, String? symbol, SnCloudFileReference? icon, SnCloudFileReference? background, Map<String, dynamic>? meta, DateTime? clearedAt, String? appIdentifier, bool isAutomated, String accountId, SnAccount? account, DateTime createdAt, DateTime updatedAt, DateTime? deletedAt
 });
 
 
-
+$SnCloudFileReferenceCopyWith<$Res>? get icon;$SnCloudFileReferenceCopyWith<$Res>? get background;$SnAccountCopyWith<$Res>? get account;
 
 }
 /// @nodoc
@@ -1407,27 +1407,68 @@ class _$SnAccountStatusCopyWithImpl<$Res>
 
 /// Create a copy of SnAccountStatus
 /// with the given fields replaced by the non-null parameter values.
-@pragma('vm:prefer-inline') @override $Res call({Object? id = null,Object? attitude = null,Object? isOnline = null,Object? isCustomized = null,Object? type = null,Object? label = null,Object? symbol = freezed,Object? meta = freezed,Object? clearedAt = freezed,Object? appIdentifier = freezed,Object? isAutomated = null,Object? accountId = null,Object? createdAt = null,Object? updatedAt = null,Object? deletedAt = freezed,}) {
+@pragma('vm:prefer-inline') @override $Res call({Object? id = null,Object? attitude = null,Object? isOnline = null,Object? isIdle = null,Object? idleSince = freezed,Object? isCustomized = null,Object? type = null,Object? label = null,Object? symbol = freezed,Object? icon = freezed,Object? background = freezed,Object? meta = freezed,Object? clearedAt = freezed,Object? appIdentifier = freezed,Object? isAutomated = null,Object? accountId = null,Object? account = freezed,Object? createdAt = null,Object? updatedAt = null,Object? deletedAt = freezed,}) {
   return _then(_self.copyWith(
 id: null == id ? _self.id : id // ignore: cast_nullable_to_non_nullable
 as String,attitude: null == attitude ? _self.attitude : attitude // ignore: cast_nullable_to_non_nullable
 as int,isOnline: null == isOnline ? _self.isOnline : isOnline // ignore: cast_nullable_to_non_nullable
-as bool,isCustomized: null == isCustomized ? _self.isCustomized : isCustomized // ignore: cast_nullable_to_non_nullable
+as bool,isIdle: null == isIdle ? _self.isIdle : isIdle // ignore: cast_nullable_to_non_nullable
+as bool,idleSince: freezed == idleSince ? _self.idleSince : idleSince // ignore: cast_nullable_to_non_nullable
+as DateTime?,isCustomized: null == isCustomized ? _self.isCustomized : isCustomized // ignore: cast_nullable_to_non_nullable
 as bool,type: null == type ? _self.type : type // ignore: cast_nullable_to_non_nullable
 as int,label: null == label ? _self.label : label // ignore: cast_nullable_to_non_nullable
 as String,symbol: freezed == symbol ? _self.symbol : symbol // ignore: cast_nullable_to_non_nullable
-as String?,meta: freezed == meta ? _self.meta : meta // ignore: cast_nullable_to_non_nullable
+as String?,icon: freezed == icon ? _self.icon : icon // ignore: cast_nullable_to_non_nullable
+as SnCloudFileReference?,background: freezed == background ? _self.background : background // ignore: cast_nullable_to_non_nullable
+as SnCloudFileReference?,meta: freezed == meta ? _self.meta : meta // ignore: cast_nullable_to_non_nullable
 as Map<String, dynamic>?,clearedAt: freezed == clearedAt ? _self.clearedAt : clearedAt // ignore: cast_nullable_to_non_nullable
 as DateTime?,appIdentifier: freezed == appIdentifier ? _self.appIdentifier : appIdentifier // ignore: cast_nullable_to_non_nullable
 as String?,isAutomated: null == isAutomated ? _self.isAutomated : isAutomated // ignore: cast_nullable_to_non_nullable
 as bool,accountId: null == accountId ? _self.accountId : accountId // ignore: cast_nullable_to_non_nullable
-as String,createdAt: null == createdAt ? _self.createdAt : createdAt // ignore: cast_nullable_to_non_nullable
+as String,account: freezed == account ? _self.account : account // ignore: cast_nullable_to_non_nullable
+as SnAccount?,createdAt: null == createdAt ? _self.createdAt : createdAt // ignore: cast_nullable_to_non_nullable
 as DateTime,updatedAt: null == updatedAt ? _self.updatedAt : updatedAt // ignore: cast_nullable_to_non_nullable
 as DateTime,deletedAt: freezed == deletedAt ? _self.deletedAt : deletedAt // ignore: cast_nullable_to_non_nullable
 as DateTime?,
   ));
 }
+/// Create a copy of SnAccountStatus
+/// with the given fields replaced by the non-null parameter values.
+@override
+@pragma('vm:prefer-inline')
+$SnCloudFileReferenceCopyWith<$Res>? get icon {
+    if (_self.icon == null) {
+    return null;
+  }
 
+  return $SnCloudFileReferenceCopyWith<$Res>(_self.icon!, (value) {
+    return _then(_self.copyWith(icon: value));
+  });
+}/// Create a copy of SnAccountStatus
+/// with the given fields replaced by the non-null parameter values.
+@override
+@pragma('vm:prefer-inline')
+$SnCloudFileReferenceCopyWith<$Res>? get background {
+    if (_self.background == null) {
+    return null;
+  }
+
+  return $SnCloudFileReferenceCopyWith<$Res>(_self.background!, (value) {
+    return _then(_self.copyWith(background: value));
+  });
+}/// Create a copy of SnAccountStatus
+/// with the given fields replaced by the non-null parameter values.
+@override
+@pragma('vm:prefer-inline')
+$SnAccountCopyWith<$Res>? get account {
+    if (_self.account == null) {
+    return null;
+  }
+
+  return $SnAccountCopyWith<$Res>(_self.account!, (value) {
+    return _then(_self.copyWith(account: value));
+  });
+}
 }
 
 
@@ -1506,10 +1547,10 @@ return $default(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( String id,  int attitude,  bool isOnline,  bool isCustomized, @JsonKey(readValue: _readStatusType, fromJson: _statusTypeFromJson)  int type,  String label,  String? symbol,  Map<String, dynamic>? meta,  DateTime? clearedAt,  String? appIdentifier,  bool isAutomated,  String accountId,  DateTime createdAt,  DateTime updatedAt,  DateTime? deletedAt)?  $default,{required TResult orElse(),}) {final _that = this;
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( String id,  int attitude,  bool isOnline,  bool isIdle,  DateTime? idleSince,  bool isCustomized, @JsonKey(readValue: _readStatusType, fromJson: _statusTypeFromJson)  int type,  String label,  String? symbol,  SnCloudFileReference? icon,  SnCloudFileReference? background,  Map<String, dynamic>? meta,  DateTime? clearedAt,  String? appIdentifier,  bool isAutomated,  String accountId,  SnAccount? account,  DateTime createdAt,  DateTime updatedAt,  DateTime? deletedAt)?  $default,{required TResult orElse(),}) {final _that = this;
 switch (_that) {
 case _SnAccountStatus() when $default != null:
-return $default(_that.id,_that.attitude,_that.isOnline,_that.isCustomized,_that.type,_that.label,_that.symbol,_that.meta,_that.clearedAt,_that.appIdentifier,_that.isAutomated,_that.accountId,_that.createdAt,_that.updatedAt,_that.deletedAt);case _:
+return $default(_that.id,_that.attitude,_that.isOnline,_that.isIdle,_that.idleSince,_that.isCustomized,_that.type,_that.label,_that.symbol,_that.icon,_that.background,_that.meta,_that.clearedAt,_that.appIdentifier,_that.isAutomated,_that.accountId,_that.account,_that.createdAt,_that.updatedAt,_that.deletedAt);case _:
   return orElse();
 
 }
@@ -1527,10 +1568,10 @@ return $default(_that.id,_that.attitude,_that.isOnline,_that.isCustomized,_that.
 /// }
 /// ```
 
-@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( String id,  int attitude,  bool isOnline,  bool isCustomized, @JsonKey(readValue: _readStatusType, fromJson: _statusTypeFromJson)  int type,  String label,  String? symbol,  Map<String, dynamic>? meta,  DateTime? clearedAt,  String? appIdentifier,  bool isAutomated,  String accountId,  DateTime createdAt,  DateTime updatedAt,  DateTime? deletedAt)  $default,) {final _that = this;
+@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( String id,  int attitude,  bool isOnline,  bool isIdle,  DateTime? idleSince,  bool isCustomized, @JsonKey(readValue: _readStatusType, fromJson: _statusTypeFromJson)  int type,  String label,  String? symbol,  SnCloudFileReference? icon,  SnCloudFileReference? background,  Map<String, dynamic>? meta,  DateTime? clearedAt,  String? appIdentifier,  bool isAutomated,  String accountId,  SnAccount? account,  DateTime createdAt,  DateTime updatedAt,  DateTime? deletedAt)  $default,) {final _that = this;
 switch (_that) {
 case _SnAccountStatus():
-return $default(_that.id,_that.attitude,_that.isOnline,_that.isCustomized,_that.type,_that.label,_that.symbol,_that.meta,_that.clearedAt,_that.appIdentifier,_that.isAutomated,_that.accountId,_that.createdAt,_that.updatedAt,_that.deletedAt);}
+return $default(_that.id,_that.attitude,_that.isOnline,_that.isIdle,_that.idleSince,_that.isCustomized,_that.type,_that.label,_that.symbol,_that.icon,_that.background,_that.meta,_that.clearedAt,_that.appIdentifier,_that.isAutomated,_that.accountId,_that.account,_that.createdAt,_that.updatedAt,_that.deletedAt);}
 }
 /// A variant of `when` that fallback to returning `null`
 ///
@@ -1544,10 +1585,10 @@ return $default(_that.id,_that.attitude,_that.isOnline,_that.isCustomized,_that.
 /// }
 /// ```
 
-@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( String id,  int attitude,  bool isOnline,  bool isCustomized, @JsonKey(readValue: _readStatusType, fromJson: _statusTypeFromJson)  int type,  String label,  String? symbol,  Map<String, dynamic>? meta,  DateTime? clearedAt,  String? appIdentifier,  bool isAutomated,  String accountId,  DateTime createdAt,  DateTime updatedAt,  DateTime? deletedAt)?  $default,) {final _that = this;
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( String id,  int attitude,  bool isOnline,  bool isIdle,  DateTime? idleSince,  bool isCustomized, @JsonKey(readValue: _readStatusType, fromJson: _statusTypeFromJson)  int type,  String label,  String? symbol,  SnCloudFileReference? icon,  SnCloudFileReference? background,  Map<String, dynamic>? meta,  DateTime? clearedAt,  String? appIdentifier,  bool isAutomated,  String accountId,  SnAccount? account,  DateTime createdAt,  DateTime updatedAt,  DateTime? deletedAt)?  $default,) {final _that = this;
 switch (_that) {
 case _SnAccountStatus() when $default != null:
-return $default(_that.id,_that.attitude,_that.isOnline,_that.isCustomized,_that.type,_that.label,_that.symbol,_that.meta,_that.clearedAt,_that.appIdentifier,_that.isAutomated,_that.accountId,_that.createdAt,_that.updatedAt,_that.deletedAt);case _:
+return $default(_that.id,_that.attitude,_that.isOnline,_that.isIdle,_that.idleSince,_that.isCustomized,_that.type,_that.label,_that.symbol,_that.icon,_that.background,_that.meta,_that.clearedAt,_that.appIdentifier,_that.isAutomated,_that.accountId,_that.account,_that.createdAt,_that.updatedAt,_that.deletedAt);case _:
   return null;
 
 }
@@ -1559,16 +1600,20 @@ return $default(_that.id,_that.attitude,_that.isOnline,_that.isCustomized,_that.
 @JsonSerializable()
 
 class _SnAccountStatus implements SnAccountStatus {
-  const _SnAccountStatus({required this.id, required this.attitude, required this.isOnline, required this.isCustomized, @JsonKey(readValue: _readStatusType, fromJson: _statusTypeFromJson) this.type = SnAccountStatusType.defaultType, this.label = "", this.symbol, required final  Map<String, dynamic>? meta, required this.clearedAt, this.appIdentifier, this.isAutomated = false, required this.accountId, required this.createdAt, required this.updatedAt, required this.deletedAt}): _meta = meta;
+  const _SnAccountStatus({required this.id, required this.attitude, required this.isOnline, this.isIdle = false, this.idleSince, required this.isCustomized, @JsonKey(readValue: _readStatusType, fromJson: _statusTypeFromJson) this.type = SnAccountStatusType.defaultType, this.label = "", this.symbol, this.icon, this.background, required final  Map<String, dynamic>? meta, required this.clearedAt, this.appIdentifier, this.isAutomated = false, required this.accountId, this.account, required this.createdAt, required this.updatedAt, required this.deletedAt}): _meta = meta;
   factory _SnAccountStatus.fromJson(Map<String, dynamic> json) => _$SnAccountStatusFromJson(json);
 
 @override final  String id;
 @override final  int attitude;
 @override final  bool isOnline;
+@override@JsonKey() final  bool isIdle;
+@override final  DateTime? idleSince;
 @override final  bool isCustomized;
 @override@JsonKey(readValue: _readStatusType, fromJson: _statusTypeFromJson) final  int type;
 @override@JsonKey() final  String label;
 @override final  String? symbol;
+@override final  SnCloudFileReference? icon;
+@override final  SnCloudFileReference? background;
  final  Map<String, dynamic>? _meta;
 @override Map<String, dynamic>? get meta {
   final value = _meta;
@@ -1582,6 +1627,7 @@ class _SnAccountStatus implements SnAccountStatus {
 @override final  String? appIdentifier;
 @override@JsonKey() final  bool isAutomated;
 @override final  String accountId;
+@override final  SnAccount? account;
 @override final  DateTime createdAt;
 @override final  DateTime updatedAt;
 @override final  DateTime? deletedAt;
@@ -1599,16 +1645,16 @@ Map<String, dynamic> toJson() {
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is _SnAccountStatus&&(identical(other.id, id) || other.id == id)&&(identical(other.attitude, attitude) || other.attitude == attitude)&&(identical(other.isOnline, isOnline) || other.isOnline == isOnline)&&(identical(other.isCustomized, isCustomized) || other.isCustomized == isCustomized)&&(identical(other.type, type) || other.type == type)&&(identical(other.label, label) || other.label == label)&&(identical(other.symbol, symbol) || other.symbol == symbol)&&const DeepCollectionEquality().equals(other._meta, _meta)&&(identical(other.clearedAt, clearedAt) || other.clearedAt == clearedAt)&&(identical(other.appIdentifier, appIdentifier) || other.appIdentifier == appIdentifier)&&(identical(other.isAutomated, isAutomated) || other.isAutomated == isAutomated)&&(identical(other.accountId, accountId) || other.accountId == accountId)&&(identical(other.createdAt, createdAt) || other.createdAt == createdAt)&&(identical(other.updatedAt, updatedAt) || other.updatedAt == updatedAt)&&(identical(other.deletedAt, deletedAt) || other.deletedAt == deletedAt));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is _SnAccountStatus&&(identical(other.id, id) || other.id == id)&&(identical(other.attitude, attitude) || other.attitude == attitude)&&(identical(other.isOnline, isOnline) || other.isOnline == isOnline)&&(identical(other.isIdle, isIdle) || other.isIdle == isIdle)&&(identical(other.idleSince, idleSince) || other.idleSince == idleSince)&&(identical(other.isCustomized, isCustomized) || other.isCustomized == isCustomized)&&(identical(other.type, type) || other.type == type)&&(identical(other.label, label) || other.label == label)&&(identical(other.symbol, symbol) || other.symbol == symbol)&&(identical(other.icon, icon) || other.icon == icon)&&(identical(other.background, background) || other.background == background)&&const DeepCollectionEquality().equals(other._meta, _meta)&&(identical(other.clearedAt, clearedAt) || other.clearedAt == clearedAt)&&(identical(other.appIdentifier, appIdentifier) || other.appIdentifier == appIdentifier)&&(identical(other.isAutomated, isAutomated) || other.isAutomated == isAutomated)&&(identical(other.accountId, accountId) || other.accountId == accountId)&&(identical(other.account, account) || other.account == account)&&(identical(other.createdAt, createdAt) || other.createdAt == createdAt)&&(identical(other.updatedAt, updatedAt) || other.updatedAt == updatedAt)&&(identical(other.deletedAt, deletedAt) || other.deletedAt == deletedAt));
 }
 
 @JsonKey(includeFromJson: false, includeToJson: false)
 @override
-int get hashCode => Object.hash(runtimeType,id,attitude,isOnline,isCustomized,type,label,symbol,const DeepCollectionEquality().hash(_meta),clearedAt,appIdentifier,isAutomated,accountId,createdAt,updatedAt,deletedAt);
+int get hashCode => Object.hashAll([runtimeType,id,attitude,isOnline,isIdle,idleSince,isCustomized,type,label,symbol,icon,background,const DeepCollectionEquality().hash(_meta),clearedAt,appIdentifier,isAutomated,accountId,account,createdAt,updatedAt,deletedAt]);
 
 @override
 String toString() {
-  return 'SnAccountStatus(id: $id, attitude: $attitude, isOnline: $isOnline, isCustomized: $isCustomized, type: $type, label: $label, symbol: $symbol, meta: $meta, clearedAt: $clearedAt, appIdentifier: $appIdentifier, isAutomated: $isAutomated, accountId: $accountId, createdAt: $createdAt, updatedAt: $updatedAt, deletedAt: $deletedAt)';
+  return 'SnAccountStatus(id: $id, attitude: $attitude, isOnline: $isOnline, isIdle: $isIdle, idleSince: $idleSince, isCustomized: $isCustomized, type: $type, label: $label, symbol: $symbol, icon: $icon, background: $background, meta: $meta, clearedAt: $clearedAt, appIdentifier: $appIdentifier, isAutomated: $isAutomated, accountId: $accountId, account: $account, createdAt: $createdAt, updatedAt: $updatedAt, deletedAt: $deletedAt)';
 }
 
 
@@ -1619,11 +1665,11 @@ abstract mixin class _$SnAccountStatusCopyWith<$Res> implements $SnAccountStatus
   factory _$SnAccountStatusCopyWith(_SnAccountStatus value, $Res Function(_SnAccountStatus) _then) = __$SnAccountStatusCopyWithImpl;
 @override @useResult
 $Res call({
- String id, int attitude, bool isOnline, bool isCustomized,@JsonKey(readValue: _readStatusType, fromJson: _statusTypeFromJson) int type, String label, String? symbol, Map<String, dynamic>? meta, DateTime? clearedAt, String? appIdentifier, bool isAutomated, String accountId, DateTime createdAt, DateTime updatedAt, DateTime? deletedAt
+ String id, int attitude, bool isOnline, bool isIdle, DateTime? idleSince, bool isCustomized,@JsonKey(readValue: _readStatusType, fromJson: _statusTypeFromJson) int type, String label, String? symbol, SnCloudFileReference? icon, SnCloudFileReference? background, Map<String, dynamic>? meta, DateTime? clearedAt, String? appIdentifier, bool isAutomated, String accountId, SnAccount? account, DateTime createdAt, DateTime updatedAt, DateTime? deletedAt
 });
 
 
-
+@override $SnCloudFileReferenceCopyWith<$Res>? get icon;@override $SnCloudFileReferenceCopyWith<$Res>? get background;@override $SnAccountCopyWith<$Res>? get account;
 
 }
 /// @nodoc
@@ -1636,28 +1682,69 @@ class __$SnAccountStatusCopyWithImpl<$Res>
 
 /// Create a copy of SnAccountStatus
 /// with the given fields replaced by the non-null parameter values.
-@override @pragma('vm:prefer-inline') $Res call({Object? id = null,Object? attitude = null,Object? isOnline = null,Object? isCustomized = null,Object? type = null,Object? label = null,Object? symbol = freezed,Object? meta = freezed,Object? clearedAt = freezed,Object? appIdentifier = freezed,Object? isAutomated = null,Object? accountId = null,Object? createdAt = null,Object? updatedAt = null,Object? deletedAt = freezed,}) {
+@override @pragma('vm:prefer-inline') $Res call({Object? id = null,Object? attitude = null,Object? isOnline = null,Object? isIdle = null,Object? idleSince = freezed,Object? isCustomized = null,Object? type = null,Object? label = null,Object? symbol = freezed,Object? icon = freezed,Object? background = freezed,Object? meta = freezed,Object? clearedAt = freezed,Object? appIdentifier = freezed,Object? isAutomated = null,Object? accountId = null,Object? account = freezed,Object? createdAt = null,Object? updatedAt = null,Object? deletedAt = freezed,}) {
   return _then(_SnAccountStatus(
 id: null == id ? _self.id : id // ignore: cast_nullable_to_non_nullable
 as String,attitude: null == attitude ? _self.attitude : attitude // ignore: cast_nullable_to_non_nullable
 as int,isOnline: null == isOnline ? _self.isOnline : isOnline // ignore: cast_nullable_to_non_nullable
-as bool,isCustomized: null == isCustomized ? _self.isCustomized : isCustomized // ignore: cast_nullable_to_non_nullable
+as bool,isIdle: null == isIdle ? _self.isIdle : isIdle // ignore: cast_nullable_to_non_nullable
+as bool,idleSince: freezed == idleSince ? _self.idleSince : idleSince // ignore: cast_nullable_to_non_nullable
+as DateTime?,isCustomized: null == isCustomized ? _self.isCustomized : isCustomized // ignore: cast_nullable_to_non_nullable
 as bool,type: null == type ? _self.type : type // ignore: cast_nullable_to_non_nullable
 as int,label: null == label ? _self.label : label // ignore: cast_nullable_to_non_nullable
 as String,symbol: freezed == symbol ? _self.symbol : symbol // ignore: cast_nullable_to_non_nullable
-as String?,meta: freezed == meta ? _self._meta : meta // ignore: cast_nullable_to_non_nullable
+as String?,icon: freezed == icon ? _self.icon : icon // ignore: cast_nullable_to_non_nullable
+as SnCloudFileReference?,background: freezed == background ? _self.background : background // ignore: cast_nullable_to_non_nullable
+as SnCloudFileReference?,meta: freezed == meta ? _self._meta : meta // ignore: cast_nullable_to_non_nullable
 as Map<String, dynamic>?,clearedAt: freezed == clearedAt ? _self.clearedAt : clearedAt // ignore: cast_nullable_to_non_nullable
 as DateTime?,appIdentifier: freezed == appIdentifier ? _self.appIdentifier : appIdentifier // ignore: cast_nullable_to_non_nullable
 as String?,isAutomated: null == isAutomated ? _self.isAutomated : isAutomated // ignore: cast_nullable_to_non_nullable
 as bool,accountId: null == accountId ? _self.accountId : accountId // ignore: cast_nullable_to_non_nullable
-as String,createdAt: null == createdAt ? _self.createdAt : createdAt // ignore: cast_nullable_to_non_nullable
+as String,account: freezed == account ? _self.account : account // ignore: cast_nullable_to_non_nullable
+as SnAccount?,createdAt: null == createdAt ? _self.createdAt : createdAt // ignore: cast_nullable_to_non_nullable
 as DateTime,updatedAt: null == updatedAt ? _self.updatedAt : updatedAt // ignore: cast_nullable_to_non_nullable
 as DateTime,deletedAt: freezed == deletedAt ? _self.deletedAt : deletedAt // ignore: cast_nullable_to_non_nullable
 as DateTime?,
   ));
 }
 
+/// Create a copy of SnAccountStatus
+/// with the given fields replaced by the non-null parameter values.
+@override
+@pragma('vm:prefer-inline')
+$SnCloudFileReferenceCopyWith<$Res>? get icon {
+    if (_self.icon == null) {
+    return null;
+  }
 
+  return $SnCloudFileReferenceCopyWith<$Res>(_self.icon!, (value) {
+    return _then(_self.copyWith(icon: value));
+  });
+}/// Create a copy of SnAccountStatus
+/// with the given fields replaced by the non-null parameter values.
+@override
+@pragma('vm:prefer-inline')
+$SnCloudFileReferenceCopyWith<$Res>? get background {
+    if (_self.background == null) {
+    return null;
+  }
+
+  return $SnCloudFileReferenceCopyWith<$Res>(_self.background!, (value) {
+    return _then(_self.copyWith(background: value));
+  });
+}/// Create a copy of SnAccountStatus
+/// with the given fields replaced by the non-null parameter values.
+@override
+@pragma('vm:prefer-inline')
+$SnAccountCopyWith<$Res>? get account {
+    if (_self.account == null) {
+    return null;
+  }
+
+  return $SnAccountCopyWith<$Res>(_self.account!, (value) {
+    return _then(_self.copyWith(account: value));
+  });
+}
 }
 
 
@@ -1955,6 +2042,580 @@ as DateTime?,
 
 
 /// @nodoc
+mixin _$BadgeManifestSeries {
+
+ String get identifier; String? get title; int get order;
+/// Create a copy of BadgeManifestSeries
+/// with the given fields replaced by the non-null parameter values.
+@JsonKey(includeFromJson: false, includeToJson: false)
+@pragma('vm:prefer-inline')
+$BadgeManifestSeriesCopyWith<BadgeManifestSeries> get copyWith => _$BadgeManifestSeriesCopyWithImpl<BadgeManifestSeries>(this as BadgeManifestSeries, _$identity);
+
+  /// Serializes this BadgeManifestSeries to a JSON map.
+  Map<String, dynamic> toJson();
+
+
+@override
+bool operator ==(Object other) {
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is BadgeManifestSeries&&(identical(other.identifier, identifier) || other.identifier == identifier)&&(identical(other.title, title) || other.title == title)&&(identical(other.order, order) || other.order == order));
+}
+
+@JsonKey(includeFromJson: false, includeToJson: false)
+@override
+int get hashCode => Object.hash(runtimeType,identifier,title,order);
+
+@override
+String toString() {
+  return 'BadgeManifestSeries(identifier: $identifier, title: $title, order: $order)';
+}
+
+
+}
+
+/// @nodoc
+abstract mixin class $BadgeManifestSeriesCopyWith<$Res>  {
+  factory $BadgeManifestSeriesCopyWith(BadgeManifestSeries value, $Res Function(BadgeManifestSeries) _then) = _$BadgeManifestSeriesCopyWithImpl;
+@useResult
+$Res call({
+ String identifier, String? title, int order
+});
+
+
+
+
+}
+/// @nodoc
+class _$BadgeManifestSeriesCopyWithImpl<$Res>
+    implements $BadgeManifestSeriesCopyWith<$Res> {
+  _$BadgeManifestSeriesCopyWithImpl(this._self, this._then);
+
+  final BadgeManifestSeries _self;
+  final $Res Function(BadgeManifestSeries) _then;
+
+/// Create a copy of BadgeManifestSeries
+/// with the given fields replaced by the non-null parameter values.
+@pragma('vm:prefer-inline') @override $Res call({Object? identifier = null,Object? title = freezed,Object? order = null,}) {
+  return _then(_self.copyWith(
+identifier: null == identifier ? _self.identifier : identifier // ignore: cast_nullable_to_non_nullable
+as String,title: freezed == title ? _self.title : title // ignore: cast_nullable_to_non_nullable
+as String?,order: null == order ? _self.order : order // ignore: cast_nullable_to_non_nullable
+as int,
+  ));
+}
+
+}
+
+
+/// Adds pattern-matching-related methods to [BadgeManifestSeries].
+extension BadgeManifestSeriesPatterns on BadgeManifestSeries {
+/// A variant of `map` that fallback to returning `orElse`.
+///
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case final Subclass value:
+///     return ...;
+///   case _:
+///     return orElse();
+/// }
+/// ```
+
+@optionalTypeArgs TResult maybeMap<TResult extends Object?>(TResult Function( _BadgeManifestSeries value)?  $default,{required TResult orElse(),}){
+final _that = this;
+switch (_that) {
+case _BadgeManifestSeries() when $default != null:
+return $default(_that);case _:
+  return orElse();
+
+}
+}
+/// A `switch`-like method, using callbacks.
+///
+/// Callbacks receives the raw object, upcasted.
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case final Subclass value:
+///     return ...;
+///   case final Subclass2 value:
+///     return ...;
+/// }
+/// ```
+
+@optionalTypeArgs TResult map<TResult extends Object?>(TResult Function( _BadgeManifestSeries value)  $default,){
+final _that = this;
+switch (_that) {
+case _BadgeManifestSeries():
+return $default(_that);}
+}
+/// A variant of `map` that fallback to returning `null`.
+///
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case final Subclass value:
+///     return ...;
+///   case _:
+///     return null;
+/// }
+/// ```
+
+@optionalTypeArgs TResult? mapOrNull<TResult extends Object?>(TResult? Function( _BadgeManifestSeries value)?  $default,){
+final _that = this;
+switch (_that) {
+case _BadgeManifestSeries() when $default != null:
+return $default(_that);case _:
+  return null;
+
+}
+}
+/// A variant of `when` that fallback to an `orElse` callback.
+///
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case Subclass(:final field):
+///     return ...;
+///   case _:
+///     return orElse();
+/// }
+/// ```
+
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( String identifier,  String? title,  int order)?  $default,{required TResult orElse(),}) {final _that = this;
+switch (_that) {
+case _BadgeManifestSeries() when $default != null:
+return $default(_that.identifier,_that.title,_that.order);case _:
+  return orElse();
+
+}
+}
+/// A `switch`-like method, using callbacks.
+///
+/// As opposed to `map`, this offers destructuring.
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case Subclass(:final field):
+///     return ...;
+///   case Subclass2(:final field2):
+///     return ...;
+/// }
+/// ```
+
+@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( String identifier,  String? title,  int order)  $default,) {final _that = this;
+switch (_that) {
+case _BadgeManifestSeries():
+return $default(_that.identifier,_that.title,_that.order);}
+}
+/// A variant of `when` that fallback to returning `null`
+///
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case Subclass(:final field):
+///     return ...;
+///   case _:
+///     return null;
+/// }
+/// ```
+
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( String identifier,  String? title,  int order)?  $default,) {final _that = this;
+switch (_that) {
+case _BadgeManifestSeries() when $default != null:
+return $default(_that.identifier,_that.title,_that.order);case _:
+  return null;
+
+}
+}
+
+}
+
+/// @nodoc
+@JsonSerializable()
+
+class _BadgeManifestSeries implements BadgeManifestSeries {
+  const _BadgeManifestSeries({required this.identifier, required this.title, this.order = 0});
+  factory _BadgeManifestSeries.fromJson(Map<String, dynamic> json) => _$BadgeManifestSeriesFromJson(json);
+
+@override final  String identifier;
+@override final  String? title;
+@override@JsonKey() final  int order;
+
+/// Create a copy of BadgeManifestSeries
+/// with the given fields replaced by the non-null parameter values.
+@override @JsonKey(includeFromJson: false, includeToJson: false)
+@pragma('vm:prefer-inline')
+_$BadgeManifestSeriesCopyWith<_BadgeManifestSeries> get copyWith => __$BadgeManifestSeriesCopyWithImpl<_BadgeManifestSeries>(this, _$identity);
+
+@override
+Map<String, dynamic> toJson() {
+  return _$BadgeManifestSeriesToJson(this, );
+}
+
+@override
+bool operator ==(Object other) {
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is _BadgeManifestSeries&&(identical(other.identifier, identifier) || other.identifier == identifier)&&(identical(other.title, title) || other.title == title)&&(identical(other.order, order) || other.order == order));
+}
+
+@JsonKey(includeFromJson: false, includeToJson: false)
+@override
+int get hashCode => Object.hash(runtimeType,identifier,title,order);
+
+@override
+String toString() {
+  return 'BadgeManifestSeries(identifier: $identifier, title: $title, order: $order)';
+}
+
+
+}
+
+/// @nodoc
+abstract mixin class _$BadgeManifestSeriesCopyWith<$Res> implements $BadgeManifestSeriesCopyWith<$Res> {
+  factory _$BadgeManifestSeriesCopyWith(_BadgeManifestSeries value, $Res Function(_BadgeManifestSeries) _then) = __$BadgeManifestSeriesCopyWithImpl;
+@override @useResult
+$Res call({
+ String identifier, String? title, int order
+});
+
+
+
+
+}
+/// @nodoc
+class __$BadgeManifestSeriesCopyWithImpl<$Res>
+    implements _$BadgeManifestSeriesCopyWith<$Res> {
+  __$BadgeManifestSeriesCopyWithImpl(this._self, this._then);
+
+  final _BadgeManifestSeries _self;
+  final $Res Function(_BadgeManifestSeries) _then;
+
+/// Create a copy of BadgeManifestSeries
+/// with the given fields replaced by the non-null parameter values.
+@override @pragma('vm:prefer-inline') $Res call({Object? identifier = null,Object? title = freezed,Object? order = null,}) {
+  return _then(_BadgeManifestSeries(
+identifier: null == identifier ? _self.identifier : identifier // ignore: cast_nullable_to_non_nullable
+as String,title: freezed == title ? _self.title : title // ignore: cast_nullable_to_non_nullable
+as String?,order: null == order ? _self.order : order // ignore: cast_nullable_to_non_nullable
+as int,
+  ));
+}
+
+
+}
+
+
+/// @nodoc
+mixin _$BadgeManifestEntry {
+
+ String get identifier; String? get achievementIdentifier; String? get label; String? get caption; String? get icon; String? get color; String? get iconUrl; String? get localizationKey; String? get category; BadgeManifestSeries? get series; bool get hidden;
+/// Create a copy of BadgeManifestEntry
+/// with the given fields replaced by the non-null parameter values.
+@JsonKey(includeFromJson: false, includeToJson: false)
+@pragma('vm:prefer-inline')
+$BadgeManifestEntryCopyWith<BadgeManifestEntry> get copyWith => _$BadgeManifestEntryCopyWithImpl<BadgeManifestEntry>(this as BadgeManifestEntry, _$identity);
+
+  /// Serializes this BadgeManifestEntry to a JSON map.
+  Map<String, dynamic> toJson();
+
+
+@override
+bool operator ==(Object other) {
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is BadgeManifestEntry&&(identical(other.identifier, identifier) || other.identifier == identifier)&&(identical(other.achievementIdentifier, achievementIdentifier) || other.achievementIdentifier == achievementIdentifier)&&(identical(other.label, label) || other.label == label)&&(identical(other.caption, caption) || other.caption == caption)&&(identical(other.icon, icon) || other.icon == icon)&&(identical(other.color, color) || other.color == color)&&(identical(other.iconUrl, iconUrl) || other.iconUrl == iconUrl)&&(identical(other.localizationKey, localizationKey) || other.localizationKey == localizationKey)&&(identical(other.category, category) || other.category == category)&&(identical(other.series, series) || other.series == series)&&(identical(other.hidden, hidden) || other.hidden == hidden));
+}
+
+@JsonKey(includeFromJson: false, includeToJson: false)
+@override
+int get hashCode => Object.hash(runtimeType,identifier,achievementIdentifier,label,caption,icon,color,iconUrl,localizationKey,category,series,hidden);
+
+@override
+String toString() {
+  return 'BadgeManifestEntry(identifier: $identifier, achievementIdentifier: $achievementIdentifier, label: $label, caption: $caption, icon: $icon, color: $color, iconUrl: $iconUrl, localizationKey: $localizationKey, category: $category, series: $series, hidden: $hidden)';
+}
+
+
+}
+
+/// @nodoc
+abstract mixin class $BadgeManifestEntryCopyWith<$Res>  {
+  factory $BadgeManifestEntryCopyWith(BadgeManifestEntry value, $Res Function(BadgeManifestEntry) _then) = _$BadgeManifestEntryCopyWithImpl;
+@useResult
+$Res call({
+ String identifier, String? achievementIdentifier, String? label, String? caption, String? icon, String? color, String? iconUrl, String? localizationKey, String? category, BadgeManifestSeries? series, bool hidden
+});
+
+
+$BadgeManifestSeriesCopyWith<$Res>? get series;
+
+}
+/// @nodoc
+class _$BadgeManifestEntryCopyWithImpl<$Res>
+    implements $BadgeManifestEntryCopyWith<$Res> {
+  _$BadgeManifestEntryCopyWithImpl(this._self, this._then);
+
+  final BadgeManifestEntry _self;
+  final $Res Function(BadgeManifestEntry) _then;
+
+/// Create a copy of BadgeManifestEntry
+/// with the given fields replaced by the non-null parameter values.
+@pragma('vm:prefer-inline') @override $Res call({Object? identifier = null,Object? achievementIdentifier = freezed,Object? label = freezed,Object? caption = freezed,Object? icon = freezed,Object? color = freezed,Object? iconUrl = freezed,Object? localizationKey = freezed,Object? category = freezed,Object? series = freezed,Object? hidden = null,}) {
+  return _then(_self.copyWith(
+identifier: null == identifier ? _self.identifier : identifier // ignore: cast_nullable_to_non_nullable
+as String,achievementIdentifier: freezed == achievementIdentifier ? _self.achievementIdentifier : achievementIdentifier // ignore: cast_nullable_to_non_nullable
+as String?,label: freezed == label ? _self.label : label // ignore: cast_nullable_to_non_nullable
+as String?,caption: freezed == caption ? _self.caption : caption // ignore: cast_nullable_to_non_nullable
+as String?,icon: freezed == icon ? _self.icon : icon // ignore: cast_nullable_to_non_nullable
+as String?,color: freezed == color ? _self.color : color // ignore: cast_nullable_to_non_nullable
+as String?,iconUrl: freezed == iconUrl ? _self.iconUrl : iconUrl // ignore: cast_nullable_to_non_nullable
+as String?,localizationKey: freezed == localizationKey ? _self.localizationKey : localizationKey // ignore: cast_nullable_to_non_nullable
+as String?,category: freezed == category ? _self.category : category // ignore: cast_nullable_to_non_nullable
+as String?,series: freezed == series ? _self.series : series // ignore: cast_nullable_to_non_nullable
+as BadgeManifestSeries?,hidden: null == hidden ? _self.hidden : hidden // ignore: cast_nullable_to_non_nullable
+as bool,
+  ));
+}
+/// Create a copy of BadgeManifestEntry
+/// with the given fields replaced by the non-null parameter values.
+@override
+@pragma('vm:prefer-inline')
+$BadgeManifestSeriesCopyWith<$Res>? get series {
+    if (_self.series == null) {
+    return null;
+  }
+
+  return $BadgeManifestSeriesCopyWith<$Res>(_self.series!, (value) {
+    return _then(_self.copyWith(series: value));
+  });
+}
+}
+
+
+/// Adds pattern-matching-related methods to [BadgeManifestEntry].
+extension BadgeManifestEntryPatterns on BadgeManifestEntry {
+/// A variant of `map` that fallback to returning `orElse`.
+///
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case final Subclass value:
+///     return ...;
+///   case _:
+///     return orElse();
+/// }
+/// ```
+
+@optionalTypeArgs TResult maybeMap<TResult extends Object?>(TResult Function( _BadgeManifestEntry value)?  $default,{required TResult orElse(),}){
+final _that = this;
+switch (_that) {
+case _BadgeManifestEntry() when $default != null:
+return $default(_that);case _:
+  return orElse();
+
+}
+}
+/// A `switch`-like method, using callbacks.
+///
+/// Callbacks receives the raw object, upcasted.
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case final Subclass value:
+///     return ...;
+///   case final Subclass2 value:
+///     return ...;
+/// }
+/// ```
+
+@optionalTypeArgs TResult map<TResult extends Object?>(TResult Function( _BadgeManifestEntry value)  $default,){
+final _that = this;
+switch (_that) {
+case _BadgeManifestEntry():
+return $default(_that);}
+}
+/// A variant of `map` that fallback to returning `null`.
+///
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case final Subclass value:
+///     return ...;
+///   case _:
+///     return null;
+/// }
+/// ```
+
+@optionalTypeArgs TResult? mapOrNull<TResult extends Object?>(TResult? Function( _BadgeManifestEntry value)?  $default,){
+final _that = this;
+switch (_that) {
+case _BadgeManifestEntry() when $default != null:
+return $default(_that);case _:
+  return null;
+
+}
+}
+/// A variant of `when` that fallback to an `orElse` callback.
+///
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case Subclass(:final field):
+///     return ...;
+///   case _:
+///     return orElse();
+/// }
+/// ```
+
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( String identifier,  String? achievementIdentifier,  String? label,  String? caption,  String? icon,  String? color,  String? iconUrl,  String? localizationKey,  String? category,  BadgeManifestSeries? series,  bool hidden)?  $default,{required TResult orElse(),}) {final _that = this;
+switch (_that) {
+case _BadgeManifestEntry() when $default != null:
+return $default(_that.identifier,_that.achievementIdentifier,_that.label,_that.caption,_that.icon,_that.color,_that.iconUrl,_that.localizationKey,_that.category,_that.series,_that.hidden);case _:
+  return orElse();
+
+}
+}
+/// A `switch`-like method, using callbacks.
+///
+/// As opposed to `map`, this offers destructuring.
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case Subclass(:final field):
+///     return ...;
+///   case Subclass2(:final field2):
+///     return ...;
+/// }
+/// ```
+
+@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( String identifier,  String? achievementIdentifier,  String? label,  String? caption,  String? icon,  String? color,  String? iconUrl,  String? localizationKey,  String? category,  BadgeManifestSeries? series,  bool hidden)  $default,) {final _that = this;
+switch (_that) {
+case _BadgeManifestEntry():
+return $default(_that.identifier,_that.achievementIdentifier,_that.label,_that.caption,_that.icon,_that.color,_that.iconUrl,_that.localizationKey,_that.category,_that.series,_that.hidden);}
+}
+/// A variant of `when` that fallback to returning `null`
+///
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case Subclass(:final field):
+///     return ...;
+///   case _:
+///     return null;
+/// }
+/// ```
+
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( String identifier,  String? achievementIdentifier,  String? label,  String? caption,  String? icon,  String? color,  String? iconUrl,  String? localizationKey,  String? category,  BadgeManifestSeries? series,  bool hidden)?  $default,) {final _that = this;
+switch (_that) {
+case _BadgeManifestEntry() when $default != null:
+return $default(_that.identifier,_that.achievementIdentifier,_that.label,_that.caption,_that.icon,_that.color,_that.iconUrl,_that.localizationKey,_that.category,_that.series,_that.hidden);case _:
+  return null;
+
+}
+}
+
+}
+
+/// @nodoc
+@JsonSerializable()
+
+class _BadgeManifestEntry implements BadgeManifestEntry {
+  const _BadgeManifestEntry({required this.identifier, this.achievementIdentifier, required this.label, this.caption, this.icon, this.color, this.iconUrl, this.localizationKey, this.category, this.series, this.hidden = false});
+  factory _BadgeManifestEntry.fromJson(Map<String, dynamic> json) => _$BadgeManifestEntryFromJson(json);
+
+@override final  String identifier;
+@override final  String? achievementIdentifier;
+@override final  String? label;
+@override final  String? caption;
+@override final  String? icon;
+@override final  String? color;
+@override final  String? iconUrl;
+@override final  String? localizationKey;
+@override final  String? category;
+@override final  BadgeManifestSeries? series;
+@override@JsonKey() final  bool hidden;
+
+/// Create a copy of BadgeManifestEntry
+/// with the given fields replaced by the non-null parameter values.
+@override @JsonKey(includeFromJson: false, includeToJson: false)
+@pragma('vm:prefer-inline')
+_$BadgeManifestEntryCopyWith<_BadgeManifestEntry> get copyWith => __$BadgeManifestEntryCopyWithImpl<_BadgeManifestEntry>(this, _$identity);
+
+@override
+Map<String, dynamic> toJson() {
+  return _$BadgeManifestEntryToJson(this, );
+}
+
+@override
+bool operator ==(Object other) {
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is _BadgeManifestEntry&&(identical(other.identifier, identifier) || other.identifier == identifier)&&(identical(other.achievementIdentifier, achievementIdentifier) || other.achievementIdentifier == achievementIdentifier)&&(identical(other.label, label) || other.label == label)&&(identical(other.caption, caption) || other.caption == caption)&&(identical(other.icon, icon) || other.icon == icon)&&(identical(other.color, color) || other.color == color)&&(identical(other.iconUrl, iconUrl) || other.iconUrl == iconUrl)&&(identical(other.localizationKey, localizationKey) || other.localizationKey == localizationKey)&&(identical(other.category, category) || other.category == category)&&(identical(other.series, series) || other.series == series)&&(identical(other.hidden, hidden) || other.hidden == hidden));
+}
+
+@JsonKey(includeFromJson: false, includeToJson: false)
+@override
+int get hashCode => Object.hash(runtimeType,identifier,achievementIdentifier,label,caption,icon,color,iconUrl,localizationKey,category,series,hidden);
+
+@override
+String toString() {
+  return 'BadgeManifestEntry(identifier: $identifier, achievementIdentifier: $achievementIdentifier, label: $label, caption: $caption, icon: $icon, color: $color, iconUrl: $iconUrl, localizationKey: $localizationKey, category: $category, series: $series, hidden: $hidden)';
+}
+
+
+}
+
+/// @nodoc
+abstract mixin class _$BadgeManifestEntryCopyWith<$Res> implements $BadgeManifestEntryCopyWith<$Res> {
+  factory _$BadgeManifestEntryCopyWith(_BadgeManifestEntry value, $Res Function(_BadgeManifestEntry) _then) = __$BadgeManifestEntryCopyWithImpl;
+@override @useResult
+$Res call({
+ String identifier, String? achievementIdentifier, String? label, String? caption, String? icon, String? color, String? iconUrl, String? localizationKey, String? category, BadgeManifestSeries? series, bool hidden
+});
+
+
+@override $BadgeManifestSeriesCopyWith<$Res>? get series;
+
+}
+/// @nodoc
+class __$BadgeManifestEntryCopyWithImpl<$Res>
+    implements _$BadgeManifestEntryCopyWith<$Res> {
+  __$BadgeManifestEntryCopyWithImpl(this._self, this._then);
+
+  final _BadgeManifestEntry _self;
+  final $Res Function(_BadgeManifestEntry) _then;
+
+/// Create a copy of BadgeManifestEntry
+/// with the given fields replaced by the non-null parameter values.
+@override @pragma('vm:prefer-inline') $Res call({Object? identifier = null,Object? achievementIdentifier = freezed,Object? label = freezed,Object? caption = freezed,Object? icon = freezed,Object? color = freezed,Object? iconUrl = freezed,Object? localizationKey = freezed,Object? category = freezed,Object? series = freezed,Object? hidden = null,}) {
+  return _then(_BadgeManifestEntry(
+identifier: null == identifier ? _self.identifier : identifier // ignore: cast_nullable_to_non_nullable
+as String,achievementIdentifier: freezed == achievementIdentifier ? _self.achievementIdentifier : achievementIdentifier // ignore: cast_nullable_to_non_nullable
+as String?,label: freezed == label ? _self.label : label // ignore: cast_nullable_to_non_nullable
+as String?,caption: freezed == caption ? _self.caption : caption // ignore: cast_nullable_to_non_nullable
+as String?,icon: freezed == icon ? _self.icon : icon // ignore: cast_nullable_to_non_nullable
+as String?,color: freezed == color ? _self.color : color // ignore: cast_nullable_to_non_nullable
+as String?,iconUrl: freezed == iconUrl ? _self.iconUrl : iconUrl // ignore: cast_nullable_to_non_nullable
+as String?,localizationKey: freezed == localizationKey ? _self.localizationKey : localizationKey // ignore: cast_nullable_to_non_nullable
+as String?,category: freezed == category ? _self.category : category // ignore: cast_nullable_to_non_nullable
+as String?,series: freezed == series ? _self.series : series // ignore: cast_nullable_to_non_nullable
+as BadgeManifestSeries?,hidden: null == hidden ? _self.hidden : hidden // ignore: cast_nullable_to_non_nullable
+as bool,
+  ));
+}
+
+/// Create a copy of BadgeManifestEntry
+/// with the given fields replaced by the non-null parameter values.
+@override
+@pragma('vm:prefer-inline')
+$BadgeManifestSeriesCopyWith<$Res>? get series {
+    if (_self.series == null) {
+    return null;
+  }
+
+  return $BadgeManifestSeriesCopyWith<$Res>(_self.series!, (value) {
+    return _then(_self.copyWith(series: value));
+  });
+}
+}
+
+
+/// @nodoc
 mixin _$SnContactMethod {
 
  String get id; int get type; DateTime? get verifiedAt; bool get isPrimary; bool get isPublic; String get content; String get accountId; DateTime get createdAt; DateTime get updatedAt; DateTime? get deletedAt;
@@ -2241,7 +2902,7 @@ as DateTime?,
 /// @nodoc
 mixin _$SnNotification {
 
- DateTime get createdAt; DateTime get updatedAt; DateTime? get deletedAt; String get id; String get topic; String get title; String get subtitle; String get content; Map<String, dynamic> get meta; int get priority; DateTime? get viewedAt; String get accountId;
+ DateTime get createdAt; String get id; String? get appId; String get topic; String get title; String get subtitle;@JsonKey(name: 'content') String get body; Map<String, dynamic> get meta; DateTime? get viewedAt; String get accountId;
 /// Create a copy of SnNotification
 /// with the given fields replaced by the non-null parameter values.
 @JsonKey(includeFromJson: false, includeToJson: false)
@@ -2254,16 +2915,16 @@ $SnNotificationCopyWith<SnNotification> get copyWith => _$SnNotificationCopyWith
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is SnNotification&&(identical(other.createdAt, createdAt) || other.createdAt == createdAt)&&(identical(other.updatedAt, updatedAt) || other.updatedAt == updatedAt)&&(identical(other.deletedAt, deletedAt) || other.deletedAt == deletedAt)&&(identical(other.id, id) || other.id == id)&&(identical(other.topic, topic) || other.topic == topic)&&(identical(other.title, title) || other.title == title)&&(identical(other.subtitle, subtitle) || other.subtitle == subtitle)&&(identical(other.content, content) || other.content == content)&&const DeepCollectionEquality().equals(other.meta, meta)&&(identical(other.priority, priority) || other.priority == priority)&&(identical(other.viewedAt, viewedAt) || other.viewedAt == viewedAt)&&(identical(other.accountId, accountId) || other.accountId == accountId));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is SnNotification&&(identical(other.createdAt, createdAt) || other.createdAt == createdAt)&&(identical(other.id, id) || other.id == id)&&(identical(other.appId, appId) || other.appId == appId)&&(identical(other.topic, topic) || other.topic == topic)&&(identical(other.title, title) || other.title == title)&&(identical(other.subtitle, subtitle) || other.subtitle == subtitle)&&(identical(other.body, body) || other.body == body)&&const DeepCollectionEquality().equals(other.meta, meta)&&(identical(other.viewedAt, viewedAt) || other.viewedAt == viewedAt)&&(identical(other.accountId, accountId) || other.accountId == accountId));
 }
 
 @JsonKey(includeFromJson: false, includeToJson: false)
 @override
-int get hashCode => Object.hash(runtimeType,createdAt,updatedAt,deletedAt,id,topic,title,subtitle,content,const DeepCollectionEquality().hash(meta),priority,viewedAt,accountId);
+int get hashCode => Object.hash(runtimeType,createdAt,id,appId,topic,title,subtitle,body,const DeepCollectionEquality().hash(meta),viewedAt,accountId);
 
 @override
 String toString() {
-  return 'SnNotification(createdAt: $createdAt, updatedAt: $updatedAt, deletedAt: $deletedAt, id: $id, topic: $topic, title: $title, subtitle: $subtitle, content: $content, meta: $meta, priority: $priority, viewedAt: $viewedAt, accountId: $accountId)';
+  return 'SnNotification(createdAt: $createdAt, id: $id, appId: $appId, topic: $topic, title: $title, subtitle: $subtitle, body: $body, meta: $meta, viewedAt: $viewedAt, accountId: $accountId)';
 }
 
 
@@ -2274,7 +2935,7 @@ abstract mixin class $SnNotificationCopyWith<$Res>  {
   factory $SnNotificationCopyWith(SnNotification value, $Res Function(SnNotification) _then) = _$SnNotificationCopyWithImpl;
 @useResult
 $Res call({
- DateTime createdAt, DateTime updatedAt, DateTime? deletedAt, String id, String topic, String title, String subtitle, String content, Map<String, dynamic> meta, int priority, DateTime? viewedAt, String accountId
+ DateTime createdAt, String id, String? appId, String topic, String title, String subtitle,@JsonKey(name: 'content') String body, Map<String, dynamic> meta, DateTime? viewedAt, String accountId
 });
 
 
@@ -2291,19 +2952,17 @@ class _$SnNotificationCopyWithImpl<$Res>
 
 /// Create a copy of SnNotification
 /// with the given fields replaced by the non-null parameter values.
-@pragma('vm:prefer-inline') @override $Res call({Object? createdAt = null,Object? updatedAt = null,Object? deletedAt = freezed,Object? id = null,Object? topic = null,Object? title = null,Object? subtitle = null,Object? content = null,Object? meta = null,Object? priority = null,Object? viewedAt = freezed,Object? accountId = null,}) {
+@pragma('vm:prefer-inline') @override $Res call({Object? createdAt = null,Object? id = null,Object? appId = freezed,Object? topic = null,Object? title = null,Object? subtitle = null,Object? body = null,Object? meta = null,Object? viewedAt = freezed,Object? accountId = null,}) {
   return _then(_self.copyWith(
 createdAt: null == createdAt ? _self.createdAt : createdAt // ignore: cast_nullable_to_non_nullable
-as DateTime,updatedAt: null == updatedAt ? _self.updatedAt : updatedAt // ignore: cast_nullable_to_non_nullable
-as DateTime,deletedAt: freezed == deletedAt ? _self.deletedAt : deletedAt // ignore: cast_nullable_to_non_nullable
-as DateTime?,id: null == id ? _self.id : id // ignore: cast_nullable_to_non_nullable
-as String,topic: null == topic ? _self.topic : topic // ignore: cast_nullable_to_non_nullable
+as DateTime,id: null == id ? _self.id : id // ignore: cast_nullable_to_non_nullable
+as String,appId: freezed == appId ? _self.appId : appId // ignore: cast_nullable_to_non_nullable
+as String?,topic: null == topic ? _self.topic : topic // ignore: cast_nullable_to_non_nullable
 as String,title: null == title ? _self.title : title // ignore: cast_nullable_to_non_nullable
 as String,subtitle: null == subtitle ? _self.subtitle : subtitle // ignore: cast_nullable_to_non_nullable
-as String,content: null == content ? _self.content : content // ignore: cast_nullable_to_non_nullable
+as String,body: null == body ? _self.body : body // ignore: cast_nullable_to_non_nullable
 as String,meta: null == meta ? _self.meta : meta // ignore: cast_nullable_to_non_nullable
-as Map<String, dynamic>,priority: null == priority ? _self.priority : priority // ignore: cast_nullable_to_non_nullable
-as int,viewedAt: freezed == viewedAt ? _self.viewedAt : viewedAt // ignore: cast_nullable_to_non_nullable
+as Map<String, dynamic>,viewedAt: freezed == viewedAt ? _self.viewedAt : viewedAt // ignore: cast_nullable_to_non_nullable
 as DateTime?,accountId: null == accountId ? _self.accountId : accountId // ignore: cast_nullable_to_non_nullable
 as String,
   ));
@@ -2387,10 +3046,10 @@ return $default(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( DateTime createdAt,  DateTime updatedAt,  DateTime? deletedAt,  String id,  String topic,  String title,  String subtitle,  String content,  Map<String, dynamic> meta,  int priority,  DateTime? viewedAt,  String accountId)?  $default,{required TResult orElse(),}) {final _that = this;
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( DateTime createdAt,  String id,  String? appId,  String topic,  String title,  String subtitle, @JsonKey(name: 'content')  String body,  Map<String, dynamic> meta,  DateTime? viewedAt,  String accountId)?  $default,{required TResult orElse(),}) {final _that = this;
 switch (_that) {
 case _SnNotification() when $default != null:
-return $default(_that.createdAt,_that.updatedAt,_that.deletedAt,_that.id,_that.topic,_that.title,_that.subtitle,_that.content,_that.meta,_that.priority,_that.viewedAt,_that.accountId);case _:
+return $default(_that.createdAt,_that.id,_that.appId,_that.topic,_that.title,_that.subtitle,_that.body,_that.meta,_that.viewedAt,_that.accountId);case _:
   return orElse();
 
 }
@@ -2408,10 +3067,10 @@ return $default(_that.createdAt,_that.updatedAt,_that.deletedAt,_that.id,_that.t
 /// }
 /// ```
 
-@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( DateTime createdAt,  DateTime updatedAt,  DateTime? deletedAt,  String id,  String topic,  String title,  String subtitle,  String content,  Map<String, dynamic> meta,  int priority,  DateTime? viewedAt,  String accountId)  $default,) {final _that = this;
+@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( DateTime createdAt,  String id,  String? appId,  String topic,  String title,  String subtitle, @JsonKey(name: 'content')  String body,  Map<String, dynamic> meta,  DateTime? viewedAt,  String accountId)  $default,) {final _that = this;
 switch (_that) {
 case _SnNotification():
-return $default(_that.createdAt,_that.updatedAt,_that.deletedAt,_that.id,_that.topic,_that.title,_that.subtitle,_that.content,_that.meta,_that.priority,_that.viewedAt,_that.accountId);}
+return $default(_that.createdAt,_that.id,_that.appId,_that.topic,_that.title,_that.subtitle,_that.body,_that.meta,_that.viewedAt,_that.accountId);}
 }
 /// A variant of `when` that fallback to returning `null`
 ///
@@ -2425,10 +3084,10 @@ return $default(_that.createdAt,_that.updatedAt,_that.deletedAt,_that.id,_that.t
 /// }
 /// ```
 
-@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( DateTime createdAt,  DateTime updatedAt,  DateTime? deletedAt,  String id,  String topic,  String title,  String subtitle,  String content,  Map<String, dynamic> meta,  int priority,  DateTime? viewedAt,  String accountId)?  $default,) {final _that = this;
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( DateTime createdAt,  String id,  String? appId,  String topic,  String title,  String subtitle, @JsonKey(name: 'content')  String body,  Map<String, dynamic> meta,  DateTime? viewedAt,  String accountId)?  $default,) {final _that = this;
 switch (_that) {
 case _SnNotification() when $default != null:
-return $default(_that.createdAt,_that.updatedAt,_that.deletedAt,_that.id,_that.topic,_that.title,_that.subtitle,_that.content,_that.meta,_that.priority,_that.viewedAt,_that.accountId);case _:
+return $default(_that.createdAt,_that.id,_that.appId,_that.topic,_that.title,_that.subtitle,_that.body,_that.meta,_that.viewedAt,_that.accountId);case _:
   return null;
 
 }
@@ -2440,17 +3099,16 @@ return $default(_that.createdAt,_that.updatedAt,_that.deletedAt,_that.id,_that.t
 @JsonSerializable()
 
 class _SnNotification implements SnNotification {
-  const _SnNotification({required this.createdAt, required this.updatedAt, required this.deletedAt, required this.id, required this.topic, required this.title, this.subtitle = '', required this.content, final  Map<String, dynamic> meta = const {}, required this.priority, required this.viewedAt, required this.accountId}): _meta = meta;
+  const _SnNotification({required this.createdAt, required this.id, this.appId, required this.topic, required this.title, this.subtitle = '', @JsonKey(name: 'content') required this.body, final  Map<String, dynamic> meta = const {}, required this.viewedAt, required this.accountId}): _meta = meta;
   factory _SnNotification.fromJson(Map<String, dynamic> json) => _$SnNotificationFromJson(json);
 
 @override final  DateTime createdAt;
-@override final  DateTime updatedAt;
-@override final  DateTime? deletedAt;
 @override final  String id;
+@override final  String? appId;
 @override final  String topic;
 @override final  String title;
 @override@JsonKey() final  String subtitle;
-@override final  String content;
+@override@JsonKey(name: 'content') final  String body;
  final  Map<String, dynamic> _meta;
 @override@JsonKey() Map<String, dynamic> get meta {
   if (_meta is EqualUnmodifiableMapView) return _meta;
@@ -2458,7 +3116,6 @@ class _SnNotification implements SnNotification {
   return EqualUnmodifiableMapView(_meta);
 }
 
-@override final  int priority;
 @override final  DateTime? viewedAt;
 @override final  String accountId;
 
@@ -2475,16 +3132,16 @@ Map<String, dynamic> toJson() {
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is _SnNotification&&(identical(other.createdAt, createdAt) || other.createdAt == createdAt)&&(identical(other.updatedAt, updatedAt) || other.updatedAt == updatedAt)&&(identical(other.deletedAt, deletedAt) || other.deletedAt == deletedAt)&&(identical(other.id, id) || other.id == id)&&(identical(other.topic, topic) || other.topic == topic)&&(identical(other.title, title) || other.title == title)&&(identical(other.subtitle, subtitle) || other.subtitle == subtitle)&&(identical(other.content, content) || other.content == content)&&const DeepCollectionEquality().equals(other._meta, _meta)&&(identical(other.priority, priority) || other.priority == priority)&&(identical(other.viewedAt, viewedAt) || other.viewedAt == viewedAt)&&(identical(other.accountId, accountId) || other.accountId == accountId));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is _SnNotification&&(identical(other.createdAt, createdAt) || other.createdAt == createdAt)&&(identical(other.id, id) || other.id == id)&&(identical(other.appId, appId) || other.appId == appId)&&(identical(other.topic, topic) || other.topic == topic)&&(identical(other.title, title) || other.title == title)&&(identical(other.subtitle, subtitle) || other.subtitle == subtitle)&&(identical(other.body, body) || other.body == body)&&const DeepCollectionEquality().equals(other._meta, _meta)&&(identical(other.viewedAt, viewedAt) || other.viewedAt == viewedAt)&&(identical(other.accountId, accountId) || other.accountId == accountId));
 }
 
 @JsonKey(includeFromJson: false, includeToJson: false)
 @override
-int get hashCode => Object.hash(runtimeType,createdAt,updatedAt,deletedAt,id,topic,title,subtitle,content,const DeepCollectionEquality().hash(_meta),priority,viewedAt,accountId);
+int get hashCode => Object.hash(runtimeType,createdAt,id,appId,topic,title,subtitle,body,const DeepCollectionEquality().hash(_meta),viewedAt,accountId);
 
 @override
 String toString() {
-  return 'SnNotification(createdAt: $createdAt, updatedAt: $updatedAt, deletedAt: $deletedAt, id: $id, topic: $topic, title: $title, subtitle: $subtitle, content: $content, meta: $meta, priority: $priority, viewedAt: $viewedAt, accountId: $accountId)';
+  return 'SnNotification(createdAt: $createdAt, id: $id, appId: $appId, topic: $topic, title: $title, subtitle: $subtitle, body: $body, meta: $meta, viewedAt: $viewedAt, accountId: $accountId)';
 }
 
 
@@ -2495,7 +3152,7 @@ abstract mixin class _$SnNotificationCopyWith<$Res> implements $SnNotificationCo
   factory _$SnNotificationCopyWith(_SnNotification value, $Res Function(_SnNotification) _then) = __$SnNotificationCopyWithImpl;
 @override @useResult
 $Res call({
- DateTime createdAt, DateTime updatedAt, DateTime? deletedAt, String id, String topic, String title, String subtitle, String content, Map<String, dynamic> meta, int priority, DateTime? viewedAt, String accountId
+ DateTime createdAt, String id, String? appId, String topic, String title, String subtitle,@JsonKey(name: 'content') String body, Map<String, dynamic> meta, DateTime? viewedAt, String accountId
 });
 
 
@@ -2512,19 +3169,17 @@ class __$SnNotificationCopyWithImpl<$Res>
 
 /// Create a copy of SnNotification
 /// with the given fields replaced by the non-null parameter values.
-@override @pragma('vm:prefer-inline') $Res call({Object? createdAt = null,Object? updatedAt = null,Object? deletedAt = freezed,Object? id = null,Object? topic = null,Object? title = null,Object? subtitle = null,Object? content = null,Object? meta = null,Object? priority = null,Object? viewedAt = freezed,Object? accountId = null,}) {
+@override @pragma('vm:prefer-inline') $Res call({Object? createdAt = null,Object? id = null,Object? appId = freezed,Object? topic = null,Object? title = null,Object? subtitle = null,Object? body = null,Object? meta = null,Object? viewedAt = freezed,Object? accountId = null,}) {
   return _then(_SnNotification(
 createdAt: null == createdAt ? _self.createdAt : createdAt // ignore: cast_nullable_to_non_nullable
-as DateTime,updatedAt: null == updatedAt ? _self.updatedAt : updatedAt // ignore: cast_nullable_to_non_nullable
-as DateTime,deletedAt: freezed == deletedAt ? _self.deletedAt : deletedAt // ignore: cast_nullable_to_non_nullable
-as DateTime?,id: null == id ? _self.id : id // ignore: cast_nullable_to_non_nullable
-as String,topic: null == topic ? _self.topic : topic // ignore: cast_nullable_to_non_nullable
+as DateTime,id: null == id ? _self.id : id // ignore: cast_nullable_to_non_nullable
+as String,appId: freezed == appId ? _self.appId : appId // ignore: cast_nullable_to_non_nullable
+as String?,topic: null == topic ? _self.topic : topic // ignore: cast_nullable_to_non_nullable
 as String,title: null == title ? _self.title : title // ignore: cast_nullable_to_non_nullable
 as String,subtitle: null == subtitle ? _self.subtitle : subtitle // ignore: cast_nullable_to_non_nullable
-as String,content: null == content ? _self.content : content // ignore: cast_nullable_to_non_nullable
+as String,body: null == body ? _self.body : body // ignore: cast_nullable_to_non_nullable
 as String,meta: null == meta ? _self._meta : meta // ignore: cast_nullable_to_non_nullable
-as Map<String, dynamic>,priority: null == priority ? _self.priority : priority // ignore: cast_nullable_to_non_nullable
-as int,viewedAt: freezed == viewedAt ? _self.viewedAt : viewedAt // ignore: cast_nullable_to_non_nullable
+as Map<String, dynamic>,viewedAt: freezed == viewedAt ? _self.viewedAt : viewedAt // ignore: cast_nullable_to_non_nullable
 as DateTime?,accountId: null == accountId ? _self.accountId : accountId // ignore: cast_nullable_to_non_nullable
 as String,
   ));
@@ -2797,6 +3452,685 @@ as String?,
 }
 
 
+}
+
+
+/// @nodoc
+mixin _$SnAccountProfileRef {
+
+ String get id; String get firstName; String get middleName; String get lastName; String get bio; SnCloudFileReference? get picture; SnCloudFileReference? get background; SnVerificationMark? get verification; UsernameColor? get usernameColor;
+/// Create a copy of SnAccountProfileRef
+/// with the given fields replaced by the non-null parameter values.
+@JsonKey(includeFromJson: false, includeToJson: false)
+@pragma('vm:prefer-inline')
+$SnAccountProfileRefCopyWith<SnAccountProfileRef> get copyWith => _$SnAccountProfileRefCopyWithImpl<SnAccountProfileRef>(this as SnAccountProfileRef, _$identity);
+
+  /// Serializes this SnAccountProfileRef to a JSON map.
+  Map<String, dynamic> toJson();
+
+
+@override
+bool operator ==(Object other) {
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is SnAccountProfileRef&&(identical(other.id, id) || other.id == id)&&(identical(other.firstName, firstName) || other.firstName == firstName)&&(identical(other.middleName, middleName) || other.middleName == middleName)&&(identical(other.lastName, lastName) || other.lastName == lastName)&&(identical(other.bio, bio) || other.bio == bio)&&(identical(other.picture, picture) || other.picture == picture)&&(identical(other.background, background) || other.background == background)&&(identical(other.verification, verification) || other.verification == verification)&&(identical(other.usernameColor, usernameColor) || other.usernameColor == usernameColor));
+}
+
+@JsonKey(includeFromJson: false, includeToJson: false)
+@override
+int get hashCode => Object.hash(runtimeType,id,firstName,middleName,lastName,bio,picture,background,verification,usernameColor);
+
+@override
+String toString() {
+  return 'SnAccountProfileRef(id: $id, firstName: $firstName, middleName: $middleName, lastName: $lastName, bio: $bio, picture: $picture, background: $background, verification: $verification, usernameColor: $usernameColor)';
+}
+
+
+}
+
+/// @nodoc
+abstract mixin class $SnAccountProfileRefCopyWith<$Res>  {
+  factory $SnAccountProfileRefCopyWith(SnAccountProfileRef value, $Res Function(SnAccountProfileRef) _then) = _$SnAccountProfileRefCopyWithImpl;
+@useResult
+$Res call({
+ String id, String firstName, String middleName, String lastName, String bio, SnCloudFileReference? picture, SnCloudFileReference? background, SnVerificationMark? verification, UsernameColor? usernameColor
+});
+
+
+$SnCloudFileReferenceCopyWith<$Res>? get picture;$SnCloudFileReferenceCopyWith<$Res>? get background;$SnVerificationMarkCopyWith<$Res>? get verification;$UsernameColorCopyWith<$Res>? get usernameColor;
+
+}
+/// @nodoc
+class _$SnAccountProfileRefCopyWithImpl<$Res>
+    implements $SnAccountProfileRefCopyWith<$Res> {
+  _$SnAccountProfileRefCopyWithImpl(this._self, this._then);
+
+  final SnAccountProfileRef _self;
+  final $Res Function(SnAccountProfileRef) _then;
+
+/// Create a copy of SnAccountProfileRef
+/// with the given fields replaced by the non-null parameter values.
+@pragma('vm:prefer-inline') @override $Res call({Object? id = null,Object? firstName = null,Object? middleName = null,Object? lastName = null,Object? bio = null,Object? picture = freezed,Object? background = freezed,Object? verification = freezed,Object? usernameColor = freezed,}) {
+  return _then(_self.copyWith(
+id: null == id ? _self.id : id // ignore: cast_nullable_to_non_nullable
+as String,firstName: null == firstName ? _self.firstName : firstName // ignore: cast_nullable_to_non_nullable
+as String,middleName: null == middleName ? _self.middleName : middleName // ignore: cast_nullable_to_non_nullable
+as String,lastName: null == lastName ? _self.lastName : lastName // ignore: cast_nullable_to_non_nullable
+as String,bio: null == bio ? _self.bio : bio // ignore: cast_nullable_to_non_nullable
+as String,picture: freezed == picture ? _self.picture : picture // ignore: cast_nullable_to_non_nullable
+as SnCloudFileReference?,background: freezed == background ? _self.background : background // ignore: cast_nullable_to_non_nullable
+as SnCloudFileReference?,verification: freezed == verification ? _self.verification : verification // ignore: cast_nullable_to_non_nullable
+as SnVerificationMark?,usernameColor: freezed == usernameColor ? _self.usernameColor : usernameColor // ignore: cast_nullable_to_non_nullable
+as UsernameColor?,
+  ));
+}
+/// Create a copy of SnAccountProfileRef
+/// with the given fields replaced by the non-null parameter values.
+@override
+@pragma('vm:prefer-inline')
+$SnCloudFileReferenceCopyWith<$Res>? get picture {
+    if (_self.picture == null) {
+    return null;
+  }
+
+  return $SnCloudFileReferenceCopyWith<$Res>(_self.picture!, (value) {
+    return _then(_self.copyWith(picture: value));
+  });
+}/// Create a copy of SnAccountProfileRef
+/// with the given fields replaced by the non-null parameter values.
+@override
+@pragma('vm:prefer-inline')
+$SnCloudFileReferenceCopyWith<$Res>? get background {
+    if (_self.background == null) {
+    return null;
+  }
+
+  return $SnCloudFileReferenceCopyWith<$Res>(_self.background!, (value) {
+    return _then(_self.copyWith(background: value));
+  });
+}/// Create a copy of SnAccountProfileRef
+/// with the given fields replaced by the non-null parameter values.
+@override
+@pragma('vm:prefer-inline')
+$SnVerificationMarkCopyWith<$Res>? get verification {
+    if (_self.verification == null) {
+    return null;
+  }
+
+  return $SnVerificationMarkCopyWith<$Res>(_self.verification!, (value) {
+    return _then(_self.copyWith(verification: value));
+  });
+}/// Create a copy of SnAccountProfileRef
+/// with the given fields replaced by the non-null parameter values.
+@override
+@pragma('vm:prefer-inline')
+$UsernameColorCopyWith<$Res>? get usernameColor {
+    if (_self.usernameColor == null) {
+    return null;
+  }
+
+  return $UsernameColorCopyWith<$Res>(_self.usernameColor!, (value) {
+    return _then(_self.copyWith(usernameColor: value));
+  });
+}
+}
+
+
+/// Adds pattern-matching-related methods to [SnAccountProfileRef].
+extension SnAccountProfileRefPatterns on SnAccountProfileRef {
+/// A variant of `map` that fallback to returning `orElse`.
+///
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case final Subclass value:
+///     return ...;
+///   case _:
+///     return orElse();
+/// }
+/// ```
+
+@optionalTypeArgs TResult maybeMap<TResult extends Object?>(TResult Function( _SnAccountProfileRef value)?  $default,{required TResult orElse(),}){
+final _that = this;
+switch (_that) {
+case _SnAccountProfileRef() when $default != null:
+return $default(_that);case _:
+  return orElse();
+
+}
+}
+/// A `switch`-like method, using callbacks.
+///
+/// Callbacks receives the raw object, upcasted.
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case final Subclass value:
+///     return ...;
+///   case final Subclass2 value:
+///     return ...;
+/// }
+/// ```
+
+@optionalTypeArgs TResult map<TResult extends Object?>(TResult Function( _SnAccountProfileRef value)  $default,){
+final _that = this;
+switch (_that) {
+case _SnAccountProfileRef():
+return $default(_that);}
+}
+/// A variant of `map` that fallback to returning `null`.
+///
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case final Subclass value:
+///     return ...;
+///   case _:
+///     return null;
+/// }
+/// ```
+
+@optionalTypeArgs TResult? mapOrNull<TResult extends Object?>(TResult? Function( _SnAccountProfileRef value)?  $default,){
+final _that = this;
+switch (_that) {
+case _SnAccountProfileRef() when $default != null:
+return $default(_that);case _:
+  return null;
+
+}
+}
+/// A variant of `when` that fallback to an `orElse` callback.
+///
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case Subclass(:final field):
+///     return ...;
+///   case _:
+///     return orElse();
+/// }
+/// ```
+
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( String id,  String firstName,  String middleName,  String lastName,  String bio,  SnCloudFileReference? picture,  SnCloudFileReference? background,  SnVerificationMark? verification,  UsernameColor? usernameColor)?  $default,{required TResult orElse(),}) {final _that = this;
+switch (_that) {
+case _SnAccountProfileRef() when $default != null:
+return $default(_that.id,_that.firstName,_that.middleName,_that.lastName,_that.bio,_that.picture,_that.background,_that.verification,_that.usernameColor);case _:
+  return orElse();
+
+}
+}
+/// A `switch`-like method, using callbacks.
+///
+/// As opposed to `map`, this offers destructuring.
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case Subclass(:final field):
+///     return ...;
+///   case Subclass2(:final field2):
+///     return ...;
+/// }
+/// ```
+
+@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( String id,  String firstName,  String middleName,  String lastName,  String bio,  SnCloudFileReference? picture,  SnCloudFileReference? background,  SnVerificationMark? verification,  UsernameColor? usernameColor)  $default,) {final _that = this;
+switch (_that) {
+case _SnAccountProfileRef():
+return $default(_that.id,_that.firstName,_that.middleName,_that.lastName,_that.bio,_that.picture,_that.background,_that.verification,_that.usernameColor);}
+}
+/// A variant of `when` that fallback to returning `null`
+///
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case Subclass(:final field):
+///     return ...;
+///   case _:
+///     return null;
+/// }
+/// ```
+
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( String id,  String firstName,  String middleName,  String lastName,  String bio,  SnCloudFileReference? picture,  SnCloudFileReference? background,  SnVerificationMark? verification,  UsernameColor? usernameColor)?  $default,) {final _that = this;
+switch (_that) {
+case _SnAccountProfileRef() when $default != null:
+return $default(_that.id,_that.firstName,_that.middleName,_that.lastName,_that.bio,_that.picture,_that.background,_that.verification,_that.usernameColor);case _:
+  return null;
+
+}
+}
+
+}
+
+/// @nodoc
+@JsonSerializable()
+
+class _SnAccountProfileRef implements SnAccountProfileRef {
+  const _SnAccountProfileRef({required this.id, this.firstName = '', this.middleName = '', this.lastName = '', this.bio = '', this.picture, this.background, this.verification, this.usernameColor});
+  factory _SnAccountProfileRef.fromJson(Map<String, dynamic> json) => _$SnAccountProfileRefFromJson(json);
+
+@override final  String id;
+@override@JsonKey() final  String firstName;
+@override@JsonKey() final  String middleName;
+@override@JsonKey() final  String lastName;
+@override@JsonKey() final  String bio;
+@override final  SnCloudFileReference? picture;
+@override final  SnCloudFileReference? background;
+@override final  SnVerificationMark? verification;
+@override final  UsernameColor? usernameColor;
+
+/// Create a copy of SnAccountProfileRef
+/// with the given fields replaced by the non-null parameter values.
+@override @JsonKey(includeFromJson: false, includeToJson: false)
+@pragma('vm:prefer-inline')
+_$SnAccountProfileRefCopyWith<_SnAccountProfileRef> get copyWith => __$SnAccountProfileRefCopyWithImpl<_SnAccountProfileRef>(this, _$identity);
+
+@override
+Map<String, dynamic> toJson() {
+  return _$SnAccountProfileRefToJson(this, );
+}
+
+@override
+bool operator ==(Object other) {
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is _SnAccountProfileRef&&(identical(other.id, id) || other.id == id)&&(identical(other.firstName, firstName) || other.firstName == firstName)&&(identical(other.middleName, middleName) || other.middleName == middleName)&&(identical(other.lastName, lastName) || other.lastName == lastName)&&(identical(other.bio, bio) || other.bio == bio)&&(identical(other.picture, picture) || other.picture == picture)&&(identical(other.background, background) || other.background == background)&&(identical(other.verification, verification) || other.verification == verification)&&(identical(other.usernameColor, usernameColor) || other.usernameColor == usernameColor));
+}
+
+@JsonKey(includeFromJson: false, includeToJson: false)
+@override
+int get hashCode => Object.hash(runtimeType,id,firstName,middleName,lastName,bio,picture,background,verification,usernameColor);
+
+@override
+String toString() {
+  return 'SnAccountProfileRef(id: $id, firstName: $firstName, middleName: $middleName, lastName: $lastName, bio: $bio, picture: $picture, background: $background, verification: $verification, usernameColor: $usernameColor)';
+}
+
+
+}
+
+/// @nodoc
+abstract mixin class _$SnAccountProfileRefCopyWith<$Res> implements $SnAccountProfileRefCopyWith<$Res> {
+  factory _$SnAccountProfileRefCopyWith(_SnAccountProfileRef value, $Res Function(_SnAccountProfileRef) _then) = __$SnAccountProfileRefCopyWithImpl;
+@override @useResult
+$Res call({
+ String id, String firstName, String middleName, String lastName, String bio, SnCloudFileReference? picture, SnCloudFileReference? background, SnVerificationMark? verification, UsernameColor? usernameColor
+});
+
+
+@override $SnCloudFileReferenceCopyWith<$Res>? get picture;@override $SnCloudFileReferenceCopyWith<$Res>? get background;@override $SnVerificationMarkCopyWith<$Res>? get verification;@override $UsernameColorCopyWith<$Res>? get usernameColor;
+
+}
+/// @nodoc
+class __$SnAccountProfileRefCopyWithImpl<$Res>
+    implements _$SnAccountProfileRefCopyWith<$Res> {
+  __$SnAccountProfileRefCopyWithImpl(this._self, this._then);
+
+  final _SnAccountProfileRef _self;
+  final $Res Function(_SnAccountProfileRef) _then;
+
+/// Create a copy of SnAccountProfileRef
+/// with the given fields replaced by the non-null parameter values.
+@override @pragma('vm:prefer-inline') $Res call({Object? id = null,Object? firstName = null,Object? middleName = null,Object? lastName = null,Object? bio = null,Object? picture = freezed,Object? background = freezed,Object? verification = freezed,Object? usernameColor = freezed,}) {
+  return _then(_SnAccountProfileRef(
+id: null == id ? _self.id : id // ignore: cast_nullable_to_non_nullable
+as String,firstName: null == firstName ? _self.firstName : firstName // ignore: cast_nullable_to_non_nullable
+as String,middleName: null == middleName ? _self.middleName : middleName // ignore: cast_nullable_to_non_nullable
+as String,lastName: null == lastName ? _self.lastName : lastName // ignore: cast_nullable_to_non_nullable
+as String,bio: null == bio ? _self.bio : bio // ignore: cast_nullable_to_non_nullable
+as String,picture: freezed == picture ? _self.picture : picture // ignore: cast_nullable_to_non_nullable
+as SnCloudFileReference?,background: freezed == background ? _self.background : background // ignore: cast_nullable_to_non_nullable
+as SnCloudFileReference?,verification: freezed == verification ? _self.verification : verification // ignore: cast_nullable_to_non_nullable
+as SnVerificationMark?,usernameColor: freezed == usernameColor ? _self.usernameColor : usernameColor // ignore: cast_nullable_to_non_nullable
+as UsernameColor?,
+  ));
+}
+
+/// Create a copy of SnAccountProfileRef
+/// with the given fields replaced by the non-null parameter values.
+@override
+@pragma('vm:prefer-inline')
+$SnCloudFileReferenceCopyWith<$Res>? get picture {
+    if (_self.picture == null) {
+    return null;
+  }
+
+  return $SnCloudFileReferenceCopyWith<$Res>(_self.picture!, (value) {
+    return _then(_self.copyWith(picture: value));
+  });
+}/// Create a copy of SnAccountProfileRef
+/// with the given fields replaced by the non-null parameter values.
+@override
+@pragma('vm:prefer-inline')
+$SnCloudFileReferenceCopyWith<$Res>? get background {
+    if (_self.background == null) {
+    return null;
+  }
+
+  return $SnCloudFileReferenceCopyWith<$Res>(_self.background!, (value) {
+    return _then(_self.copyWith(background: value));
+  });
+}/// Create a copy of SnAccountProfileRef
+/// with the given fields replaced by the non-null parameter values.
+@override
+@pragma('vm:prefer-inline')
+$SnVerificationMarkCopyWith<$Res>? get verification {
+    if (_self.verification == null) {
+    return null;
+  }
+
+  return $SnVerificationMarkCopyWith<$Res>(_self.verification!, (value) {
+    return _then(_self.copyWith(verification: value));
+  });
+}/// Create a copy of SnAccountProfileRef
+/// with the given fields replaced by the non-null parameter values.
+@override
+@pragma('vm:prefer-inline')
+$UsernameColorCopyWith<$Res>? get usernameColor {
+    if (_self.usernameColor == null) {
+    return null;
+  }
+
+  return $UsernameColorCopyWith<$Res>(_self.usernameColor!, (value) {
+    return _then(_self.copyWith(usernameColor: value));
+  });
+}
+}
+
+
+/// @nodoc
+mixin _$SnAccountReference {
+
+ String get id; String get name; String get nick; SnAccountProfileRef? get profile; List<SnAccountBadge> get badges; String? get automatedId;
+/// Create a copy of SnAccountReference
+/// with the given fields replaced by the non-null parameter values.
+@JsonKey(includeFromJson: false, includeToJson: false)
+@pragma('vm:prefer-inline')
+$SnAccountReferenceCopyWith<SnAccountReference> get copyWith => _$SnAccountReferenceCopyWithImpl<SnAccountReference>(this as SnAccountReference, _$identity);
+
+  /// Serializes this SnAccountReference to a JSON map.
+  Map<String, dynamic> toJson();
+
+
+@override
+bool operator ==(Object other) {
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is SnAccountReference&&(identical(other.id, id) || other.id == id)&&(identical(other.name, name) || other.name == name)&&(identical(other.nick, nick) || other.nick == nick)&&(identical(other.profile, profile) || other.profile == profile)&&const DeepCollectionEquality().equals(other.badges, badges)&&(identical(other.automatedId, automatedId) || other.automatedId == automatedId));
+}
+
+@JsonKey(includeFromJson: false, includeToJson: false)
+@override
+int get hashCode => Object.hash(runtimeType,id,name,nick,profile,const DeepCollectionEquality().hash(badges),automatedId);
+
+@override
+String toString() {
+  return 'SnAccountReference(id: $id, name: $name, nick: $nick, profile: $profile, badges: $badges, automatedId: $automatedId)';
+}
+
+
+}
+
+/// @nodoc
+abstract mixin class $SnAccountReferenceCopyWith<$Res>  {
+  factory $SnAccountReferenceCopyWith(SnAccountReference value, $Res Function(SnAccountReference) _then) = _$SnAccountReferenceCopyWithImpl;
+@useResult
+$Res call({
+ String id, String name, String nick, SnAccountProfileRef? profile, List<SnAccountBadge> badges, String? automatedId
+});
+
+
+$SnAccountProfileRefCopyWith<$Res>? get profile;
+
+}
+/// @nodoc
+class _$SnAccountReferenceCopyWithImpl<$Res>
+    implements $SnAccountReferenceCopyWith<$Res> {
+  _$SnAccountReferenceCopyWithImpl(this._self, this._then);
+
+  final SnAccountReference _self;
+  final $Res Function(SnAccountReference) _then;
+
+/// Create a copy of SnAccountReference
+/// with the given fields replaced by the non-null parameter values.
+@pragma('vm:prefer-inline') @override $Res call({Object? id = null,Object? name = null,Object? nick = null,Object? profile = freezed,Object? badges = null,Object? automatedId = freezed,}) {
+  return _then(_self.copyWith(
+id: null == id ? _self.id : id // ignore: cast_nullable_to_non_nullable
+as String,name: null == name ? _self.name : name // ignore: cast_nullable_to_non_nullable
+as String,nick: null == nick ? _self.nick : nick // ignore: cast_nullable_to_non_nullable
+as String,profile: freezed == profile ? _self.profile : profile // ignore: cast_nullable_to_non_nullable
+as SnAccountProfileRef?,badges: null == badges ? _self.badges : badges // ignore: cast_nullable_to_non_nullable
+as List<SnAccountBadge>,automatedId: freezed == automatedId ? _self.automatedId : automatedId // ignore: cast_nullable_to_non_nullable
+as String?,
+  ));
+}
+/// Create a copy of SnAccountReference
+/// with the given fields replaced by the non-null parameter values.
+@override
+@pragma('vm:prefer-inline')
+$SnAccountProfileRefCopyWith<$Res>? get profile {
+    if (_self.profile == null) {
+    return null;
+  }
+
+  return $SnAccountProfileRefCopyWith<$Res>(_self.profile!, (value) {
+    return _then(_self.copyWith(profile: value));
+  });
+}
+}
+
+
+/// Adds pattern-matching-related methods to [SnAccountReference].
+extension SnAccountReferencePatterns on SnAccountReference {
+/// A variant of `map` that fallback to returning `orElse`.
+///
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case final Subclass value:
+///     return ...;
+///   case _:
+///     return orElse();
+/// }
+/// ```
+
+@optionalTypeArgs TResult maybeMap<TResult extends Object?>(TResult Function( _SnAccountReference value)?  $default,{required TResult orElse(),}){
+final _that = this;
+switch (_that) {
+case _SnAccountReference() when $default != null:
+return $default(_that);case _:
+  return orElse();
+
+}
+}
+/// A `switch`-like method, using callbacks.
+///
+/// Callbacks receives the raw object, upcasted.
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case final Subclass value:
+///     return ...;
+///   case final Subclass2 value:
+///     return ...;
+/// }
+/// ```
+
+@optionalTypeArgs TResult map<TResult extends Object?>(TResult Function( _SnAccountReference value)  $default,){
+final _that = this;
+switch (_that) {
+case _SnAccountReference():
+return $default(_that);}
+}
+/// A variant of `map` that fallback to returning `null`.
+///
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case final Subclass value:
+///     return ...;
+///   case _:
+///     return null;
+/// }
+/// ```
+
+@optionalTypeArgs TResult? mapOrNull<TResult extends Object?>(TResult? Function( _SnAccountReference value)?  $default,){
+final _that = this;
+switch (_that) {
+case _SnAccountReference() when $default != null:
+return $default(_that);case _:
+  return null;
+
+}
+}
+/// A variant of `when` that fallback to an `orElse` callback.
+///
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case Subclass(:final field):
+///     return ...;
+///   case _:
+///     return orElse();
+/// }
+/// ```
+
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( String id,  String name,  String nick,  SnAccountProfileRef? profile,  List<SnAccountBadge> badges,  String? automatedId)?  $default,{required TResult orElse(),}) {final _that = this;
+switch (_that) {
+case _SnAccountReference() when $default != null:
+return $default(_that.id,_that.name,_that.nick,_that.profile,_that.badges,_that.automatedId);case _:
+  return orElse();
+
+}
+}
+/// A `switch`-like method, using callbacks.
+///
+/// As opposed to `map`, this offers destructuring.
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case Subclass(:final field):
+///     return ...;
+///   case Subclass2(:final field2):
+///     return ...;
+/// }
+/// ```
+
+@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( String id,  String name,  String nick,  SnAccountProfileRef? profile,  List<SnAccountBadge> badges,  String? automatedId)  $default,) {final _that = this;
+switch (_that) {
+case _SnAccountReference():
+return $default(_that.id,_that.name,_that.nick,_that.profile,_that.badges,_that.automatedId);}
+}
+/// A variant of `when` that fallback to returning `null`
+///
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case Subclass(:final field):
+///     return ...;
+///   case _:
+///     return null;
+/// }
+/// ```
+
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( String id,  String name,  String nick,  SnAccountProfileRef? profile,  List<SnAccountBadge> badges,  String? automatedId)?  $default,) {final _that = this;
+switch (_that) {
+case _SnAccountReference() when $default != null:
+return $default(_that.id,_that.name,_that.nick,_that.profile,_that.badges,_that.automatedId);case _:
+  return null;
+
+}
+}
+
+}
+
+/// @nodoc
+@JsonSerializable()
+
+class _SnAccountReference extends SnAccountReference {
+  const _SnAccountReference({required this.id, required this.name, required this.nick, this.profile, final  List<SnAccountBadge> badges = const [], this.automatedId}): _badges = badges,super._();
+  factory _SnAccountReference.fromJson(Map<String, dynamic> json) => _$SnAccountReferenceFromJson(json);
+
+@override final  String id;
+@override final  String name;
+@override final  String nick;
+@override final  SnAccountProfileRef? profile;
+ final  List<SnAccountBadge> _badges;
+@override@JsonKey() List<SnAccountBadge> get badges {
+  if (_badges is EqualUnmodifiableListView) return _badges;
+  // ignore: implicit_dynamic_type
+  return EqualUnmodifiableListView(_badges);
+}
+
+@override final  String? automatedId;
+
+/// Create a copy of SnAccountReference
+/// with the given fields replaced by the non-null parameter values.
+@override @JsonKey(includeFromJson: false, includeToJson: false)
+@pragma('vm:prefer-inline')
+_$SnAccountReferenceCopyWith<_SnAccountReference> get copyWith => __$SnAccountReferenceCopyWithImpl<_SnAccountReference>(this, _$identity);
+
+@override
+Map<String, dynamic> toJson() {
+  return _$SnAccountReferenceToJson(this, );
+}
+
+@override
+bool operator ==(Object other) {
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is _SnAccountReference&&(identical(other.id, id) || other.id == id)&&(identical(other.name, name) || other.name == name)&&(identical(other.nick, nick) || other.nick == nick)&&(identical(other.profile, profile) || other.profile == profile)&&const DeepCollectionEquality().equals(other._badges, _badges)&&(identical(other.automatedId, automatedId) || other.automatedId == automatedId));
+}
+
+@JsonKey(includeFromJson: false, includeToJson: false)
+@override
+int get hashCode => Object.hash(runtimeType,id,name,nick,profile,const DeepCollectionEquality().hash(_badges),automatedId);
+
+@override
+String toString() {
+  return 'SnAccountReference(id: $id, name: $name, nick: $nick, profile: $profile, badges: $badges, automatedId: $automatedId)';
+}
+
+
+}
+
+/// @nodoc
+abstract mixin class _$SnAccountReferenceCopyWith<$Res> implements $SnAccountReferenceCopyWith<$Res> {
+  factory _$SnAccountReferenceCopyWith(_SnAccountReference value, $Res Function(_SnAccountReference) _then) = __$SnAccountReferenceCopyWithImpl;
+@override @useResult
+$Res call({
+ String id, String name, String nick, SnAccountProfileRef? profile, List<SnAccountBadge> badges, String? automatedId
+});
+
+
+@override $SnAccountProfileRefCopyWith<$Res>? get profile;
+
+}
+/// @nodoc
+class __$SnAccountReferenceCopyWithImpl<$Res>
+    implements _$SnAccountReferenceCopyWith<$Res> {
+  __$SnAccountReferenceCopyWithImpl(this._self, this._then);
+
+  final _SnAccountReference _self;
+  final $Res Function(_SnAccountReference) _then;
+
+/// Create a copy of SnAccountReference
+/// with the given fields replaced by the non-null parameter values.
+@override @pragma('vm:prefer-inline') $Res call({Object? id = null,Object? name = null,Object? nick = null,Object? profile = freezed,Object? badges = null,Object? automatedId = freezed,}) {
+  return _then(_SnAccountReference(
+id: null == id ? _self.id : id // ignore: cast_nullable_to_non_nullable
+as String,name: null == name ? _self.name : name // ignore: cast_nullable_to_non_nullable
+as String,nick: null == nick ? _self.nick : nick // ignore: cast_nullable_to_non_nullable
+as String,profile: freezed == profile ? _self.profile : profile // ignore: cast_nullable_to_non_nullable
+as SnAccountProfileRef?,badges: null == badges ? _self._badges : badges // ignore: cast_nullable_to_non_nullable
+as List<SnAccountBadge>,automatedId: freezed == automatedId ? _self.automatedId : automatedId // ignore: cast_nullable_to_non_nullable
+as String?,
+  ));
+}
+
+/// Create a copy of SnAccountReference
+/// with the given fields replaced by the non-null parameter values.
+@override
+@pragma('vm:prefer-inline')
+$SnAccountProfileRefCopyWith<$Res>? get profile {
+    if (_self.profile == null) {
+    return null;
+  }
+
+  return $SnAccountProfileRefCopyWith<$Res>(_self.profile!, (value) {
+    return _then(_self.copyWith(profile: value));
+  });
+}
 }
 
 
@@ -4758,6 +6092,293 @@ topic: null == topic ? _self.topic : topic // ignore: cast_nullable_to_non_nulla
 as String,description: null == description ? _self.description : description // ignore: cast_nullable_to_non_nullable
 as String,isCustom: null == isCustom ? _self.isCustom : isCustom // ignore: cast_nullable_to_non_nullable
 as bool,
+  ));
+}
+
+
+}
+
+
+/// @nodoc
+mixin _$SnNotificationPushSubscription {
+
+ String get id; String get accountId; String? get appId; String get deviceId; String get deviceToken; String? get deviceName; SnNotificationPushSubscriptionProvider get provider; bool get isActivated; DateTime? get lastUsedAt; DateTime get createdAt; DateTime get updatedAt;
+/// Create a copy of SnNotificationPushSubscription
+/// with the given fields replaced by the non-null parameter values.
+@JsonKey(includeFromJson: false, includeToJson: false)
+@pragma('vm:prefer-inline')
+$SnNotificationPushSubscriptionCopyWith<SnNotificationPushSubscription> get copyWith => _$SnNotificationPushSubscriptionCopyWithImpl<SnNotificationPushSubscription>(this as SnNotificationPushSubscription, _$identity);
+
+  /// Serializes this SnNotificationPushSubscription to a JSON map.
+  Map<String, dynamic> toJson();
+
+
+@override
+bool operator ==(Object other) {
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is SnNotificationPushSubscription&&(identical(other.id, id) || other.id == id)&&(identical(other.accountId, accountId) || other.accountId == accountId)&&(identical(other.appId, appId) || other.appId == appId)&&(identical(other.deviceId, deviceId) || other.deviceId == deviceId)&&(identical(other.deviceToken, deviceToken) || other.deviceToken == deviceToken)&&(identical(other.deviceName, deviceName) || other.deviceName == deviceName)&&(identical(other.provider, provider) || other.provider == provider)&&(identical(other.isActivated, isActivated) || other.isActivated == isActivated)&&(identical(other.lastUsedAt, lastUsedAt) || other.lastUsedAt == lastUsedAt)&&(identical(other.createdAt, createdAt) || other.createdAt == createdAt)&&(identical(other.updatedAt, updatedAt) || other.updatedAt == updatedAt));
+}
+
+@JsonKey(includeFromJson: false, includeToJson: false)
+@override
+int get hashCode => Object.hash(runtimeType,id,accountId,appId,deviceId,deviceToken,deviceName,provider,isActivated,lastUsedAt,createdAt,updatedAt);
+
+@override
+String toString() {
+  return 'SnNotificationPushSubscription(id: $id, accountId: $accountId, appId: $appId, deviceId: $deviceId, deviceToken: $deviceToken, deviceName: $deviceName, provider: $provider, isActivated: $isActivated, lastUsedAt: $lastUsedAt, createdAt: $createdAt, updatedAt: $updatedAt)';
+}
+
+
+}
+
+/// @nodoc
+abstract mixin class $SnNotificationPushSubscriptionCopyWith<$Res>  {
+  factory $SnNotificationPushSubscriptionCopyWith(SnNotificationPushSubscription value, $Res Function(SnNotificationPushSubscription) _then) = _$SnNotificationPushSubscriptionCopyWithImpl;
+@useResult
+$Res call({
+ String id, String accountId, String? appId, String deviceId, String deviceToken, String? deviceName, SnNotificationPushSubscriptionProvider provider, bool isActivated, DateTime? lastUsedAt, DateTime createdAt, DateTime updatedAt
+});
+
+
+
+
+}
+/// @nodoc
+class _$SnNotificationPushSubscriptionCopyWithImpl<$Res>
+    implements $SnNotificationPushSubscriptionCopyWith<$Res> {
+  _$SnNotificationPushSubscriptionCopyWithImpl(this._self, this._then);
+
+  final SnNotificationPushSubscription _self;
+  final $Res Function(SnNotificationPushSubscription) _then;
+
+/// Create a copy of SnNotificationPushSubscription
+/// with the given fields replaced by the non-null parameter values.
+@pragma('vm:prefer-inline') @override $Res call({Object? id = null,Object? accountId = null,Object? appId = freezed,Object? deviceId = null,Object? deviceToken = null,Object? deviceName = freezed,Object? provider = null,Object? isActivated = null,Object? lastUsedAt = freezed,Object? createdAt = null,Object? updatedAt = null,}) {
+  return _then(_self.copyWith(
+id: null == id ? _self.id : id // ignore: cast_nullable_to_non_nullable
+as String,accountId: null == accountId ? _self.accountId : accountId // ignore: cast_nullable_to_non_nullable
+as String,appId: freezed == appId ? _self.appId : appId // ignore: cast_nullable_to_non_nullable
+as String?,deviceId: null == deviceId ? _self.deviceId : deviceId // ignore: cast_nullable_to_non_nullable
+as String,deviceToken: null == deviceToken ? _self.deviceToken : deviceToken // ignore: cast_nullable_to_non_nullable
+as String,deviceName: freezed == deviceName ? _self.deviceName : deviceName // ignore: cast_nullable_to_non_nullable
+as String?,provider: null == provider ? _self.provider : provider // ignore: cast_nullable_to_non_nullable
+as SnNotificationPushSubscriptionProvider,isActivated: null == isActivated ? _self.isActivated : isActivated // ignore: cast_nullable_to_non_nullable
+as bool,lastUsedAt: freezed == lastUsedAt ? _self.lastUsedAt : lastUsedAt // ignore: cast_nullable_to_non_nullable
+as DateTime?,createdAt: null == createdAt ? _self.createdAt : createdAt // ignore: cast_nullable_to_non_nullable
+as DateTime,updatedAt: null == updatedAt ? _self.updatedAt : updatedAt // ignore: cast_nullable_to_non_nullable
+as DateTime,
+  ));
+}
+
+}
+
+
+/// Adds pattern-matching-related methods to [SnNotificationPushSubscription].
+extension SnNotificationPushSubscriptionPatterns on SnNotificationPushSubscription {
+/// A variant of `map` that fallback to returning `orElse`.
+///
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case final Subclass value:
+///     return ...;
+///   case _:
+///     return orElse();
+/// }
+/// ```
+
+@optionalTypeArgs TResult maybeMap<TResult extends Object?>(TResult Function( _SnNotificationPushSubscription value)?  $default,{required TResult orElse(),}){
+final _that = this;
+switch (_that) {
+case _SnNotificationPushSubscription() when $default != null:
+return $default(_that);case _:
+  return orElse();
+
+}
+}
+/// A `switch`-like method, using callbacks.
+///
+/// Callbacks receives the raw object, upcasted.
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case final Subclass value:
+///     return ...;
+///   case final Subclass2 value:
+///     return ...;
+/// }
+/// ```
+
+@optionalTypeArgs TResult map<TResult extends Object?>(TResult Function( _SnNotificationPushSubscription value)  $default,){
+final _that = this;
+switch (_that) {
+case _SnNotificationPushSubscription():
+return $default(_that);}
+}
+/// A variant of `map` that fallback to returning `null`.
+///
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case final Subclass value:
+///     return ...;
+///   case _:
+///     return null;
+/// }
+/// ```
+
+@optionalTypeArgs TResult? mapOrNull<TResult extends Object?>(TResult? Function( _SnNotificationPushSubscription value)?  $default,){
+final _that = this;
+switch (_that) {
+case _SnNotificationPushSubscription() when $default != null:
+return $default(_that);case _:
+  return null;
+
+}
+}
+/// A variant of `when` that fallback to an `orElse` callback.
+///
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case Subclass(:final field):
+///     return ...;
+///   case _:
+///     return orElse();
+/// }
+/// ```
+
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( String id,  String accountId,  String? appId,  String deviceId,  String deviceToken,  String? deviceName,  SnNotificationPushSubscriptionProvider provider,  bool isActivated,  DateTime? lastUsedAt,  DateTime createdAt,  DateTime updatedAt)?  $default,{required TResult orElse(),}) {final _that = this;
+switch (_that) {
+case _SnNotificationPushSubscription() when $default != null:
+return $default(_that.id,_that.accountId,_that.appId,_that.deviceId,_that.deviceToken,_that.deviceName,_that.provider,_that.isActivated,_that.lastUsedAt,_that.createdAt,_that.updatedAt);case _:
+  return orElse();
+
+}
+}
+/// A `switch`-like method, using callbacks.
+///
+/// As opposed to `map`, this offers destructuring.
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case Subclass(:final field):
+///     return ...;
+///   case Subclass2(:final field2):
+///     return ...;
+/// }
+/// ```
+
+@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( String id,  String accountId,  String? appId,  String deviceId,  String deviceToken,  String? deviceName,  SnNotificationPushSubscriptionProvider provider,  bool isActivated,  DateTime? lastUsedAt,  DateTime createdAt,  DateTime updatedAt)  $default,) {final _that = this;
+switch (_that) {
+case _SnNotificationPushSubscription():
+return $default(_that.id,_that.accountId,_that.appId,_that.deviceId,_that.deviceToken,_that.deviceName,_that.provider,_that.isActivated,_that.lastUsedAt,_that.createdAt,_that.updatedAt);}
+}
+/// A variant of `when` that fallback to returning `null`
+///
+/// It is equivalent to doing:
+/// ```dart
+/// switch (sealedClass) {
+///   case Subclass(:final field):
+///     return ...;
+///   case _:
+///     return null;
+/// }
+/// ```
+
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( String id,  String accountId,  String? appId,  String deviceId,  String deviceToken,  String? deviceName,  SnNotificationPushSubscriptionProvider provider,  bool isActivated,  DateTime? lastUsedAt,  DateTime createdAt,  DateTime updatedAt)?  $default,) {final _that = this;
+switch (_that) {
+case _SnNotificationPushSubscription() when $default != null:
+return $default(_that.id,_that.accountId,_that.appId,_that.deviceId,_that.deviceToken,_that.deviceName,_that.provider,_that.isActivated,_that.lastUsedAt,_that.createdAt,_that.updatedAt);case _:
+  return null;
+
+}
+}
+
+}
+
+/// @nodoc
+@JsonSerializable()
+
+class _SnNotificationPushSubscription implements SnNotificationPushSubscription {
+  const _SnNotificationPushSubscription({required this.id, required this.accountId, this.appId, required this.deviceId, required this.deviceToken, this.deviceName, required this.provider, required this.isActivated, this.lastUsedAt, required this.createdAt, required this.updatedAt});
+  factory _SnNotificationPushSubscription.fromJson(Map<String, dynamic> json) => _$SnNotificationPushSubscriptionFromJson(json);
+
+@override final  String id;
+@override final  String accountId;
+@override final  String? appId;
+@override final  String deviceId;
+@override final  String deviceToken;
+@override final  String? deviceName;
+@override final  SnNotificationPushSubscriptionProvider provider;
+@override final  bool isActivated;
+@override final  DateTime? lastUsedAt;
+@override final  DateTime createdAt;
+@override final  DateTime updatedAt;
+
+/// Create a copy of SnNotificationPushSubscription
+/// with the given fields replaced by the non-null parameter values.
+@override @JsonKey(includeFromJson: false, includeToJson: false)
+@pragma('vm:prefer-inline')
+_$SnNotificationPushSubscriptionCopyWith<_SnNotificationPushSubscription> get copyWith => __$SnNotificationPushSubscriptionCopyWithImpl<_SnNotificationPushSubscription>(this, _$identity);
+
+@override
+Map<String, dynamic> toJson() {
+  return _$SnNotificationPushSubscriptionToJson(this, );
+}
+
+@override
+bool operator ==(Object other) {
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is _SnNotificationPushSubscription&&(identical(other.id, id) || other.id == id)&&(identical(other.accountId, accountId) || other.accountId == accountId)&&(identical(other.appId, appId) || other.appId == appId)&&(identical(other.deviceId, deviceId) || other.deviceId == deviceId)&&(identical(other.deviceToken, deviceToken) || other.deviceToken == deviceToken)&&(identical(other.deviceName, deviceName) || other.deviceName == deviceName)&&(identical(other.provider, provider) || other.provider == provider)&&(identical(other.isActivated, isActivated) || other.isActivated == isActivated)&&(identical(other.lastUsedAt, lastUsedAt) || other.lastUsedAt == lastUsedAt)&&(identical(other.createdAt, createdAt) || other.createdAt == createdAt)&&(identical(other.updatedAt, updatedAt) || other.updatedAt == updatedAt));
+}
+
+@JsonKey(includeFromJson: false, includeToJson: false)
+@override
+int get hashCode => Object.hash(runtimeType,id,accountId,appId,deviceId,deviceToken,deviceName,provider,isActivated,lastUsedAt,createdAt,updatedAt);
+
+@override
+String toString() {
+  return 'SnNotificationPushSubscription(id: $id, accountId: $accountId, appId: $appId, deviceId: $deviceId, deviceToken: $deviceToken, deviceName: $deviceName, provider: $provider, isActivated: $isActivated, lastUsedAt: $lastUsedAt, createdAt: $createdAt, updatedAt: $updatedAt)';
+}
+
+
+}
+
+/// @nodoc
+abstract mixin class _$SnNotificationPushSubscriptionCopyWith<$Res> implements $SnNotificationPushSubscriptionCopyWith<$Res> {
+  factory _$SnNotificationPushSubscriptionCopyWith(_SnNotificationPushSubscription value, $Res Function(_SnNotificationPushSubscription) _then) = __$SnNotificationPushSubscriptionCopyWithImpl;
+@override @useResult
+$Res call({
+ String id, String accountId, String? appId, String deviceId, String deviceToken, String? deviceName, SnNotificationPushSubscriptionProvider provider, bool isActivated, DateTime? lastUsedAt, DateTime createdAt, DateTime updatedAt
+});
+
+
+
+
+}
+/// @nodoc
+class __$SnNotificationPushSubscriptionCopyWithImpl<$Res>
+    implements _$SnNotificationPushSubscriptionCopyWith<$Res> {
+  __$SnNotificationPushSubscriptionCopyWithImpl(this._self, this._then);
+
+  final _SnNotificationPushSubscription _self;
+  final $Res Function(_SnNotificationPushSubscription) _then;
+
+/// Create a copy of SnNotificationPushSubscription
+/// with the given fields replaced by the non-null parameter values.
+@override @pragma('vm:prefer-inline') $Res call({Object? id = null,Object? accountId = null,Object? appId = freezed,Object? deviceId = null,Object? deviceToken = null,Object? deviceName = freezed,Object? provider = null,Object? isActivated = null,Object? lastUsedAt = freezed,Object? createdAt = null,Object? updatedAt = null,}) {
+  return _then(_SnNotificationPushSubscription(
+id: null == id ? _self.id : id // ignore: cast_nullable_to_non_nullable
+as String,accountId: null == accountId ? _self.accountId : accountId // ignore: cast_nullable_to_non_nullable
+as String,appId: freezed == appId ? _self.appId : appId // ignore: cast_nullable_to_non_nullable
+as String?,deviceId: null == deviceId ? _self.deviceId : deviceId // ignore: cast_nullable_to_non_nullable
+as String,deviceToken: null == deviceToken ? _self.deviceToken : deviceToken // ignore: cast_nullable_to_non_nullable
+as String,deviceName: freezed == deviceName ? _self.deviceName : deviceName // ignore: cast_nullable_to_non_nullable
+as String?,provider: null == provider ? _self.provider : provider // ignore: cast_nullable_to_non_nullable
+as SnNotificationPushSubscriptionProvider,isActivated: null == isActivated ? _self.isActivated : isActivated // ignore: cast_nullable_to_non_nullable
+as bool,lastUsedAt: freezed == lastUsedAt ? _self.lastUsedAt : lastUsedAt // ignore: cast_nullable_to_non_nullable
+as DateTime?,createdAt: null == createdAt ? _self.createdAt : createdAt // ignore: cast_nullable_to_non_nullable
+as DateTime,updatedAt: null == updatedAt ? _self.updatedAt : updatedAt // ignore: cast_nullable_to_non_nullable
+as DateTime,
   ));
 }
 

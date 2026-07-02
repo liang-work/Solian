@@ -48,8 +48,8 @@ class RealmFormContent extends HookConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final submitting = useState(false);
-    final picture = useState<SnCloudFile?>(null);
-    final background = useState<SnCloudFile?>(null);
+    final picture = useState<IDisplayableCloudFile?>(null);
+    final background = useState<IDisplayableCloudFile?>(null);
     final isPublic = useState(true);
     final isCommunity = useState(false);
 
@@ -259,8 +259,11 @@ class RealmFormContent extends HookConsumerWidget {
                 controller: slugController,
                 decoration: InputDecoration(
                   labelText: 'slug'.tr(),
-                  helperText: 'slugHint'.tr(),
+                  helperText: slug != null
+                      ? 'usernameCannotChangeHint'.tr()
+                      : 'slugHint'.tr(),
                 ),
+                readOnly: slug != null,
                 onTapOutside: (_) =>
                     FocusManager.instance.primaryFocus?.unfocus(),
               ),
@@ -315,17 +318,15 @@ class RealmFormContent extends HookConsumerWidget {
                   ],
                 ),
               ),
-              if (!isInSheet) ...[
-                const SizedBox(height: 16),
-                Align(
-                  alignment: Alignment.centerRight,
-                  child: TextButton.icon(
-                    onPressed: submitting.value ? null : performAction,
-                    label: Text('saveChanges'.tr()),
-                    icon: const Icon(Symbols.save),
-                  ),
+              const SizedBox(height: 16),
+              Align(
+                alignment: Alignment.centerRight,
+                child: TextButton.icon(
+                  onPressed: submitting.value ? null : performAction,
+                  label: Text((slug == null ? 'create' : 'saveChanges').tr()),
+                  icon: Icon(slug == null ? Symbols.add : Symbols.save),
                 ),
-              ],
+              ),
             ],
           ).padding(horizontal: 24),
         ),

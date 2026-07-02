@@ -11,7 +11,11 @@ _SnWallet _$SnWalletFromJson(Map<String, dynamic> json) => _SnWallet(
   pockets: (json['pockets'] as List<dynamic>)
       .map((e) => SnWalletPocket.fromJson(e as Map<String, dynamic>))
       .toList(),
-  accountId: json['account_id'] as String,
+  accountId: json['account_id'] as String?,
+  realmId: json['realm_id'] as String?,
+  name: json['name'] as String,
+  isPrimary: json['is_primary'] as bool? ?? false,
+  publicId: json['public_id'] as String?,
   account: json['account'] == null
       ? null
       : SnAccount.fromJson(json['account'] as Map<String, dynamic>),
@@ -26,6 +30,10 @@ Map<String, dynamic> _$SnWalletToJson(_SnWallet instance) => <String, dynamic>{
   'id': instance.id,
   'pockets': instance.pockets.map((e) => e.toJson()).toList(),
   'account_id': instance.accountId,
+  'realm_id': instance.realmId,
+  'name': instance.name,
+  'is_primary': instance.isPrimary,
+  'public_id': instance.publicId,
   'account': instance.account?.toJson(),
   'created_at': instance.createdAt.toIso8601String(),
   'updated_at': instance.updatedAt.toIso8601String(),
@@ -71,6 +79,7 @@ _SnWalletPocket _$SnWalletPocketFromJson(Map<String, dynamic> json) =>
       id: json['id'] as String,
       currency: json['currency'] as String,
       amount: (json['amount'] as num).toDouble(),
+      heldAmount: (json['held_amount'] as num?)?.toDouble() ?? 0,
       walletId: json['wallet_id'] as String,
       createdAt: DateTime.parse(json['created_at'] as String),
       updatedAt: DateTime.parse(json['updated_at'] as String),
@@ -84,6 +93,7 @@ Map<String, dynamic> _$SnWalletPocketToJson(_SnWalletPocket instance) =>
       'id': instance.id,
       'currency': instance.currency,
       'amount': instance.amount,
+      'held_amount': instance.heldAmount,
       'wallet_id': instance.walletId,
       'created_at': instance.createdAt.toIso8601String(),
       'updated_at': instance.updatedAt.toIso8601String(),
@@ -97,6 +107,18 @@ _SnTransaction _$SnTransactionFromJson(Map<String, dynamic> json) =>
       amount: (json['amount'] as num).toDouble(),
       remarks: json['remarks'] as String?,
       type: (json['type'] as num).toInt(),
+      status: (json['status'] as num?)?.toInt() ?? 2,
+      isFrozen: json['is_frozen'] as bool? ?? false,
+      requireConfirmation: json['require_confirmation'] as bool? ?? false,
+      frozenAt: json['frozen_at'] == null
+          ? null
+          : DateTime.parse(json['frozen_at'] as String),
+      expiresAt: json['expires_at'] == null
+          ? null
+          : DateTime.parse(json['expires_at'] as String),
+      confirmedAt: json['confirmed_at'] == null
+          ? null
+          : DateTime.parse(json['confirmed_at'] as String),
       payerWalletId: json['payer_wallet_id'] as String?,
       payerWallet: json['payer_wallet'] == null
           ? null
@@ -119,6 +141,12 @@ Map<String, dynamic> _$SnTransactionToJson(_SnTransaction instance) =>
       'amount': instance.amount,
       'remarks': instance.remarks,
       'type': instance.type,
+      'status': instance.status,
+      'is_frozen': instance.isFrozen,
+      'require_confirmation': instance.requireConfirmation,
+      'frozen_at': instance.frozenAt?.toIso8601String(),
+      'expires_at': instance.expiresAt?.toIso8601String(),
+      'confirmed_at': instance.confirmedAt?.toIso8601String(),
       'payer_wallet_id': instance.payerWalletId,
       'payer_wallet': instance.payerWallet?.toJson(),
       'payee_wallet_id': instance.payeeWalletId,
@@ -137,6 +165,7 @@ _SnWalletSubscription _$SnWalletSubscriptionFromJson(
       ? null
       : DateTime.parse(json['ended_at'] as String),
   identifier: json['identifier'] as String,
+  groupIdentifier: json['group_identifier'] as String?,
   isActive: json['is_active'] as bool? ?? true,
   isFreeTrial: json['is_free_trial'] as bool? ?? false,
   status: (json['status'] as num?)?.toInt() ?? 1,
@@ -153,6 +182,7 @@ _SnWalletSubscription _$SnWalletSubscriptionFromJson(
       ? null
       : SnAccount.fromJson(json['account'] as Map<String, dynamic>),
   isAvailable: json['is_available'] as bool? ?? true,
+  isPendingActivation: json['is_pending_activation'] as bool? ?? false,
   finalPrice: (json['final_price'] as num?)?.toDouble(),
   createdAt: DateTime.parse(json['created_at'] as String),
   updatedAt: DateTime.parse(json['updated_at'] as String),
@@ -168,6 +198,7 @@ Map<String, dynamic> _$SnWalletSubscriptionToJson(
   'begun_at': instance.begunAt.toIso8601String(),
   'ended_at': instance.endedAt?.toIso8601String(),
   'identifier': instance.identifier,
+  'group_identifier': instance.groupIdentifier,
   'is_active': instance.isActive,
   'is_free_trial': instance.isFreeTrial,
   'status': instance.status,
@@ -180,6 +211,7 @@ Map<String, dynamic> _$SnWalletSubscriptionToJson(
   'account_id': instance.accountId,
   'account': instance.account?.toJson(),
   'is_available': instance.isAvailable,
+  'is_pending_activation': instance.isPendingActivation,
   'final_price': instance.finalPrice,
   'created_at': instance.createdAt.toIso8601String(),
   'updated_at': instance.updatedAt.toIso8601String(),
@@ -324,6 +356,14 @@ _SnWalletFund _$SnWalletFundFromJson(Map<String, dynamic> json) =>
       creatorAccount: json['creator_account'] == null
           ? null
           : SnAccount.fromJson(json['creator_account'] as Map<String, dynamic>),
+      isRaising: json['is_raising'] as bool? ?? false,
+      targetAmount: (json['target_amount'] as num?)?.toDouble() ?? 0,
+      contributionType: (json['contribution_type'] as num?)?.toInt() ?? 0,
+      contributionAmount:
+          (json['contribution_amount'] as num?)?.toDouble() ?? 0,
+      deadlineAt: json['deadline_at'] == null
+          ? null
+          : DateTime.parse(json['deadline_at'] as String),
       expiredAt: DateTime.parse(json['expired_at'] as String),
       recipients: (json['recipients'] as List<dynamic>)
           .map((e) => SnWalletFundRecipient.fromJson(e as Map<String, dynamic>))
@@ -348,6 +388,11 @@ Map<String, dynamic> _$SnWalletFundToJson(_SnWalletFund instance) =>
       'message': instance.message,
       'creator_account_id': instance.creatorAccountId,
       'creator_account': instance.creatorAccount?.toJson(),
+      'is_raising': instance.isRaising,
+      'target_amount': instance.targetAmount,
+      'contribution_type': instance.contributionType,
+      'contribution_amount': instance.contributionAmount,
+      'deadline_at': instance.deadlineAt?.toIso8601String(),
       'expired_at': instance.expiredAt.toIso8601String(),
       'recipients': instance.recipients.map((e) => e.toJson()).toList(),
       'is_open': instance.isOpen,
@@ -474,6 +519,14 @@ _SnSubscriptionGroup _$SnSubscriptionGroupFromJson(Map<String, dynamic> json) =>
       catalog: SnSubscriptionGroupCatalog.fromJson(
         json['catalog'] as Map<String, dynamic>,
       ),
+      current: json['current'] == null
+          ? null
+          : SnActiveSubscription.fromJson(
+              json['current'] as Map<String, dynamic>,
+            ),
+      next: json['next'] == null
+          ? null
+          : SnActiveSubscription.fromJson(json['next'] as Map<String, dynamic>),
       subscriptions: (json['subscriptions'] as List<dynamic>)
           .map((e) => SnActiveSubscription.fromJson(e as Map<String, dynamic>))
           .toList(),
@@ -484,6 +537,8 @@ Map<String, dynamic> _$SnSubscriptionGroupToJson(
 ) => <String, dynamic>{
   'group_identifier': instance.groupIdentifier,
   'catalog': instance.catalog.toJson(),
+  'current': instance.current?.toJson(),
+  'next': instance.next?.toJson(),
   'subscriptions': instance.subscriptions.map((e) => e.toJson()).toList(),
 };
 

@@ -9,8 +9,8 @@ import 'package:island/core/widgets/content/file_viewer_contents.dart';
 import 'package:island/core/config.dart';
 import 'package:island/core/services/time.dart';
 import 'package:island/core/utils/format.dart';
-import 'package:island/drive/drive_service.dart';
 import 'package:island/route.gr.dart';
+import 'package:island/shared/widgets/content/audio.dart';
 import 'package:island/shared/widgets/content/image.dart';
 import 'package:island/core/widgets/content/profile_decoration.dart';
 import 'package:material_symbols_icons/symbols.dart';
@@ -18,14 +18,28 @@ import 'package:styled_widget/styled_widget.dart';
 import 'dart:math' as math;
 import 'dart:ui' as ui;
 import 'package:island/core/data_saving_gate.dart';
+import 'package:island/core/network.dart';
+import 'package:island/core/utils/file_icon_utils.dart';
+import 'package:island/drive/widgets/file_list_view.dart' show FileListViewMode;
+import 'package:island/shared/widgets/layouts/sheet_scaffold.dart';
+import 'package:flutter_staggered_grid_view/flutter_staggered_grid_view.dart';
 import 'package:solar_network_sdk/solar_network_sdk.dart';
 
+final folderChildrenProvider = FutureProvider.family<List<SnCloudFile>, String>(
+  (ref, parentId) async {
+    final driveApi = ref.read(solarNetworkClientProvider).drive;
+    final result = await driveApi.listFolderChildren(parentId);
+    return result.items;
+  },
+);
+
 class CloudFileWidget extends HookConsumerWidget {
-  final SnCloudFile item;
+  final IDisplayableCloudFile item;
   final BoxFit fit;
   final String? heroTag;
   final bool noBlurhash;
   final bool useInternalGate;
+  final SnPost? sourcePost;
   const CloudFileWidget({
     super.key,
     required this.item,
@@ -33,6 +47,7 @@ class CloudFileWidget extends HookConsumerWidget {
     this.heroTag,
     this.noBlurhash = false,
     this.useInternalGate = true,
+    this.sourcePost,
   });
 
   @override
@@ -41,23 +56,19 @@ class CloudFileWidget extends HookConsumerWidget {
       appSettingsProvider.select((s) => s.dataSavingMode),
     );
     final serverUrl = ref.watch(serverUrlProvider);
-    final uri = item.url ?? '$serverUrl/drive/files/${item.id}';
+    final uri = item.storageUrl ?? '$serverUrl/drive/files/${item.id}';
 
     final unlocked = useState(false);
 
-    final meta = item.fileMeta is Map ? (item.fileMeta as Map) : const {};
-    final isEncrypted = DriveE2eeFileEnvelope.isEncryptedFile(item);
-    final e2eeMeta = meta['e2ee'] is Map
-        ? Map<String, dynamic>.from(meta['e2ee'] as Map)
-        : const <String, dynamic>{};
-    final e2eeScheme = e2eeMeta['scheme']?.toString();
-    final blurHash = noBlurhash ? null : (meta['blur'] as String?);
-    var ratio = meta['ratio'] is num ? (meta['ratio'] as num).toDouble() : 1.0;
+    final blurHash = noBlurhash ? null : item.blurhash;
+    var ratio = item.ratio ?? 1.0;
     if (ratio == 0) ratio = 1.0;
 
     Widget cloudImage() =>
         UniversalImage(uri: uri, blurHash: blurHash, fit: fit);
-    Widget cloudVideo() => CloudVideoWidget(item: item);
+    Widget cloudVideo() => CloudVideoWidget(item: item, sourcePost: sourcePost);
+
+    Widget cloudAudio() => UniversalAudio(uri: uri, filename: item.name);
 
     Widget dataPlaceHolder(IconData icon) => _DataSavingPlaceholder(
       icon: icon,
@@ -66,11 +77,7 @@ class CloudFileWidget extends HookConsumerWidget {
       },
     );
 
-    if (isEncrypted) {
-      return _EncryptedFileCard(item: item, scheme: e2eeScheme);
-    }
-
-    if (item.mimeType?.startsWith('text/') == true) {
+    if (item.mimeType.startsWith('text/') == true) {
       return Container(
         height: 400,
         decoration: BoxDecoration(
@@ -151,7 +158,9 @@ class CloudFileWidget extends HookConsumerWidget {
                         size: 16,
                       ),
                       onPressed: () {
-                        context.router.push(FileDetailRoute(item: item));
+                        if (item is SnCloudFile) {
+                          context.router.push(FileDetailRoute(id: item.id));
+                        }
                       },
                       padding: EdgeInsets.all(4),
                       constraints: const BoxConstraints(),
@@ -166,7 +175,9 @@ class CloudFileWidget extends HookConsumerWidget {
       );
     }
 
-    var content = switch (item.mimeType?.split('/').firstOrNull) {
+    final isFolderItem = item.isFolder;
+
+    var content = switch (item.mimeType.split('/').firstOrNull) {
       'image' => AspectRatio(
         aspectRatio: ratio,
         child: (useInternalGate && dataSaving && !unlocked.value)
@@ -179,61 +190,76 @@ class CloudFileWidget extends HookConsumerWidget {
             ? dataPlaceHolder(Symbols.play_arrow)
             : cloudVideo(),
       ),
-      'audio' => AudioFileContent(item: item, uri: uri),
-      _ => Builder(
-        builder: (context) {
-          return Container(
-            decoration: BoxDecoration(
-              border: Border.all(
-                color: Theme.of(context).colorScheme.outline,
-                width: 1,
-              ),
-              borderRadius: BorderRadius.circular(16),
-            ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(
-                  Symbols.insert_drive_file,
-                  size: 48,
-                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+      'audio' => () {
+        if (useInternalGate && dataSaving && !unlocked.value) {
+          return dataPlaceHolder(Symbols.audio_file);
+        }
+        return cloudAudio();
+      }(),
+      _ => () {
+        if (useInternalGate && dataSaving && !unlocked.value) {
+          return dataPlaceHolder(
+            isFolderItem ? Symbols.folder : Symbols.insert_drive_file,
+          );
+        }
+
+        final icon = isFolderItem ? Symbols.folder : Symbols.insert_drive_file;
+        final subtitle = isFolderItem
+            ? Text('folder'.tr(), style: Theme.of(context).textTheme.bodySmall)
+            : Text(
+                formatFileSize(item.size),
+                style: Theme.of(context).textTheme.bodySmall,
+              );
+
+        Widget card = Card(
+          color: Theme.of(context).colorScheme.surfaceContainerLowest,
+          child: Row(
+            children: [
+              Container(
+                width: 48,
+                height: 48,
+                decoration: BoxDecoration(
+                  color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                  borderRadius: BorderRadius.circular(12),
                 ),
-                const Gap(8),
-                Text(
-                  item.name,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    fontSize: 14,
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
-                  ),
+                child: Icon(
+                  icon,
+                  size: 28,
+                  color: isFolderItem
+                      ? Theme.of(context).colorScheme.tertiary
+                      : Theme.of(context).colorScheme.primary,
                 ),
-                Text(
-                  formatFileSize(item.size),
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
-                  ),
-                ),
-                const Gap(8),
-                Row(
+              ).center(),
+              const Gap(16),
+              Expanded(
+                child: Column(
                   mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    TextButton.icon(
-                      onPressed: () {
-                        context.router.push(FileDetailRoute(item: item));
-                      },
-                      icon: const Icon(Symbols.info),
-                      label: Text('info').tr(),
+                    Text(
+                      item.name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.titleSmall,
                     ),
+                    subtitle,
                   ],
                 ),
-              ],
-            ).padding(all: 8),
-          );
-        },
-      ),
+              ),
+              IconButton(
+                icon: const Icon(Symbols.info),
+                onPressed: () {
+                  if (item is SnCloudFile) {
+                    context.router.push(FileDetailRoute(id: item.id));
+                  }
+                },
+              ),
+            ],
+          ).padding(horizontal: 16, vertical: 12),
+        );
+
+        return card;
+      }(),
     };
 
     if (heroTag != null) {
@@ -241,75 +267,6 @@ class CloudFileWidget extends HookConsumerWidget {
     }
 
     return content;
-  }
-}
-
-class _EncryptedFileCard extends ConsumerWidget {
-  final SnCloudFile item;
-  final String? scheme;
-  const _EncryptedFileCard({required this.item, required this.scheme});
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final label = (scheme != null && scheme!.isNotEmpty)
-        ? 'Encrypted file ($scheme)'
-        : 'Encrypted file';
-    return Container(
-      decoration: BoxDecoration(
-        border: Border.all(color: Theme.of(context).colorScheme.outline),
-        borderRadius: BorderRadius.circular(16),
-        color: Theme.of(context).colorScheme.surfaceContainerHighest,
-      ),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(
-            Symbols.lock,
-            size: 42,
-            color: Theme.of(context).colorScheme.primary,
-          ),
-          const Gap(8),
-          Text(
-            item.name,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: Theme.of(context).textTheme.titleSmall,
-            textAlign: TextAlign.center,
-          ),
-          Text(
-            label,
-            style: Theme.of(context).textTheme.bodySmall,
-            textAlign: TextAlign.center,
-          ),
-          Text(
-            formatFileSize(item.size),
-            style: Theme.of(context).textTheme.bodySmall,
-          ),
-          const Gap(8),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextButton.icon(
-                onPressed: () => ref
-                    .read(driveFileDownloaderProvider)
-                    .downloadWithProgress(item),
-                icon: const Icon(Symbols.download),
-                label: Text('download').tr(),
-              ),
-              TextButton.icon(
-                onPressed: () {
-                  context.router.push(FileDetailRoute(item: item));
-                },
-                icon: const Icon(Symbols.info),
-                label: Text('info').tr(),
-              ),
-            ],
-          ),
-        ],
-      ).padding(all: 12),
-    );
   }
 }
 
@@ -347,27 +304,60 @@ class _DataSavingPlaceholder extends StatelessWidget {
 }
 
 class CloudVideoWidget extends HookConsumerWidget {
-  final SnCloudFile item;
-  const CloudVideoWidget({super.key, required this.item});
+  final IDisplayableCloudFile item;
+  final SnPost? sourcePost;
+  const CloudVideoWidget({super.key, required this.item, this.sourcePost});
+
+  Duration? _parseDuration(Map<String, dynamic> formatMeta) {
+    final rawDuration = formatMeta['duration'];
+    final seconds = rawDuration is num
+        ? rawDuration.toDouble()
+        : double.tryParse(rawDuration?.toString() ?? '');
+    if (seconds == null || seconds <= 0) return null;
+    return Duration(milliseconds: (seconds * 1000).round());
+  }
+
+  String? _formatBitrate(Map<String, dynamic> formatMeta) {
+    final rawBitrate = formatMeta['bit_rate'];
+    final bitrate = rawBitrate is num
+        ? rawBitrate.toInt()
+        : int.tryParse(rawBitrate?.toString() ?? '');
+    if (bitrate == null || bitrate <= 0) return null;
+    return '${(bitrate / 1000).round()} Kbps';
+  }
+
+  String? _formatResolution(Map<String, dynamic> rootMeta) {
+    final width = rootMeta['width'];
+    final height = rootMeta['height'];
+    final parsedWidth = width is num
+        ? width.toInt()
+        : int.tryParse(width?.toString() ?? '');
+    final parsedHeight = height is num
+        ? height.toInt()
+        : int.tryParse(height?.toString() ?? '');
+    if (parsedWidth == null ||
+        parsedHeight == null ||
+        parsedWidth <= 0 ||
+        parsedHeight <= 0) {
+      return null;
+    }
+    return '$parsedWidth×$parsedHeight';
+  }
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    if (DriveE2eeFileEnvelope.isEncryptedFile(item)) {
-      return _EncryptedFileCard(
-        item: item,
-        scheme: (item.fileMeta is Map && (item.fileMeta as Map)['e2ee'] is Map)
-            ? ((item.fileMeta as Map)['e2ee'] as Map)['scheme']?.toString()
-            : null,
-      );
-    }
-
     final serverUrl = ref.watch(serverUrlProvider);
-    final uri = '$serverUrl/drive/files/${item.id}';
-
-    var ratio = item.fileMeta?['ratio'] is num
-        ? item.fileMeta!['ratio'].toDouble()
-        : 1.0;
-    if (ratio == 0) ratio = 1.0;
+    final uri = item.storageUrl ?? '$serverUrl/drive/files/${item.id}';
+    final rootMeta = Map<String, dynamic>.from(item.fileMeta as Map);
+    final mediaMeta = rootMeta['media'] is Map
+        ? Map<String, dynamic>.from(rootMeta['media'] as Map)
+        : <String, dynamic>{};
+    final formatMeta = mediaMeta['format'] is Map
+        ? Map<String, dynamic>.from(mediaMeta['format'] as Map)
+        : <String, dynamic>{};
+    final duration = _parseDuration(formatMeta);
+    final bitrate = _formatBitrate(formatMeta);
+    final resolution = _formatResolution(rootMeta);
 
     return GestureDetector(
       child: Stack(
@@ -423,13 +413,9 @@ class CloudVideoWidget extends HookConsumerWidget {
                 Wrap(
                   spacing: 8,
                   children: [
-                    if (item.fileMeta?['duration'] != null)
+                    if (resolution != null)
                       Text(
-                        Duration(
-                          milliseconds:
-                              ((item.fileMeta?['duration'] as num) * 1000)
-                                  .toInt(),
-                        ).formatDuration(),
+                        resolution,
                         style: TextStyle(
                           color: Colors.white,
                           shadows: [
@@ -442,9 +428,9 @@ class CloudVideoWidget extends HookConsumerWidget {
                           ],
                         ),
                       ),
-                    if (item.fileMeta?['bit_rate'] != null)
+                    if (duration != null)
                       Text(
-                        '${int.parse(item.fileMeta?['bit_rate'] as String) ~/ 1000} Kbps',
+                        duration.formatDuration(),
                         style: TextStyle(
                           color: Colors.white,
                           shadows: [
@@ -457,6 +443,8 @@ class CloudVideoWidget extends HookConsumerWidget {
                           ],
                         ),
                       ),
+                    if (bitrate != null)
+                      Text(bitrate, style: _videoMetaStyle()),
                   ],
                 ),
                 Text(
@@ -482,15 +470,29 @@ class CloudVideoWidget extends HookConsumerWidget {
         ],
       ),
       onTap: () {
-        context.router.push(FileDetailRoute(item: item));
+        context.router.push(
+          FileDetailRoute(id: item.id, sourcePost: sourcePost),
+        );
       },
     );
   }
+
+  TextStyle _videoMetaStyle() => const TextStyle(
+    color: Colors.white,
+    shadows: [
+      BoxShadow(
+        color: Colors.black54,
+        offset: Offset(1, 1),
+        spreadRadius: 8,
+        blurRadius: 8,
+      ),
+    ],
+  );
 }
 
 class CloudImageWidget extends ConsumerWidget {
   final String? fileId;
-  final SnCloudFile? file;
+  final IDisplayableCloudFile? file;
   final BoxFit fit;
   final double aspectRatio;
   final String? blurHash;
@@ -508,7 +510,8 @@ class CloudImageWidget extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final serverUrl = ref.watch(serverUrlProvider);
-    final uri = file?.url ?? '$serverUrl/drive/files/${file?.id ?? fileId}';
+    final uri =
+        file?.storageUrl ?? '$serverUrl/drive/files/${file?.id ?? fileId}';
 
     return AspectRatio(
       aspectRatio: aspectRatio,
@@ -523,12 +526,12 @@ class CloudImageWidget extends ConsumerWidget {
   }
 
   static ImageProvider provider({
-    required SnCloudFile file,
+    required IDisplayableCloudFile file,
     required String serverUrl,
     bool original = false,
   }) {
     final uri =
-        file.url ??
+        file.storageUrl ??
         (original
             ? '$serverUrl/drive/files/${file.id}?original=true'
             : '$serverUrl/drive/files/${file.id}');
@@ -538,7 +541,7 @@ class CloudImageWidget extends ConsumerWidget {
 
 class ProfilePictureWidget extends ConsumerWidget {
   final String? fileId;
-  final SnCloudFile? file;
+  final IDisplayableCloudFile? file;
   final double radius;
   final double? borderRadius;
   final IconData? fallbackIcon;
@@ -560,8 +563,7 @@ class ProfilePictureWidget extends ConsumerWidget {
     final serverUrl = ref.watch(serverUrlProvider);
     final String? id = file?.id ?? fileId;
 
-    final meta = file?.fileMeta is Map ? (file!.fileMeta as Map) : const {};
-    final blurHash = meta['blur'] as String?;
+    final blurHash = file?.blurhash;
 
     final fallback = Icon(
       fallbackIcon ?? Symbols.account_circle,
@@ -612,7 +614,7 @@ class ProfilePictureWidget extends ConsumerWidget {
 }
 
 class SplitAvatarWidget extends ConsumerWidget {
-  final List<SnCloudFile?> files;
+  final List<IDisplayableCloudFile?> files;
   final double radius;
   final IconData fallbackIcon;
   final Color? fallbackColor;
@@ -735,7 +737,7 @@ class SplitAvatarWidget extends ConsumerWidget {
 
   Widget _buildQuadrant(
     BuildContext context,
-    SnCloudFile? file,
+    IDisplayableCloudFile? file,
     WidgetRef ref,
     double radius,
   ) {
@@ -758,6 +760,410 @@ class SplitAvatarWidget extends ConsumerWidget {
     return SizedBox(
       width: radius,
       child: UniversalImage(uri: uri, fit: BoxFit.cover),
+    );
+  }
+}
+
+class CloudFileTile extends ConsumerWidget {
+  final SnCloudFile file;
+  final VoidCallback onTap;
+  final bool isWaterfall;
+
+  const CloudFileTile({
+    super.key,
+    required this.file,
+    required this.onTap,
+    this.isWaterfall = false,
+  });
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    if (isWaterfall) {
+      return _buildWaterfall(context, ref);
+    }
+    return _buildList(context);
+  }
+
+  Widget _buildList(BuildContext context) {
+    final theme = Theme.of(context);
+    if (file.isFolder) {
+      return InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: onTap,
+        child: ListTile(
+          dense: true,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+          contentPadding: const EdgeInsets.symmetric(
+            horizontal: 16,
+            vertical: 2,
+          ),
+          leading: SizedBox(
+            width: 40,
+            height: 40,
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                color: theme.colorScheme.primaryContainer.withOpacity(0.5),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Icon(
+                Symbols.folder,
+                fill: 1,
+                color: theme.colorScheme.primary,
+              ),
+            ),
+          ),
+          title: Text(
+            file.name.isEmpty ? 'untitled'.tr() : file.name,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              fontWeight: FontWeight.w600,
+              color: theme.colorScheme.onSurface,
+            ),
+          ),
+          subtitle: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            spacing: 6,
+            children: [
+              const Icon(Symbols.folder, size: 12),
+              Text(
+                file.childrenCount > 0
+                    ? file.childrenCount.toString()
+                    : 'folder'.tr(),
+                style: theme.textTheme.bodySmall?.copyWith(height: 1),
+              ),
+            ],
+          ).opacity(0.85).padding(top: 2, bottom: 4),
+        ),
+      );
+    }
+
+    return InkWell(
+      borderRadius: BorderRadius.circular(12),
+      onTap: onTap,
+      child: ListTile(
+        dense: true,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
+        leading: SizedBox(
+          width: 40,
+          height: 40,
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              color: theme.colorScheme.surfaceContainerHighest,
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: getFileIcon(file, size: 22),
+          ),
+        ),
+        title: Text(
+          file.name.isEmpty ? 'untitled'.tr() : file.name,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(
+            fontWeight: FontWeight.w600,
+            color: theme.colorScheme.onSurface,
+          ),
+        ),
+        subtitle: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          spacing: 6,
+          children: [
+            const Icon(Symbols.insert_drive_file, size: 12),
+            Text(
+              formatFileSize(file.size),
+              style: theme.textTheme.bodySmall?.copyWith(height: 1),
+            ),
+          ],
+        ).opacity(0.85).padding(top: 2, bottom: 4),
+      ),
+    );
+  }
+
+  Widget _buildWaterfall(BuildContext context, WidgetRef ref) {
+    if (file.isFolder) {
+      return InkWell(
+        borderRadius: BorderRadius.circular(8),
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(
+              color: Theme.of(context).colorScheme.outline.withOpacity(0.3),
+            ),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Icon(
+                Symbols.folder,
+                fill: 1,
+                size: 24,
+                color: Theme.of(context).colorScheme.primaryFixedDim,
+              ),
+              const Gap(16),
+              Text(
+                file.name.isEmpty ? 'untitled'.tr() : file.name,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.center,
+                style: Theme.of(
+                  context,
+                ).textTheme.bodySmall?.copyWith(fontWeight: FontWeight.w500),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    final ratio = file.ratio ?? 1.0;
+    final itemType = file.mimeType.split('/').first;
+
+    Widget previewWidget;
+    switch (itemType) {
+      case 'image':
+        previewWidget = CloudImageWidget(
+          file: file,
+          aspectRatio: ratio,
+          fit: BoxFit.cover,
+        );
+        break;
+      case 'video':
+        previewWidget = CloudVideoWidget(item: file);
+        break;
+      default:
+        previewWidget = getFileIcon(file, size: 48);
+        break;
+    }
+
+    return InkWell(
+      borderRadius: BorderRadius.circular(8),
+      onTap: onTap,
+      child: Container(
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(
+            color: Theme.of(context).colorScheme.outline.withOpacity(0.3),
+          ),
+        ),
+        child: Column(
+          children: [
+            ClipRRect(
+              borderRadius: const BorderRadius.only(
+                topLeft: Radius.circular(8),
+                topRight: Radius.circular(8),
+              ),
+              child: AspectRatio(
+                aspectRatio: ratio,
+                child: Container(
+                  color: Theme.of(context).colorScheme.surfaceContainer,
+                  child: previewWidget,
+                ),
+              ),
+            ),
+            Row(
+              children: [
+                getFileIcon(file, size: 22, tinyPreview: false),
+                const Gap(10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      file.name.isEmpty
+                          ? Text('untitled').tr().italic()
+                          : Text(
+                              file.name,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                      Text(
+                        formatFileSize(file.size),
+                        maxLines: 1,
+                        style: Theme.of(
+                          context,
+                        ).textTheme.bodySmall!.copyWith(fontSize: 11),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ).padding(horizontal: 10, vertical: 6),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class FolderContentsSheet extends HookConsumerWidget {
+  final String folderId;
+  final String folderName;
+
+  const FolderContentsSheet({
+    super.key,
+    required this.folderId,
+    required this.folderName,
+  });
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final folderPath = useState<List<({String name, String id})>>([
+      (name: folderName, id: folderId),
+    ]);
+    final currentFolderId = folderPath.value.last.id;
+    final children = ref.watch(folderChildrenProvider(currentFolderId));
+    final viewMode = useState<FileListViewMode>(FileListViewMode.list);
+
+    return SheetScaffold(
+      titleText: folderPath.value.last.name,
+      actions: [
+        SegmentedButton<FileListViewMode>(
+          segments: [
+            ButtonSegment<FileListViewMode>(
+              value: FileListViewMode.list,
+              icon: const Icon(Symbols.list),
+              tooltip: 'listView'.tr(),
+            ),
+            ButtonSegment<FileListViewMode>(
+              value: FileListViewMode.waterfall,
+              icon: const Icon(Symbols.view_module),
+              tooltip: 'waterfallView'.tr(),
+            ),
+          ],
+          selected: {viewMode.value},
+          onSelectionChanged: (Set<FileListViewMode> newSelection) {
+            viewMode.value = newSelection.first;
+          },
+          style: ButtonStyle(
+            visualDensity: VisualDensity.compact,
+            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          ),
+        ),
+      ],
+      child: Column(
+        children: [
+          if (folderPath.value.length > 1)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+              child: SizedBox(
+                height: 36,
+                child: ListView.separated(
+                  scrollDirection: Axis.horizontal,
+                  itemCount: folderPath.value.length,
+                  separatorBuilder: (_, _) =>
+                      const Icon(Symbols.chevron_right, size: 18),
+                  itemBuilder: (context, index) {
+                    final entry = folderPath.value[index];
+                    final isLast = index == folderPath.value.length - 1;
+                    return TextButton(
+                      onPressed: isLast
+                          ? null
+                          : () {
+                              folderPath.value = folderPath.value.sublist(
+                                0,
+                                index + 1,
+                              );
+                            },
+                      style: TextButton.styleFrom(
+                        visualDensity: VisualDensity.compact,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 6,
+                        ),
+                        minimumSize: Size.zero,
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      ),
+                      child: Text(entry.name),
+                    );
+                  },
+                ),
+              ),
+            ),
+          Expanded(
+            child: children.when(
+              data: (items) => items.isEmpty
+                  ? Center(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            Symbols.folder_open,
+                            size: 48,
+                            color: Theme.of(
+                              context,
+                            ).colorScheme.onSurfaceVariant,
+                          ),
+                          const Gap(12),
+                          Text(
+                            'folder'.tr(),
+                            style: Theme.of(context).textTheme.bodyLarge,
+                          ),
+                        ],
+                      ),
+                    )
+                  : viewMode.value == FileListViewMode.list
+                  ? ListView.builder(
+                      itemCount: items.length,
+                      padding: EdgeInsets.zero,
+                      itemBuilder: (context, index) {
+                        final file = items[index];
+                        return CloudFileTile(
+                          file: file,
+                          onTap: file.isFolder
+                              ? () {
+                                  folderPath.value = [
+                                    ...folderPath.value,
+                                    (name: file.name, id: file.id),
+                                  ];
+                                }
+                              : () => context.router.push(
+                                  FileDetailRoute(id: file.id),
+                                ),
+                        );
+                      },
+                    )
+                  : Padding(
+                      padding: const EdgeInsets.all(12),
+                      child: MasonryGridView.count(
+                        crossAxisCount: 2,
+                        mainAxisSpacing: 8,
+                        crossAxisSpacing: 8,
+                        itemCount: items.length,
+                        itemBuilder: (context, index) {
+                          final file = items[index];
+                          return CloudFileTile(
+                            file: file,
+                            isWaterfall: true,
+                            onTap: file.isFolder
+                                ? () {
+                                    folderPath.value = [
+                                      ...folderPath.value,
+                                      (name: file.name, id: file.id),
+                                    ];
+                                  }
+                                : () => context.router.push(
+                                    FileDetailRoute(id: file.id),
+                                  ),
+                          );
+                        },
+                      ),
+                    ),
+              loading: () => const Center(child: CircularProgressIndicator()),
+              error: (err, _) => Center(
+                child: Padding(
+                  padding: const EdgeInsets.all(24),
+                  child: Text('Error: $err'),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

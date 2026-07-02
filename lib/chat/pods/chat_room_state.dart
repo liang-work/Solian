@@ -4,6 +4,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
+import 'package:island/chat/pods/chat_share_payload.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:island/chat/messages_notifier.dart';
 import 'package:island/chat/pods/chat_room.dart';
@@ -22,17 +23,14 @@ class ChatRoomState {
   final bool isSelectionMode;
   final Set<String> selectedMessageIds;
 
-  // Bot group collapse state
-  final Set<String> collapsedBotGroupIds;
-
   // Input state
   final List<UniversalFile> attachments;
   final Map<String, Map<int, double?>> attachmentProgress;
   final SnChatMessage? messageEditingTo;
   final SnChatMessage? messageReplyingTo;
   final SnChatMessage? messageForwardingTo;
-  final SnPoll? selectedPoll;
-  final SnWalletFund? selectedFund;
+  // Unified embeds list (surveys, funds, locations, meets, calendar events)
+  final List<Map<String, dynamic>> embeds;
 
   // Scroll state (not persisted - fresh on each navigation)
   final bool isScrollingToMessage;
@@ -40,48 +38,46 @@ class ChatRoomState {
   // Read receipt state
   final DateTime roomOpenTime;
   final String? lastReadAnchorMessageId;
+  final String? dismissedLastReadAnchorMessageId;
 
   const ChatRoomState({
     this.isSelectionMode = false,
     this.selectedMessageIds = const {},
-    this.collapsedBotGroupIds = const {},
     this.attachments = const [],
     this.attachmentProgress = const {},
     this.messageEditingTo,
     this.messageReplyingTo,
     this.messageForwardingTo,
-    this.selectedPoll,
-    this.selectedFund,
+    this.embeds = const [],
     this.isScrollingToMessage = false,
     required this.roomOpenTime,
     this.lastReadAnchorMessageId,
+    this.dismissedLastReadAnchorMessageId,
   });
 
   ChatRoomState copyWith({
     bool? isSelectionMode,
     Set<String>? selectedMessageIds,
-    Set<String>? collapsedBotGroupIds,
     List<UniversalFile>? attachments,
     Map<String, Map<int, double?>>? attachmentProgress,
     SnChatMessage? messageEditingTo,
     SnChatMessage? messageReplyingTo,
     SnChatMessage? messageForwardingTo,
-    SnPoll? selectedPoll,
-    SnWalletFund? selectedFund,
+    List<Map<String, dynamic>>? embeds,
     bool? isScrollingToMessage,
     DateTime? roomOpenTime,
     String? lastReadAnchorMessageId,
+    String? dismissedLastReadAnchorMessageId,
     bool clearEditingTo = false,
     bool clearReplyingTo = false,
     bool clearForwardingTo = false,
-    bool clearPoll = false,
-    bool clearFund = false,
+    bool clearEmbeds = false,
     bool clearLastReadAnchor = false,
+    bool clearDismissedLastReadAnchor = false,
   }) {
     return ChatRoomState(
       isSelectionMode: isSelectionMode ?? this.isSelectionMode,
       selectedMessageIds: selectedMessageIds ?? this.selectedMessageIds,
-      collapsedBotGroupIds: collapsedBotGroupIds ?? this.collapsedBotGroupIds,
       attachments: attachments ?? this.attachments,
       attachmentProgress: attachmentProgress ?? this.attachmentProgress,
       messageEditingTo: clearEditingTo
@@ -93,13 +89,16 @@ class ChatRoomState {
       messageForwardingTo: clearForwardingTo
           ? null
           : (messageForwardingTo ?? this.messageForwardingTo),
-      selectedPoll: clearPoll ? null : (selectedPoll ?? this.selectedPoll),
-      selectedFund: clearFund ? null : (selectedFund ?? this.selectedFund),
+      embeds: clearEmbeds ? [] : (embeds ?? this.embeds),
       isScrollingToMessage: isScrollingToMessage ?? this.isScrollingToMessage,
       roomOpenTime: roomOpenTime ?? this.roomOpenTime,
       lastReadAnchorMessageId: clearLastReadAnchor
           ? null
           : (lastReadAnchorMessageId ?? this.lastReadAnchorMessageId),
+      dismissedLastReadAnchorMessageId: clearDismissedLastReadAnchor
+          ? null
+          : (dismissedLastReadAnchorMessageId ??
+                this.dismissedLastReadAnchorMessageId),
     );
   }
 }
@@ -249,18 +248,6 @@ class ChatRoomStateNotifier extends Notifier<ChatRoomState> {
     state = state.copyWith(selectedMessageIds: Set<String>.from(messageIds));
   }
 
-  // ==================== Bot Group Collapse ====================
-
-  void toggleBotGroup(String groupId) {
-    final current = Set<String>.from(state.collapsedBotGroupIds);
-    if (current.contains(groupId)) {
-      current.remove(groupId);
-    } else {
-      current.add(groupId);
-    }
-    state = state.copyWith(collapsedBotGroupIds: current);
-  }
-
   // ==================== Input Management ====================
 
   void updateAttachments(List<UniversalFile> attachments) {
@@ -271,7 +258,40 @@ class ChatRoomStateNotifier extends Notifier<ChatRoomState> {
     final newProgress = Map<String, Map<int, double?>>.from(
       state.attachmentProgress,
     );
-    newProgress[messageId] = {0: progress};
+    if (progress == null) {
+      newProgress.remove(messageId);
+    } else {
+      newProgress[messageId] = {0: progress};
+    }
+    state = state.copyWith(attachmentProgress: newProgress);
+  }
+
+  void updateAttachmentUploadProgress(int index, double? progress) {
+    if (index < 0 || index >= state.attachments.length) return;
+    final newProgress = Map<String, Map<int, double?>>.from(
+      state.attachmentProgress,
+    );
+    final uploadProgress = Map<int, double?>.from(
+      newProgress['chat-upload'] ?? const {},
+    );
+    uploadProgress[index] = progress;
+    newProgress['chat-upload'] = uploadProgress;
+    state = state.copyWith(attachmentProgress: newProgress);
+  }
+
+  void clearAttachmentUploadProgress(int index) {
+    final newProgress = Map<String, Map<int, double?>>.from(
+      state.attachmentProgress,
+    );
+    final uploadProgress = Map<int, double?>.from(
+      newProgress['chat-upload'] ?? const {},
+    );
+    uploadProgress.remove(index);
+    if (uploadProgress.isEmpty) {
+      newProgress.remove('chat-upload');
+    } else {
+      newProgress['chat-upload'] = uploadProgress;
+    }
     state = state.copyWith(attachmentProgress: newProgress);
   }
 
@@ -303,12 +323,8 @@ class ChatRoomStateNotifier extends Notifier<ChatRoomState> {
     );
   }
 
-  void setPoll(SnPoll? poll) {
-    state = state.copyWith(selectedPoll: poll, clearPoll: poll == null);
-  }
-
-  void setFund(SnWalletFund? fund) {
-    state = state.copyWith(selectedFund: fund, clearFund: fund == null);
+  void setEmbeds(List<Map<String, dynamic>> embeds) {
+    state = state.copyWith(embeds: embeds);
   }
 
   void clearInput() {
@@ -317,8 +333,7 @@ class ChatRoomStateNotifier extends Notifier<ChatRoomState> {
       clearEditingTo: true,
       clearReplyingTo: true,
       clearForwardingTo: true,
-      clearPoll: true,
-      clearFund: true,
+      clearEmbeds: true,
       attachments: [],
     );
   }
@@ -379,35 +394,85 @@ class ChatRoomStateNotifier extends Notifier<ChatRoomState> {
         setReplyingTo(message.toRemoteMessage());
       case 'resend':
         notifier.retryMessage(message.id);
+      case 'redirect':
+        _redirectSingleMessage(message);
+      case 'pin':
+        notifier.pinMessage(message.id);
+      case 'unpin':
+        notifier.unpinMessage(message.id);
     }
   }
 
-  void sendMessage(WidgetRef outerRef) {
+  void _redirectSingleMessage(LocalChatMessage message) {
+    // Enter selection mode with this single message selected
+    state = state.copyWith(
+      isSelectionMode: true,
+      selectedMessageIds: {message.id},
+    );
+  }
+
+  void sendMessage() {
     final text = messageController.text.trim();
-    if (text.isEmpty &&
-        state.attachments.isEmpty &&
-        state.selectedPoll == null &&
-        state.selectedFund == null) {
+    final attachments = List<UniversalFile>.of(state.attachments);
+    if (text.isEmpty && attachments.isEmpty && state.embeds.isEmpty) {
       return;
     }
 
     // Read fresh notifier each time to avoid using disposed instance
     final notifier = ref.read(messagesProvider(roomId).notifier);
+    final subscribeNotifier = ref.read(chatSubscribeProvider(roomId).notifier);
     notifier.sendMessage(
-      outerRef,
       text,
-      state.attachments,
-      poll: state.selectedPoll,
-      fund: state.selectedFund,
+      attachments,
+      embeds: state.embeds,
       editingTo: state.messageEditingTo,
       forwardingTo: state.messageForwardingTo,
       replyingTo: state.messageReplyingTo,
       onProgress: (messageId, progress) {
-        updateAttachmentProgress(messageId, progress[0]);
+        final overallProgress = _calculateOverallUploadProgress(
+          attachments,
+          progress,
+        );
+        updateAttachmentProgress(messageId, overallProgress);
+        subscribeNotifier.sendUploadingStatus(overallProgress);
       },
     );
 
     clearInput();
+  }
+
+  void applySharedPayload(ChatComposerSharePayload payload) {
+    if (payload.text.trim().isNotEmpty) {
+      final existingText = messageController.text.trim();
+      final nextText = existingText.isEmpty
+          ? payload.text.trim()
+          : '$existingText\n\n${payload.text.trim()}';
+      messageController.value = TextEditingValue(
+        text: nextText,
+        selection: TextSelection.collapsed(offset: nextText.length),
+      );
+    }
+
+    if (payload.attachments.isNotEmpty) {
+      updateAttachments([...state.attachments, ...payload.attachments]);
+    }
+  }
+
+  double _calculateOverallUploadProgress(
+    List<UniversalFile> attachments,
+    Map<int, double?> progress,
+  ) {
+    if (attachments.isEmpty) return 1.0;
+
+    var total = 0.0;
+    for (var i = 0; i < attachments.length; i++) {
+      if (attachments[i].isOnCloud) {
+        total += 1.0;
+        continue;
+      }
+      total += (progress[i] ?? 0.0).clamp(0.0, 1.0);
+    }
+    return (total / attachments.length).clamp(0.0, 1.0);
   }
 
   // ==================== Scroll Actions ====================
@@ -420,11 +485,6 @@ class ChatRoomStateNotifier extends Notifier<ChatRoomState> {
     if (state.isScrollingToMessage) return;
 
     state = state.copyWith(isScrollingToMessage: true);
-
-    // Add flashing effect
-    ref
-        .read(flashingMessagesProvider.notifier)
-        .update((set) => set.union({messageId}));
 
     final messageIndex = messageList.indexWhere((m) => m.id == messageId);
 
@@ -447,6 +507,8 @@ class ChatRoomStateNotifier extends Notifier<ChatRoomState> {
   }) {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       try {
+        ref.read(flashingMessagesProvider.notifier).trigger(messageId);
+
         listController.animateToItem(
           index: index,
           scrollController: scrollController,
@@ -546,7 +608,7 @@ class ChatRoomStateNotifier extends Notifier<ChatRoomState> {
       ...state.attachments,
       UniversalFile(
         data: cloudFile,
-        type: switch (cloudFile.mimeType?.split('/').firstOrNull) {
+        type: switch (cloudFile.mimeType.split('/').firstOrNull) {
           'image' => UniversalFileType.image,
           'video' => UniversalFileType.video,
           'audio' => UniversalFileType.audio,
@@ -564,11 +626,21 @@ class ChatRoomStateNotifier extends Notifier<ChatRoomState> {
     state = state.copyWith(
       lastReadAnchorMessageId: messageId,
       clearLastReadAnchor: messageId == null,
+      dismissedLastReadAnchorMessageId:
+          state.dismissedLastReadAnchorMessageId == messageId
+          ? state.dismissedLastReadAnchorMessageId
+          : null,
+      clearDismissedLastReadAnchor:
+          messageId == null ||
+          state.dismissedLastReadAnchorMessageId != null &&
+              state.dismissedLastReadAnchorMessageId != messageId,
     );
   }
 
   void dismissLastReadMarker() {
-    state = state.copyWith(clearLastReadAnchor: true);
+    final currentAnchor = state.lastReadAnchorMessageId;
+    if (currentAnchor == null) return;
+    state = state.copyWith(dismissedLastReadAnchorMessageId: currentAnchor);
   }
 }
 

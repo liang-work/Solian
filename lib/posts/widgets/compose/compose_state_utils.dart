@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_hooks/flutter_hooks.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 import 'package:island/accounts/screens/me/account_settings.dart';
+import 'package:island/core/database.dart';
 import 'package:island/creators/screens/publishers_form.dart'
     as publishers_form;
 import 'package:island/posts/compose.dart';
@@ -98,9 +99,15 @@ class ComposeStateUtils {
 
   /// Handles auto-save functionality for new posts.
   static void useAutoSave(WidgetRef ref, ComposeState state, bool isNewPost) {
+    final database = ref.read(databaseProvider);
     useEffect(() {
       if (isNewPost) {
-        state.startAutoSave(ref);
+        state.startAutoSave(
+          (composeState) => ComposeLogic.saveDraftWithoutUploadWithDatabase(
+            database,
+            composeState,
+          ),
+        );
       }
       return () => state.stopAutoSave();
     }, [state]);
@@ -113,12 +120,13 @@ class ComposeStateUtils {
     SnPost? originalPost,
     bool submitted,
   ) {
+    final database = ref.read(databaseProvider);
     useEffect(() {
       return () {
         if (!submitted &&
             originalPost == null &&
             state.currentPublisher.value != null) {
-          ComposeLogic.saveDraftWithoutUpload(ref, state);
+          ComposeLogic.saveDraftWithoutUploadWithDatabase(database, state);
         }
         ComposeLogic.dispose(state);
       };
@@ -137,7 +145,6 @@ class ComposeStateUtils {
         state.attachmentProgress,
         state.currentPublisher,
         state.submitting,
-        state.liveStreamId,
       ]),
       [state],
     );
@@ -169,14 +176,11 @@ class ComposeStateUtils {
     // Clear embed view
     state.embedView.value = null;
 
-    // Clear poll
-    state.pollId.value = null;
+    // Clear all embeds (surveys, funds, meets, etc.)
+    state.embeds.value = [];
 
     // Clear realm
     state.realm.value = null;
-
-    // Clear livestream
-    state.liveStreamId.value = null;
 
     // Generate new draft ID for fresh composition
     // Note: We don't recreate the entire state, just reset the fields

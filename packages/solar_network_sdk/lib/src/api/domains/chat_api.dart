@@ -155,6 +155,21 @@ class ChatApi extends BaseApi {
     await delete('$_basePath/chat/rooms/$roomId/messages/$messageId');
   }
 
+  /// Creates a placeholder message for streaming or uploading.
+  ///
+  /// [roomId] - The room ID.
+  /// [kind] - "streaming" or "uploading".
+  Future<SnChatMessage> createPlaceholder({
+    required String roomId,
+    required String kind,
+  }) async {
+    final response = await post<Map<String, dynamic>>(
+      '$_basePath/chat/rooms/$roomId/messages/placeholder',
+      data: {'kind': kind},
+    );
+    return SnChatMessage.fromJson(response.data!);
+  }
+
   /// Marks messages as read.
   ///
   /// [roomId] - The room ID.
@@ -167,6 +182,21 @@ class ChatApi extends BaseApi {
       '$_basePath/chat/rooms/$roomId/read',
       data: {'message_id': messageId},
     );
+  }
+
+  /// Redirects existing messages into a destination room.
+  ///
+  /// [roomId] - The destination room ID.
+  /// [messageIds] - Source message IDs to redirect.
+  Future<SnChatMessage> redirectMessages({
+    required String roomId,
+    required List<String> messageIds,
+  }) async {
+    final response = await post<Map<String, dynamic>>(
+      '$_basePath/chat/$roomId/messages/redirect',
+      data: {'message_ids': messageIds},
+    );
+    return SnChatMessage.fromJson(response.data!);
   }
 
   // ==========================================
@@ -355,6 +385,63 @@ class ChatApi extends BaseApi {
       '$_basePath/realms/$realmSlug/chat',
     );
     return parseList(response, SnChatRoom.fromJson);
+  }
+
+  // ==========================================
+  // Group endpoints
+  // ==========================================
+
+  /// Gets chat groups for the current user.
+  Future<List<SnChatGroup>> getGroups() async {
+    final response = await get<List<dynamic>>('$_basePath/chat/groups');
+    return parseList(response, SnChatGroup.fromJson);
+  }
+
+  /// Creates a chat group.
+  Future<SnChatGroup> createGroup({
+    required String name,
+    String? color,
+    String? icon,
+    int? order,
+  }) async {
+    final response = await post<Map<String, dynamic>>(
+      '$_basePath/chat/groups',
+      data: {'name': name, 'color': color, 'icon': icon, 'order': order}
+        ..removeWhere((_, value) => value == null),
+    );
+    return SnChatGroup.fromJson(response.data!);
+  }
+
+  /// Updates a chat group.
+  Future<SnChatGroup> updateGroup({
+    required String groupId,
+    String? name,
+    String? color,
+    String? icon,
+    int? order,
+  }) async {
+    final response = await patch<Map<String, dynamic>>(
+      '$_basePath/chat/groups/$groupId',
+      data: {'name': name, 'color': color, 'icon': icon, 'order': order}
+        ..removeWhere((_, value) => value == null),
+    );
+    return SnChatGroup.fromJson(response.data!);
+  }
+
+  /// Deletes a chat group.
+  Future<void> deleteGroup(String groupId) async {
+    await delete('$_basePath/chat/groups/$groupId');
+  }
+
+  /// Assigns a room to a group, or removes it from its group when [groupId] is null.
+  Future<void> moveRoomToGroup({
+    required String roomId,
+    String? groupId,
+  }) async {
+    await patch(
+      '$_basePath/chat/rooms/$roomId/group',
+      data: {'group_id': groupId},
+    );
   }
 
   // ==========================================

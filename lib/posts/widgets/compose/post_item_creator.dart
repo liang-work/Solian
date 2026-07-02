@@ -6,6 +6,7 @@ import 'package:gap/gap.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 import 'package:island/core/network.dart';
 import 'package:island/core/services/time.dart';
+import 'package:island/posts/screens/compose_blog.dart';
 import 'package:island/posts/widgets/compose/compose_dialog.dart';
 import 'package:island/posts/widgets/compose/post_item.dart';
 import 'package:island/posts/widgets/compose/post_shared.dart';
@@ -23,6 +24,8 @@ class PostItemCreator extends HookConsumerWidget {
   final bool isOpenable;
   final Function? onRefresh;
   final Function(SnPost)? onUpdate;
+  final VoidCallback? onTap;
+  final void Function(String)? onPostTap;
 
   const PostItemCreator({
     super.key,
@@ -32,6 +35,8 @@ class PostItemCreator extends HookConsumerWidget {
     this.isOpenable = true,
     this.onRefresh,
     this.onUpdate,
+    this.onTap,
+    this.onPostTap,
   });
 
   @override
@@ -40,6 +45,12 @@ class PostItemCreator extends HookConsumerWidget {
         padding ?? const EdgeInsets.symmetric(horizontal: 8, vertical: 8);
 
     return ContextMenuWidget(
+      previewBuilder: (_, child) {
+        return Material(
+          color: Theme.of(context).colorScheme.onSurface,
+          child: child,
+        );
+      },
       menuProvider: (_) {
         return Menu(
           children: [
@@ -49,6 +60,14 @@ class PostItemCreator extends HookConsumerWidget {
               callback: () {
                 if (item.type == 1) {
                   context.router.push(ArticleEditRoute(id: item.id)).then((
+                    value,
+                  ) {
+                    if (value != null) {
+                      onRefresh?.call();
+                    }
+                  });
+                } else if (item.type == 2) {
+                  BlogComposeDialog.show(context, originalPost: item).then((
                     value,
                   ) {
                     if (value != null) {
@@ -108,6 +127,10 @@ class PostItemCreator extends HookConsumerWidget {
         child: InkWell(
           borderRadius: BorderRadius.circular(12),
           onTap: () {
+            if (onTap != null) {
+              onTap!();
+              return;
+            }
             if (isOpenable) {
               context.router.push(PostDetailRoute(id: item.id));
             }
@@ -118,6 +141,7 @@ class PostItemCreator extends HookConsumerWidget {
               ReferencedPostWidget(
                 item: item,
                 renderingPadding: renderingPadding,
+                onPostTap: onPostTap,
               ),
               PostHeader(item: item, renderingPadding: renderingPadding),
               PostBody(item: item, renderingPadding: renderingPadding),

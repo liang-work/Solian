@@ -1,15 +1,10 @@
-import 'dart:async';
-import 'dart:io';
-import 'package:flutter/foundation.dart';
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_webrtc/flutter_webrtc.dart';
-import 'package:island/shared/widgets/alert.dart';
 import 'package:livekit_client/livekit_client.dart' as lk;
 import 'package:freezed_annotation/freezed_annotation.dart';
-import 'package:logging/logging.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 import 'package:island/core/network.dart';
-import 'package:wakelock_plus/wakelock_plus.dart';
+import 'package:island/chat/pods/call_controller.dart';
 
 import 'package:solar_network_sdk/solar_network_sdk.dart';
 
@@ -30,6 +25,7 @@ String formatDuration(Duration duration) {
 sealed class CallState with _$CallState {
   const factory CallState({
     required bool isConnected,
+    @Default(false) bool isReconnecting,
     required bool isMicrophoneEnabled,
     required bool isCameraEnabled,
     required bool isScreenSharing,
@@ -38,6 +34,8 @@ sealed class CallState with _$CallState {
     DateTime? joinedAt,
     @Default(ViewMode.grid) ViewMode viewMode,
     @Default(0) int participantSyncVersion,
+    @Default(0) int reconnectAttempt,
+    @Default(false) bool hasJoined,
     String? error,
   }) = _CallState;
 }
@@ -62,43 +60,52 @@ sealed class CallParticipantLive with _$CallParticipantLive {
   bool get hasAudio => remoteParticipant.hasAudio;
 }
 
+/// ponytail: safe fallback when CallNotifier hasn't been initialized yet
+/// (e.g. overlay showing remote participants before local join)
+class _DummyCallController extends CallController {
+  _DummyCallController() : super(apiClient: Dio(BaseOptions()));
+}
+
+/// Riverpod wrapper that delegates all call logic to [CallController].
+/// The controller is created lazily on first [joinRoom] call.
 @Riverpod(keepAlive: true)
 class CallNotifier extends _$CallNotifier {
-  lk.Room? _room;
-  lk.LocalParticipant? _localParticipant;
-  List<CallParticipantLive> _participants = [];
-  final Map<String, CallParticipant> _participantInfoByIdentity = {};
-  lk.EventsListener? _roomListener;
-  bool _isAdmin = false;
+  CallController? _controller;
+  void _syncState() {
+    if (_controller != null) state = _controller!.stateNotifier.value;
+  }
 
-  List<CallParticipantLive> get participants =>
-      List.unmodifiable(_participants);
-  lk.LocalParticipant? get localParticipant => _localParticipant;
+  CallController get _ctrl {
+    if (_controller == null) {
+      // ponytail: not initialized yet — return safe defaults
+      return _dummyController ??= _DummyCallController();
+    }
+    return _controller!;
+  }
+  static _DummyCallController? _dummyController;
 
-  Map<String, double> participantsVolumes = {};
+  // ponytail: expose controller for sub-windows that need direct access
+  CallController? get controller => _controller;
 
-  Timer? _durationTimer;
-  Timer? _reconnectTimer;
-  Timer? _connectionHealthTimer;
+  List<CallParticipantLive> get participants => _ctrl.participants;
+  lk.LocalParticipant? get localParticipant => _ctrl.localParticipant;
+  lk.Room? get room => _ctrl.room;
+  bool get isAdmin => _ctrl.isAdmin;
+  String? get roomId => _ctrl.roomId;
+  SnChatRoom? get chatRoom => _ctrl.chatRoom;
+  Map<String, double> get participantsVolumes => _ctrl.participantsVolumes;
 
-  lk.Room? get room => _room;
-  bool get isAdmin => _isAdmin;
-
-  // Reconnection state
-  int _reconnectAttempts = 0;
-  static const int _maxReconnectAttempts = 10;
-  static const Duration _baseReconnectDelay = Duration(seconds: 1);
-  static const Duration _maxReconnectDelay = Duration(seconds: 30);
-  bool _isReconnecting = false;
-  bool _shouldAutoReconnect = true;
-
-  SnChatRoom? _currentRoom;
+  static int get maxReconnectAttempts => CallController.maxReconnectAttempts;
 
   @override
   CallState build() {
-    // Subscribe to websocket updates
+    ref.onDispose(() {
+      _controller?.stateNotifier.removeListener(_syncState);
+      _controller?.dispose();
+    });
     return const CallState(
       isConnected: false,
+      isReconnecting: false,
       isMicrophoneEnabled: true,
       isCameraEnabled: false,
       isScreenSharing: false,
@@ -108,502 +115,57 @@ class CallNotifier extends _$CallNotifier {
     );
   }
 
-  void _bumpParticipantSync() {
-    state = state.copyWith(
-      participantSyncVersion: state.participantSyncVersion + 1,
-    );
-  }
-
-  void _initRoomListeners() {
-    if (_room == null) return;
-    _roomListener?.dispose();
-    _roomListener = _room!.createListener();
-    _room!.addListener(_onRoomChange);
-    _roomListener!
-      ..on<lk.ParticipantConnectedEvent>((e) {
-        _refreshLiveParticipants();
-      })
-      ..on<lk.RoomDisconnectedEvent>((e) {
-        _participants = [];
-        _bumpParticipantSync();
-      });
-  }
-
-  void _onRoomChange() {
-    _refreshLiveParticipants();
-  }
-
-  void _refreshLiveParticipants() {
-    if (_room == null) return;
-    final remoteParticipants = _room!.remoteParticipants;
-    _participants = [];
-    // Add local participant first if available
-    if (_localParticipant != null) {
-      final localInfo = _buildParticipant();
-      _participants.add(
-        CallParticipantLive(
-          participant: localInfo,
-          remoteParticipant: _localParticipant!,
-        ),
-      );
-    }
-    // Add remote participants
-    _participants.addAll(
-      remoteParticipants.values.map((remote) {
-        final match =
-            _participantInfoByIdentity[remote.identity] ??
-            CallParticipant(
-              identity: remote.identity,
-              name: remote.identity,
-              joinedAt: DateTime.now(),
-            );
-        return CallParticipantLive(
-          participant: match,
-          remoteParticipant: remote,
-        );
-      }),
-    );
-    _bumpParticipantSync();
-  }
-
-  /// Builds the CallParticipant object for the local participant.
-  /// Optionally, pass [participants] if you want to prioritize info from the latest list.
-  CallParticipant _buildParticipant({List<CallParticipant>? participants}) {
-    if (_localParticipant == null) {
-      throw StateError('No local participant available');
-    }
-    // Prefer info from the latest participants list if available
-    if (participants != null) {
-      final idx = participants.indexWhere(
-        (p) => p.identity == _localParticipant!.identity,
-      );
-      if (idx != -1) return participants[idx];
-    }
-
-    // Otherwise, use info from the identity map or fallback to minimal
-    return _participantInfoByIdentity[_localParticipant!.identity] ??
-        CallParticipant(
-          identity: _localParticipant!.identity,
-          name: _localParticipant!.identity,
-          joinedAt: DateTime.now(),
-        );
-  }
-
-  void _updateLiveParticipants(List<CallParticipant> participants) {
-    // Update the info map for lookup
-    for (final p in participants) {
-      _participantInfoByIdentity[p.identity] = p;
-    }
-    if (_room == null) {
-      // Can't build live objects, just store empty
-      _participants = [];
-      _bumpParticipantSync();
-      return;
-    }
-    final remoteParticipants = _room!.remoteParticipants;
-    final remotes = remoteParticipants.values.toList();
-    _participants = [];
-    // Add local participant if present in the list
-    if (_localParticipant != null) {
-      final localInfo = _buildParticipant(participants: participants);
-      _participants.add(
-        CallParticipantLive(
-          participant: localInfo,
-          remoteParticipant: _localParticipant!,
-        ),
-      );
-    }
-    // Add remote participants
-    _participants.addAll(
-      participants.map((p) {
-        lk.RemoteParticipant? remote;
-        for (final r in remotes) {
-          if (r.identity == p.identity) {
-            remote = r;
-            break;
-          }
-        }
-        if (_localParticipant != null &&
-            p.identity == _localParticipant!.identity) {
-          return null; // Already added local
-        }
-        return remote != null
-            ? CallParticipantLive(participant: p, remoteParticipant: remote)
-            : null;
-      }).whereType<CallParticipantLive>(),
-    );
-    _bumpParticipantSync();
-  }
-
-  String? _roomId;
-  String? get roomId => _roomId;
-
-  SnChatRoom? _chatRoom;
-  SnChatRoom? get chatRoom => _chatRoom;
-
-  Future<void> joinRoom(SnChatRoom room) async {
-    var roomId = room.id;
-    if (_roomId == roomId &&
-        _room != null &&
-        _room?.connectionState == lk.ConnectionState.connected) {
-      Logger.root.info('[Call] Call skipped. Already has data');
-      return;
-    } else if (_room != null) {
-      if (!_room!.isDisposed &&
-          _room!.connectionState != lk.ConnectionState.disconnected) {
-        throw Exception('Call already connected');
-      }
-    }
-    _roomId = roomId;
-    _chatRoom = room;
-    _currentRoom = room;
-    _shouldAutoReconnect = true;
-    _reconnectAttempts = 0;
-    _isReconnecting = false;
-
-    if (_room != null) {
-      await _room!.disconnect();
-      await _room!.dispose();
-      _room = null;
-      _localParticipant = null;
-      _participants = [];
-    }
-    try {
-      await _performConnection(room);
-    } catch (e) {
-      state = state.copyWith(error: e.toString());
-    }
-  }
-
-  Future<void> _performConnection(SnChatRoom room) async {
+  CallController _ensureController() {
+    if (_controller != null) return _controller!;
     final apiClient = ref.read(apiClientProvider);
-    final response = await apiClient.get(
-      '/messager/chat/realtime/${room.id}/join',
-    );
-
-    if (response.statusCode != 200 || response.data == null) {
-      throw Exception('Failed to join room');
-    }
-
-    final data = response.data;
-    final joinResponse = ChatRealtimeJoinResponse.fromJson(data);
-    final participants = joinResponse.participants;
-    final String endpoint = joinResponse.endpoint;
-    final String token = joinResponse.token;
-    _isAdmin = joinResponse.isAdmin;
-
-    // Setup duration timer
-    final joinedAt = DateTime.now();
-    state = state.copyWith(joinedAt: joinedAt, duration: Duration.zero);
-    _durationTimer?.cancel();
-    _durationTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
-      state = state.copyWith(
-        duration: Duration(
-          milliseconds:
-              DateTime.now().millisecondsSinceEpoch -
-              joinedAt.millisecondsSinceEpoch,
-        ),
-      );
-    });
-
-    // Connect to LiveKit
-    _room = lk.Room();
-
-    await _room!.connect(
-      endpoint,
-      token,
-      connectOptions: lk.ConnectOptions(autoSubscribe: true),
-      roomOptions: lk.RoomOptions(adaptiveStream: true, dynacast: true),
-      fastConnectOptions: lk.FastConnectOptions(
-        microphone: lk.TrackOption(enabled: true),
-      ),
-    );
-    _localParticipant = _room!.localParticipant;
-
-    _initRoomListeners();
-    _updateLiveParticipants(participants);
-    _startConnectionHealthMonitor();
-
-    if (!kIsWeb && (Platform.isIOS || Platform.isAndroid)) {
-      lk.Hardware.instance.setSpeakerphoneOn(true);
-    }
-
-    // Listen for connection updates
-    _room!.addListener(_onConnectionStateChange);
-    state = state.copyWith(isConnected: true);
-    WakelockPlus.enable();
+    _controller = CallController(apiClient: apiClient);
+    _controller!.stateNotifier.addListener(_syncState);
+    return _controller!;
   }
 
-  void _onConnectionStateChange() {
-    if (_room == null || _room!.isDisposed) return;
-
-    final connectionState = _room!.connectionState;
-    final wasConnected = state.isConnected;
-    final isNowConnected = connectionState == lk.ConnectionState.connected;
-
-    state = state.copyWith(
-      isConnected: isNowConnected,
-      isMicrophoneEnabled: _localParticipant?.isMicrophoneEnabled() ?? false,
-      isCameraEnabled: _localParticipant?.isCameraEnabled() ?? false,
-      isScreenSharing: _localParticipant?.isScreenShareEnabled() ?? false,
-    );
-
-    if (!wasConnected && isNowConnected) {
-      WakelockPlus.enable();
-      _reconnectAttempts = 0;
-      _isReconnecting = false;
-    } else if (wasConnected && !isNowConnected) {
-      WakelockPlus.disable();
-      _attemptReconnect();
-    }
+  Future<void> joinRoom(SnChatRoom room, {bool cameraEnabled = false}) async {
+    final ctrl = _ensureController();
+    await ctrl.joinRoom(room, cameraEnabled: cameraEnabled);
   }
 
-  void _startConnectionHealthMonitor() {
-    _connectionHealthTimer?.cancel();
-    _connectionHealthTimer = Timer.periodic(
-      const Duration(seconds: 30),
-      (_) => _checkConnectionHealth(),
-    );
-  }
+  Future<void> ensureMicrophoneEnabled() => _ctrl.ensureMicrophoneEnabled();
+  Future<void> toggleMicrophone() => _ctrl.toggleMicrophone();
+  Future<void> toggleCamera() => _ctrl.toggleCamera();
+  Future<void> toggleScreenShare(BuildContext context) =>
+      _ctrl.toggleScreenShare(context);
+  Future<void> toggleSpeakerphone() => _ctrl.toggleSpeakerphone();
+  Future<void> disconnect() => _ctrl.disconnect();
 
-  void _checkConnectionHealth() {
-    if (_room == null || _room!.isDisposed) return;
+  Future<void> muteParticipantByAccountId(String id) =>
+      _ctrl.muteParticipantByAccountId(id);
+  Future<void> unmuteParticipantByAccountId(String id) =>
+      _ctrl.unmuteParticipantByAccountId(id);
+  Future<void> kickParticipantByAccountId(String id) =>
+      _ctrl.kickParticipantByAccountId(id);
 
-    final connectionState = _room!.connectionState;
-    if (connectionState != lk.ConnectionState.connected) {
-      Logger.root.warning(
-        '[Call] Connection health check failed: $connectionState',
-      );
-      _attemptReconnect();
-    }
-  }
+  void setParticipantVolume(CallParticipantLive live, double volume) =>
+      _ctrl.setParticipantVolume(live, volume);
+  double getParticipantVolume(CallParticipantLive live) =>
+      _ctrl.getParticipantVolume(live);
 
-  Future<void> _attemptReconnect() async {
-    if (_isReconnecting || !_shouldAutoReconnect || _currentRoom == null) {
-      return;
-    }
-    if (_reconnectAttempts >= _maxReconnectAttempts) {
-      Logger.root.severe('[Call] Max reconnection attempts reached');
-      state = state.copyWith(error: 'Connection lost. Please rejoin the call.');
-      return;
-    }
-
-    _isReconnecting = true;
-    _reconnectAttempts++;
-
-    // Exponential backoff with jitter
-    final delay = Duration(
-      milliseconds:
-          (_baseReconnectDelay.inMilliseconds * (1 << (_reconnectAttempts - 1)))
-              .clamp(
-                _baseReconnectDelay.inMilliseconds,
-                _maxReconnectDelay.inMilliseconds,
-              ) +
-          (DateTime.now().millisecond % 1000),
-    );
-
-    Logger.root.info(
-      '[Call] Attempting reconnect $_reconnectAttempts/$_maxReconnectAttempts in ${delay.inSeconds}s',
-    );
-
-    _reconnectTimer?.cancel();
-    _reconnectTimer = Timer(delay, () async {
-      try {
-        // Clean up old connection
-        if (_room != null) {
-          _room!.removeListener(_onConnectionStateChange);
-          await _room!.disconnect();
-          await _room!.dispose();
-        }
-        _room = null;
-        _localParticipant = null;
-
-        await _performConnection(_currentRoom!);
-        Logger.root.info('[Call] Reconnection successful');
-        _reconnectAttempts = 0;
-        _isReconnecting = false;
-      } catch (e) {
-        Logger.root.severe('[Call] Reconnection failed: $e');
-        _isReconnecting = false;
-        // Will try again on next timer if needed
-      }
-    });
-  }
-
-  Future<void> toggleMicrophone() async {
-    if (_localParticipant != null) {
-      const autostop = true;
-      final target = !_localParticipant!.isMicrophoneEnabled();
-      state = state.copyWith(isMicrophoneEnabled: target);
-      if (target) {
-        await _localParticipant!.audioTrackPublications.firstOrNull?.unmute(
-          stopOnMute: autostop,
-        );
-      } else {
-        await _localParticipant!.audioTrackPublications.firstOrNull?.mute(
-          stopOnMute: autostop,
-        );
-      }
-      state = state.copyWith();
-    }
-  }
-
-  Future<void> toggleCamera() async {
-    if (_localParticipant != null) {
-      final target = !_localParticipant!.isCameraEnabled();
-      state = state.copyWith(isCameraEnabled: target);
-      await _localParticipant!.setCameraEnabled(target);
-      state = state.copyWith();
-    }
-  }
-
-  Future<void> toggleScreenShare(BuildContext context) async {
-    if (_localParticipant != null) {
-      final target = !_localParticipant!.isScreenShareEnabled();
-      state = state.copyWith(isScreenSharing: target);
-
-      if (target && lk.lkPlatformIsDesktop()) {
-        try {
-          final source = await showDialog<DesktopCapturerSource>(
-            context: context,
-            builder: (context) => lk.ScreenSelectDialog(),
-          );
-          if (source == null) {
-            return;
-          }
-          var track = await lk.LocalVideoTrack.createScreenShareTrack(
-            lk.ScreenShareCaptureOptions(
-              sourceId: source.id,
-              maxFrameRate: 30.0,
-              captureScreenAudio: true,
-              useiOSBroadcastExtension: true,
-            ),
-          );
-          await _localParticipant!.publishVideoTrack(track);
-        } catch (err) {
-          showErrorAlert(err);
-        }
-        return;
-      } else {
-        await _localParticipant!.setScreenShareEnabled(target);
-      }
-
-      state = state.copyWith();
-    }
-  }
-
-  Future<void> toggleSpeakerphone() async {
-    state = state.copyWith(isSpeakerphone: !state.isSpeakerphone);
-    await lk.Hardware.instance.setSpeakerphoneOn(state.isSpeakerphone);
-    state = state.copyWith();
-  }
-
-  Future<void> disconnect() async {
-    if (_room != null) {
-      await _room!.disconnect();
-      state = state.copyWith(
-        isConnected: false,
-        isMicrophoneEnabled: false,
-        isCameraEnabled: false,
-        isScreenSharing: false,
-      );
-      // Disable wakelock when call disconnects
-      WakelockPlus.disable();
-    }
-  }
-
-  Future<void> muteParticipantByAccountId(String targetAccountId) async {
-    if (_roomId == null || _roomId!.isEmpty) {
-      throw StateError('No active room');
-    }
-    if (!_isAdmin) {
-      throw StateError('Only room admins can mute participants');
-    }
-
-    final apiClient = ref.read(apiClientProvider);
-    await apiClient.post(
-      '/messager/chat/realtime/$_roomId/mute/$targetAccountId',
-    );
-  }
-
-  Future<void> unmuteParticipantByAccountId(String targetAccountId) async {
-    if (_roomId == null || _roomId!.isEmpty) {
-      throw StateError('No active room');
-    }
-    if (!_isAdmin) {
-      throw StateError('Only room admins can unmute participants');
-    }
-
-    final apiClient = ref.read(apiClientProvider);
-    await apiClient.post(
-      '/messager/chat/realtime/$_roomId/unmute/$targetAccountId',
-    );
-  }
-
-  Future<void> kickParticipantByAccountId(String targetAccountId) async {
-    if (_roomId == null || _roomId!.isEmpty) {
-      throw StateError('No active room');
-    }
-    if (!_isAdmin) {
-      throw StateError('Only room admins can kick participants');
-    }
-
-    final apiClient = ref.read(apiClientProvider);
-    await apiClient.post(
-      '/messager/chat/realtime/$_roomId/kick/$targetAccountId',
-    );
-  }
-
-  void setParticipantVolume(CallParticipantLive live, double volume) {
-    if (participantsVolumes[live.remoteParticipant.sid] == null) {
-      participantsVolumes[live.remoteParticipant.sid] = 1;
-    }
-    Helper.setVolume(
-      volume,
-      live
-          .remoteParticipant
-          .audioTrackPublications
-          .first
-          .track!
-          .mediaStreamTrack,
-    );
-    participantsVolumes[live.remoteParticipant.sid] = volume;
-  }
-
-  double getParticipantVolume(CallParticipantLive live) {
-    return participantsVolumes[live.remoteParticipant.sid] ?? 1;
-  }
-
-  void toggleViewMode() {
-    state = state.copyWith(
-      viewMode: state.viewMode == ViewMode.grid
-          ? ViewMode.stage
-          : ViewMode.grid,
-    );
-  }
+  void toggleViewMode() => _ctrl.toggleViewMode();
 
   void dispose() {
-    _shouldAutoReconnect = false;
-    _reconnectTimer?.cancel();
-    _connectionHealthTimer?.cancel();
-    _isReconnecting = false;
-
-    state = state.copyWith(
-      error: null,
+    // ponytail: controller may already be disposed by ref.onDispose
+    if (_controller != null && !_controller!.isDisposed) {
+      _controller!.stateNotifier.removeListener(_syncState);
+      _controller!.dispose();
+    }
+    _controller = null;
+    state = const CallState(
       isConnected: false,
+      isReconnecting: false,
       isMicrophoneEnabled: false,
       isCameraEnabled: false,
       isScreenSharing: false,
+      isSpeakerphone: true,
+      viewMode: ViewMode.grid,
+      participantSyncVersion: 0,
     );
-    _room?.removeListener(_onConnectionStateChange);
-    _roomListener?.dispose();
-    _room?.disconnect();
-    _room?.dispose();
-    _durationTimer?.cancel();
-    _roomId = null;
-    _currentRoom = null;
-    _isAdmin = false;
-    participantsVolumes = {};
-    WakelockPlus.disable();
   }
 }

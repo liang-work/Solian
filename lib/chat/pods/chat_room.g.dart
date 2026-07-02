@@ -37,7 +37,7 @@ final class ChatGlobalSyncNotifierProvider
 }
 
 String _$chatGlobalSyncNotifierHash() =>
-    r'5ea279d095fffd4c8db130aebf47ed11ffb3bf76';
+    r'da9486ac16b36ad7589b1a46bcd897f125244c85';
 
 /// Global chat sync notifier that syncs messages from all chat rooms
 
@@ -63,7 +63,7 @@ abstract class _$ChatGlobalSyncNotifier extends $AsyncNotifier<void> {
 final chatRoomJoinedProvider = ChatRoomJoinedNotifierProvider._();
 
 final class ChatRoomJoinedNotifierProvider
-    extends $AsyncNotifierProvider<ChatRoomJoinedNotifier, List<SnChatRoom>> {
+    extends $StreamNotifierProvider<ChatRoomJoinedNotifier, List<SnChatRoom>> {
   ChatRoomJoinedNotifierProvider._()
     : super(
         from: null,
@@ -84,11 +84,11 @@ final class ChatRoomJoinedNotifierProvider
 }
 
 String _$chatRoomJoinedNotifierHash() =>
-    r'b5d0a951bee8af865c6881100ae936b223792b2b';
+    r'a669ab2aa9d1f51940d9d8a8371ee5e770961263';
 
 abstract class _$ChatRoomJoinedNotifier
-    extends $AsyncNotifier<List<SnChatRoom>> {
-  FutureOr<List<SnChatRoom>> build();
+    extends $StreamNotifier<List<SnChatRoom>> {
+  Stream<List<SnChatRoom>> build();
   @$mustCallSuper
   @override
   void runBuild() {

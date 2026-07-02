@@ -7,6 +7,7 @@ import 'package:solar_network_sdk/src/models/accounts/relationship.dart';
 import 'package:solar_network_sdk/src/models/accounts/progression.dart';
 import 'package:solar_network_sdk/src/models/accounts/fortune.dart';
 import 'package:solar_network_sdk/src/models/accounts/action_log.dart';
+import 'package:solar_network_sdk/src/models/accounts/affiliation.dart';
 import 'package:solar_network_sdk/src/models/accounts/abuse_report.dart';
 import 'package:solar_network_sdk/src/models/accounts/abuse_report_type.dart';
 import 'package:solar_network_sdk/src/models/activity/activity.dart';
@@ -102,6 +103,18 @@ class AccountsApi extends BaseApi {
   /// [badgeId] - ID of the badge to activate.
   Future<void> activateBadge(String badgeId) async {
     await post('$_basePath/accounts/me/badges/$badgeId/active');
+  }
+
+  /// Fetches the public badges manifest.
+  ///
+  /// Returns metadata for all progression badges (colors, icons, labels).
+  /// No authentication required; response is cached for 1 hour server-side.
+  Future<List<BadgeManifestEntry>> getBadgesManifest() async {
+    final response = await get<Map<String, dynamic>>('/.well-known/badges');
+    final badges = response.data?['badges'] as List<dynamic>? ?? [];
+    return badges
+        .map((e) => BadgeManifestEntry.fromJson(e as Map<String, dynamic>))
+        .toList();
   }
 
   // ==========================================
@@ -274,6 +287,8 @@ class AccountsApi extends BaseApi {
     try {
       final response = await get<Map<String, dynamic>>(
         '$_basePath/accounts/me/check-in',
+        queryParameters: {'version': 2},
+        options: Options(receiveTimeout: const Duration(seconds: 60)),
       );
       return SnCheckInResult.fromJson(response.data!);
     } on DioException catch (e) {
@@ -290,7 +305,9 @@ class AccountsApi extends BaseApi {
   Future<void> checkIn({String? captchaToken}) async {
     await post(
       '$_basePath/accounts/me/check-in',
+      queryParameters: {'version': 2},
       data: captchaToken != null ? jsonEncode(captchaToken) : null,
+      options: Options(receiveTimeout: const Duration(seconds: 60)),
     );
   }
 
@@ -391,11 +408,17 @@ class AccountsApi extends BaseApi {
   ///
   /// [startTime] - Filter events starting after this time.
   /// [endTime] - Filter events ending before this time.
+  /// [accountId] - Restrict to one accessible account.
+  /// [query] - Matches title, description, location, or exact normalized tag.
+  /// [tags] - Filter by one or more tags.
   /// [offset] - Pagination offset.
   /// [take] - Number of results to return.
   Future<PaginatedResult<SnUserCalendarEvent>> listCalendarEvents({
     DateTime? startTime,
     DateTime? endTime,
+    String? accountId,
+    String? query,
+    List<String>? tags,
     int offset = 0,
     int take = 50,
   }) async {
@@ -406,6 +429,15 @@ class AccountsApi extends BaseApi {
     }
     if (endTime != null) {
       queryParameters['endTime'] = endTime.toUtc().toIso8601String();
+    }
+    if (accountId != null) {
+      queryParameters['accountId'] = accountId;
+    }
+    if (query != null && query.isNotEmpty) {
+      queryParameters['query'] = query;
+    }
+    if (tags != null && tags.isNotEmpty) {
+      queryParameters['tags'] = tags;
     }
 
     final response = await get<List<dynamic>>(
@@ -430,7 +462,10 @@ class AccountsApi extends BaseApi {
   /// [isAllDay] - Whether this is an all-day event.
   /// [visibility] - Visibility level (0=Private, 100=Friends, 200=Public).
   /// [recurrence] - Recurrence pattern.
+  /// [tags] - Free-form tags (will be normalized server-side: trimmed, lowercased, deduplicated).
   /// [meta] - Custom metadata.
+  /// [iconId] - File ID for event icon.
+  /// [backgroundId] - File ID for event background image.
   Future<SnUserCalendarEvent> createCalendarEvent({
     required String title,
     required DateTime startTime,
@@ -440,7 +475,10 @@ class AccountsApi extends BaseApi {
     bool isAllDay = false,
     int visibility = SnEventVisibility.private,
     SnRecurrencePattern? recurrence,
+    List<String>? tags,
     Map<String, dynamic>? meta,
+    String? iconId,
+    String? backgroundId,
   }) async {
     final response = await post<Map<String, dynamic>>(
       '$_basePath/accounts/me/calendar/events',
@@ -454,7 +492,7 @@ class AccountsApi extends BaseApi {
         'visibility': visibility,
         if (recurrence != null)
           'recurrence': {
-            'frequency': _recurrenceFrequencyToString(recurrence.frequency),
+            'frequency': recurrence.frequency,
             'interval': recurrence.interval,
             if (recurrence.endDate != null)
               'end_date': recurrence.endDate!.toUtc().toIso8601String(),
@@ -467,7 +505,10 @@ class AccountsApi extends BaseApi {
             if (recurrence.monthOfYear != null)
               'month_of_year': recurrence.monthOfYear,
           },
+        'tags': tags,
         'meta': ?meta,
+        'icon_id': ?iconId,
+        'background_id': ?backgroundId,
       },
     );
 
@@ -484,10 +525,25 @@ class AccountsApi extends BaseApi {
     return SnUserCalendarEvent.fromJson(response.data!);
   }
 
+  /// Gets a specific calendar event by username and event ID.
+  ///
+  /// [username] - Account username.
+  /// [id] - Event ID.
+  Future<SnUserCalendarEvent> getUserCalendarEvent(
+    String username,
+    String id,
+  ) async {
+    final response = await get<Map<String, dynamic>>(
+      '$_basePath/accounts/$username/calendar/events/$id',
+    );
+    return SnUserCalendarEvent.fromJson(response.data!);
+  }
+
   /// Updates an existing calendar event.
   ///
   /// [id] - Event ID.
   /// All other fields are optional - only provided fields will be updated.
+  /// When [tags] is provided, it replaces the stored tag set.
   Future<SnUserCalendarEvent> updateCalendarEvent({
     required String id,
     String? title,
@@ -498,7 +554,10 @@ class AccountsApi extends BaseApi {
     bool? isAllDay,
     int? visibility,
     SnRecurrencePattern? recurrence,
+    List<String>? tags,
     Map<String, dynamic>? meta,
+    String? iconId,
+    String? backgroundId,
   }) async {
     final data = <String, dynamic>{
       'title': ?title,
@@ -512,7 +571,7 @@ class AccountsApi extends BaseApi {
         'recurrence': recurrence.frequency == SnRecurrenceFrequency.none
             ? null
             : {
-                'frequency': _recurrenceFrequencyToString(recurrence.frequency),
+                'frequency': recurrence.frequency,
                 'interval': recurrence.interval,
                 if (recurrence.endDate != null)
                   'end_date': recurrence.endDate!.toUtc().toIso8601String(),
@@ -525,7 +584,10 @@ class AccountsApi extends BaseApi {
                 if (recurrence.monthOfYear != null)
                   'month_of_year': recurrence.monthOfYear,
               },
+      'tags': tags,
       'meta': ?meta,
+      'icon_id': ?iconId,
+      'background_id': ?backgroundId,
     };
 
     final response = await put<Map<String, dynamic>>(
@@ -543,19 +605,125 @@ class AccountsApi extends BaseApi {
     await delete('$_basePath/accounts/me/calendar/events/$id');
   }
 
-  String _recurrenceFrequencyToString(int frequency) {
-    switch (frequency) {
-      case SnRecurrenceFrequency.daily:
-        return 'Daily';
-      case SnRecurrenceFrequency.weekly:
-        return 'Weekly';
-      case SnRecurrenceFrequency.monthly:
-        return 'Monthly';
-      case SnRecurrenceFrequency.yearly:
-        return 'Yearly';
-      default:
-        return 'None';
+  // ==========================================
+  // Calendar Subscription endpoints
+  // ==========================================
+
+  /// Lists account IDs the current user has subscribed to.
+  Future<List<String>> listCalendarSubscriptions() async {
+    final response = await get<List<dynamic>>(
+      '$_basePath/accounts/me/calendar/subscriptions',
+    );
+    return (response.data ?? []).cast<String>();
+  }
+
+  /// Subscribes to another user's public events.
+  ///
+  /// [accountId] - The target account to subscribe to.
+  Future<void> subscribeToCalendar(String accountId) async {
+    await post('$_basePath/accounts/me/calendar/subscriptions/$accountId');
+  }
+
+  /// Unsubscribes from another user's events.
+  ///
+  /// [accountId] - The target account to unsubscribe from.
+  Future<void> unsubscribeFromCalendar(String accountId) async {
+    await delete('$_basePath/accounts/me/calendar/subscriptions/$accountId');
+  }
+
+  /// Gets a list of account IDs subscribed to the current user's events.
+  Future<List<String>> listCalendarSubscribers() async {
+    final response = await get<List<dynamic>>(
+      '$_basePath/accounts/me/calendar/subscriptions/subscribers',
+    );
+    return (response.data ?? []).cast<String>();
+  }
+
+  // ==========================================
+  // Calendar Event Tags endpoints
+  // ==========================================
+
+  /// Gets the current user's distinct calendar event tags.
+  Future<List<String>> getUsedCalendarTags() async {
+    final response = await get<List<dynamic>>(
+      '$_basePath/accounts/me/calendar/tags',
+    );
+    return (response.data ?? []).cast<String>();
+  }
+
+  // ==========================================
+  // Calendar Search endpoints
+  // ==========================================
+
+  /// Searches accessible calendar events and notable days.
+  ///
+  /// [query] - Search text matching title, description, location, or exact normalized tag.
+  /// [accountId] - Filter event-side results to one accessible account.
+  /// [tags] - Filter by one or more event tags.
+  /// [startTime] - Filter events starting after this time.
+  /// [endTime] - Filter events ending before this time.
+  /// [notableDayTag] - Filter notable days by tag (int: 0=Holiday, 1=Event, 2=Anniversary, 3=Memorial, 4=Festival).
+  /// [offset] - Pagination offset.
+  /// [take] - Number of results to return.
+  Future<List<Map<String, dynamic>>> searchCalendarEvents({
+    String? query,
+    String? accountId,
+    List<String>? tags,
+    DateTime? startTime,
+    DateTime? endTime,
+    int? notableDayTag,
+    int offset = 0,
+    int take = 50,
+  }) async {
+    final queryParameters = <String, dynamic>{
+      'offset': offset,
+      'take': take,
+    };
+
+    if (query != null && query.isNotEmpty) {
+      queryParameters['query'] = query;
     }
+    if (accountId != null) {
+      queryParameters['accountId'] = accountId;
+    }
+    if (tags != null && tags.isNotEmpty) {
+      queryParameters['tags'] = tags;
+    }
+    if (startTime != null) {
+      queryParameters['startTime'] = startTime.toUtc().toIso8601String();
+    }
+    if (endTime != null) {
+      queryParameters['endTime'] = endTime.toUtc().toIso8601String();
+    }
+    if (notableDayTag != null) {
+      queryParameters['notableDayTag'] = notableDayTag;
+    }
+
+    final response = await get<List<dynamic>>(
+      '$_basePath/accounts/me/calendar/search',
+      queryParameters: queryParameters,
+    );
+
+    return (response.data ?? [])
+        .map((e) => e as Map<String, dynamic>)
+        .toList();
+  }
+
+  // ==========================================
+  // Notable Day Detail endpoints
+  // ==========================================
+
+  /// Gets generated notable day detail by synthetic occurrence key.
+  ///
+  /// [occurrenceKey] - Synthetic key in format: region|yyyy-MM-dd|source-identity
+  /// Example: us|2026-12-25|christmas
+  Future<Map<String, dynamic>> getNotableDayDetail(
+    String occurrenceKey,
+  ) async {
+    final response = await get<Map<String, dynamic>>(
+      '$_basePath/accounts/me/calendar/notable-days/$occurrenceKey',
+    );
+    return response.data!;
   }
 
   // ==========================================
@@ -565,27 +733,59 @@ class AccountsApi extends BaseApi {
   /// Gets upcoming event countdowns for the authenticated user.
   ///
   /// [take] - Number of countdowns to return (default 5).
-  Future<List<SnEventCountdownItem>> getEventCountdowns({int take = 5}) async {
+  /// [offset] - Pagination offset.
+  /// [includeNotableDays] - Whether to include notable days (default true).
+  /// [tag] - Filter notable days by tag (Holiday, Event, Anniversary, Memorial, Festival).
+  Future<PaginatedResult<SnEventCountdownItem>> getEventCountdowns({
+    int take = 5,
+    int offset = 0,
+    bool includeNotableDays = true,
+    String? tag,
+  }) async {
     final response = await get<List<dynamic>>(
       '$_basePath/accounts/me/calendar/countdown',
-      queryParameters: {'take': take},
+      queryParameters: {
+        'take': take,
+        'offset': offset,
+        'includeNotableDays': includeNotableDays,
+        'tag': ?tag,
+      },
     );
-    return parseList(response, SnEventCountdownItem.fromJson);
+    final totalCount = int.parse(response.headers.value('X-Total') ?? '0');
+    return PaginatedResult(
+      items: parseList(response, SnEventCountdownItem.fromJson),
+      totalCount: totalCount,
+    );
   }
 
   /// Gets upcoming event countdowns for another user.
   ///
   /// [username] - Username to fetch countdowns for.
   /// [take] - Number of countdowns to return (default 5).
-  Future<List<SnEventCountdownItem>> getUserEventCountdowns(
+  /// [offset] - Pagination offset.
+  /// [includeNotableDays] - Whether to include notable days (default true).
+  /// [tag] - Filter notable days by tag (Holiday, Event, Anniversary, Memorial, Festival).
+  Future<PaginatedResult<SnEventCountdownItem>> getUserEventCountdowns(
     String username, {
     int take = 5,
+    int offset = 0,
+    bool includeNotableDays = true,
+    String? tag,
   }) async {
     final response = await get<List<dynamic>>(
       '$_basePath/accounts/$username/calendar/countdown',
-      queryParameters: {'take': take},
+      queryParameters: {
+        'take': take,
+        'offset': offset,
+        'includeNotableDays': includeNotableDays,
+        'tag': ?tag,
+      },
     );
-    return parseList(response, SnEventCountdownItem.fromJson);
+    final totalCount = int.parse(response.headers.value('X-Total') ?? '0');
+    return PaginatedResult(
+      items: parseList(response, SnEventCountdownItem.fromJson),
+      totalCount: totalCount,
+    );
   }
 
   // ==========================================
@@ -700,6 +900,89 @@ class AccountsApi extends BaseApi {
       items: parseList(response, SnAccountTimelineItem.fromJson),
       totalCount: totalCount,
     );
+  }
+
+  // ==========================================
+  // Affiliation spell endpoints
+  // ==========================================
+
+  /// Creates a new affiliation spell.
+  ///
+  /// [spell] - Optional custom spell word. If null, a random 8-char string is generated.
+  Future<SnAffiliationSpell> createAffiliationSpell({String? spell}) async {
+    final response = await post<Map<String, dynamic>>(
+      '$_basePath/affiliations',
+      data: {'spell': ?spell},
+    );
+    return SnAffiliationSpell.fromJson(response.data!);
+  }
+
+  /// Lists the current user's affiliation spells.
+  ///
+  /// [order] - Sort order: 'date' or 'usage'.
+  /// [desc] - Whether to sort descending.
+  /// [take] - Number of items to take.
+  /// [offset] - Pagination offset.
+  Future<PaginatedResult<SnAffiliationSpell>> listAffiliationSpells({
+    String order = 'date',
+    bool desc = false,
+    int take = 20,
+    int offset = 0,
+  }) async {
+    final response = await get<List<dynamic>>(
+      '$_basePath/affiliations',
+      queryParameters: {
+        'order': order,
+        'desc': desc,
+        'take': take,
+        'offset': offset,
+      },
+    );
+    final totalCount = getTotalCount(response.headers);
+    return PaginatedResult(
+      items: parseList(response, SnAffiliationSpell.fromJson),
+      totalCount: totalCount,
+    );
+  }
+
+  /// Gets an affiliation spell by ID.
+  ///
+  /// [id] - The spell ID.
+  Future<SnAffiliationSpell> getAffiliationSpell(String id) async {
+    final response = await get<Map<String, dynamic>>(
+      '$_basePath/affiliations/$id',
+    );
+    return SnAffiliationSpell.fromJson(response.data!);
+  }
+
+  /// Lists results for an affiliation spell.
+  ///
+  /// [id] - The spell ID.
+  /// [desc] - Whether to sort descending.
+  /// [take] - Number of items to take.
+  /// [offset] - Pagination offset.
+  Future<PaginatedResult<SnAffiliationResult>> listAffiliationResults(
+    String id, {
+    bool desc = false,
+    int take = 20,
+    int offset = 0,
+  }) async {
+    final response = await get<List<dynamic>>(
+      '$_basePath/affiliations/$id/results',
+      queryParameters: {'desc': desc, 'take': take, 'offset': offset},
+    );
+    final totalCount = getTotalCount(response.headers);
+    return PaginatedResult(
+      items: parseList(response, SnAffiliationResult.fromJson),
+      totalCount: totalCount,
+    );
+  }
+
+  /// Deletes an affiliation spell.
+  ///
+  /// [id] - The spell ID.
+  Future<void> deleteAffiliationSpell(String id) async {
+    await delete('$_basePath/affiliations/$id');
   }
 
   // ==========================================

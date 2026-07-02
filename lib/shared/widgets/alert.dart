@@ -5,51 +5,26 @@ import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:gap/gap.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
-import 'package:island/main.dart';
 import 'package:island/core/config.dart';
+import 'package:island/main.dart';
 import 'package:island/core/notification.dart';
-import 'package:island/core/services/responsive.dart';
-
+import 'package:island/route.dart';
 import 'package:just_audio/just_audio.dart';
+export 'package:island_ui_foundation/src/snackbar_overlay.dart'
+    show
+        SnackBarEntryKey,
+        dismissSnackBar,
+        showCustomSnackBar,
+        showSnackBar,
+        showStyledSnackBar,
+        updateCustomSnackBar;
 import 'package:logging/logging.dart';
 import 'package:material_symbols_icons/symbols.dart';
 import 'package:styled_widget/styled_widget.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:solar_network_sdk/solar_network_sdk.dart';
-
-const double kFloatingSnackBarWidth = 400.0;
-
-void showSnackBar(String message, {SnackBarAction? action}) {
-  final messenger = globalScaffoldMessengerKey.currentState;
-  if (messenger == null) return;
-
-  final context = messenger.context;
-  final screenWidth = MediaQuery.of(context).size.width;
-  final wideScreen = screenWidth > kWideScreenWidth;
-
-  messenger.hideCurrentSnackBar();
-  messenger.showSnackBar(
-    wideScreen
-        ? SnackBar(
-            content: Text(message),
-            action: action,
-            behavior: SnackBarBehavior.floating,
-            duration: const Duration(milliseconds: 1500),
-            margin: EdgeInsets.only(
-              left: screenWidth - kFloatingSnackBarWidth - 16,
-              right: 16,
-              bottom: 16,
-            ),
-          )
-        : SnackBar(
-            content: Text(message),
-            action: action,
-            behavior: SnackBarBehavior.fixed,
-            shape: RoundedRectangleBorder(),
-            duration: const Duration(milliseconds: 1500),
-          ),
-  );
-}
+import 'package:island/core/network/domain_trust.dart';
+import 'package:island/shared/widgets/content/domain_trust_sheet.dart';
 
 OverlayEntry? _loadingOverlay;
 GlobalKey<_FadeOverlayState> _loadingOverlayKey = GlobalKey();
@@ -233,7 +208,7 @@ Future<T?> showOverlayDialog<T>({
   );
 
   _activeOverlayDialogs.add(() => close(null));
-  globalOverlay.currentState!.insert(entry);
+  globalOverlay.currentState?.insert(entry);
   return completer.future;
 }
 
@@ -257,7 +232,14 @@ Future<void> _playSfx(String assetPath, double volume) async {
 }
 
 void showErrorAlert(dynamic err, {IconData? icon}) {
-  final context = globalOverlay.currentState!.context;
+  final state = globalOverlay.currentState;
+  if (state == null) {
+    Logger.root.severe(
+      '[Alert] showErrorAlert called but overlay not ready: $err',
+    );
+    return;
+  }
+  final context = state.context;
   final ref = ProviderScope.containerOf(context);
   final settings = ref.read(appSettingsProvider);
   if (settings.soundEffects) {
@@ -314,7 +296,9 @@ void showErrorAlert(dynamic err, {IconData? icon}) {
 }
 
 void showInfoAlert(String message, String title, {IconData? icon}) {
-  final context = globalOverlay.currentState!.context;
+  final state = globalOverlay.currentState;
+  if (state == null) return;
+  final context = state.context;
   final ref = ProviderScope.containerOf(context);
   final settings = ref.read(appSettingsProvider);
   if (settings.soundEffects) {
@@ -362,7 +346,9 @@ Future<bool> showConfirmAlert(
   IconData? icon,
   bool isDanger = false,
 }) async {
-  final context = globalOverlay.currentState!.context;
+  final state = globalOverlay.currentState;
+  if (state == null) return false;
+  final context = state.context;
   final ref = ProviderScope.containerOf(context);
   final settings = ref.read(appSettingsProvider);
   if (settings.soundEffects) {
@@ -421,19 +407,18 @@ void showNotification({
   Map<String, dynamic> meta = const {},
   Duration? duration,
 }) {
-  final context = globalOverlay.currentState!.context;
+  final state = globalOverlay.currentState;
+  if (state == null) return;
+  final context = state.context;
   final ref = ProviderScope.containerOf(context);
   final notification = SnNotification(
     createdAt: DateTime.now(),
-    updatedAt: DateTime.now(),
-    deletedAt: null,
     id: 'local_${DateTime.now().millisecondsSinceEpoch}',
     topic: 'local',
     title: title,
     subtitle: subtitle,
-    content: content,
+    body: content,
     meta: meta,
-    priority: 0,
     viewedAt: null,
     accountId: 'local',
   );
@@ -443,18 +428,49 @@ void showNotification({
 }
 
 Future<void> openExternalLink(Uri url, WidgetRef ref) async {
-  final whitelistDomains = ['solian.app', 'solsynth.dev'];
-  if (whitelistDomains.any(
-    (domain) => url.host == domain || url.host.endsWith('.$domain'),
-  )) {
+  final state = globalOverlay.currentState;
+  if (state == null) return;
+  await openExternalLinkWithContainer(
+    url,
+    ProviderScope.containerOf(state.context),
+  );
+}
+
+Future<void> openExternalLinkWithContainer(
+  Uri url,
+  ProviderContainer container,
+) async {
+  if (url.scheme == 'solian') {
     await launchUrl(url, mode: LaunchMode.externalApplication);
-  } else {
-    final value = await showConfirmAlert(
-      'openLinkConfirmDescription'.tr(args: [url.toString()]),
-      'openLinkConfirm'.tr(),
-    );
-    if (value) {
-      await launchUrl(url, mode: LaunchMode.externalApplication);
-    }
+    return;
+  }
+
+  final context = container
+      .read(routerProvider)
+      .navigatorKey
+      .currentState!
+      .context;
+
+  showLoadingModal(context);
+  final domainTrustService = container.read(domainTrustServiceProvider);
+  final result = await domainTrustService.validateUrl(url);
+
+  if (!context.mounted) return;
+  hideLoadingModal(context);
+
+  if (result.trustLevel == DomainTrustLevel.verified) {
+    await launchUrl(url, mode: LaunchMode.externalApplication);
+    return;
+  }
+
+  final decision = await showDomainTrustSheet(
+    context,
+    uri: url,
+    result: result,
+    action: DomainTrustAction.openLink,
+  );
+
+  if (decision == DomainTrustDecision.proceed) {
+    await launchUrl(url, mode: LaunchMode.externalApplication);
   }
 }

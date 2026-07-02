@@ -4,19 +4,23 @@ import 'package:flutter/material.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 import 'package:island/accounts/widgets/account/account_devices.dart';
 import 'package:island/accounts/widgets/account/account_authorized_apps.dart';
-import 'package:island/core/network.dart';
 import 'package:island/accounts/account_pod.dart';
 import 'package:island/accounts/screens/me/settings_auth_factors.dart';
 import 'package:island/accounts/screens/me/settings_connections.dart';
 import 'package:island/accounts/screens/me/settings_contacts.dart';
+import 'package:island/accounts/screens/me/settings_webdav.dart';
 import 'package:island/auth/captcha.dart';
 import 'package:island/auth/login.dart';
+import 'package:island/chat/widgets/chat_groups_manager.dart';
+import 'package:island/core/database.dart';
+import 'package:island/core/network.dart';
 import 'package:island/creators/screens/publishers_form.dart';
 import 'package:island/drive/widgets/cloud_files.dart';
 import 'package:island/shared/widgets/alert.dart';
 import 'package:island/shared/widgets/app_scaffold.dart' hide PageBackButton;
 import 'package:island/shared/widgets/layouts/sheet_scaffold.dart';
 import 'package:island/shared/widgets/response.dart';
+import 'package:island/route.gr.dart';
 import 'package:material_symbols_icons/symbols.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 import 'package:styled_widget/styled_widget.dart';
@@ -67,6 +71,14 @@ Future<Map<String, SnNotificationPreferenceLevel>> notificationPreferences(
   final client = ref.read(solarNetworkClientProvider);
   final prefs = await client.notifications.getPreferences();
   return {for (var p in prefs) p.topic: p.preference};
+}
+
+@riverpod
+Future<List<SnNotificationPushSubscription>> notificationSubscriptions(
+  Ref ref,
+) async {
+  final client = ref.read(solarNetworkClientProvider);
+  return await client.notifications.getSubscriptions();
 }
 
 @riverpod
@@ -146,6 +158,20 @@ class AccountSettingsScreen extends HookConsumerWidget {
     final authFactors = ref.watch(authFactorsProvider);
 
     // Group settings into categories for better organization
+    final profileSettings = [
+      ListTile(
+        minLeadingWidth: 48,
+        leading: const Icon(Symbols.person_edit),
+        title: Text('updateYourProfile').tr(),
+        subtitle: Text('updateYourProfileDescription').tr().fontSize(12),
+        contentPadding: const EdgeInsets.only(left: 24, right: 17),
+        trailing: const Icon(Symbols.chevron_right),
+        onTap: () {
+          context.router.push(const AccountUpdateProfileRoute());
+        },
+      ),
+    ];
+
     final securitySettings = [
       ListTile(
         minLeadingWidth: 48,
@@ -535,6 +561,74 @@ class AccountSettingsScreen extends HookConsumerWidget {
           });
         },
       ),
+      ListTile(
+        minLeadingWidth: 48,
+        leading: const Icon(Symbols.cell_tower),
+        title: Text('notificationSubscriptions').tr(),
+        subtitle: Text(
+          'notificationSubscriptionsDescription',
+        ).tr().fontSize(12),
+        contentPadding: const EdgeInsets.only(left: 24, right: 17),
+        trailing: const Icon(Symbols.chevron_right),
+        onTap: () {
+          showModalBottomSheet(
+            context: context,
+            isScrollControlled: true,
+            builder: (context) => const NotificationSubscriptionsSheet(),
+          ).then((value) {
+            if (value == true) {
+              ref.invalidate(notificationSubscriptionsProvider);
+            }
+          });
+        },
+      ),
+    ];
+
+    final activitySettings = [
+      ListTile(
+        minLeadingWidth: 48,
+        leading: const Icon(Symbols.history),
+        title: Text('actionLogs').tr(),
+        subtitle: Text('actionLogsDescription').tr().fontSize(12),
+        contentPadding: const EdgeInsets.only(left: 24, right: 17),
+        trailing: const Icon(Symbols.chevron_right),
+        onTap: () {
+          context.router.push(const ActionLogsRoute());
+        },
+      ),
+      ListTile(
+        minLeadingWidth: 48,
+        leading: const Icon(Symbols.gavel),
+        title: Text('punishments').tr(),
+        subtitle: Text('punishmentsDescription').tr().fontSize(12),
+        contentPadding: const EdgeInsets.only(left: 24, right: 17),
+        trailing: const Icon(Symbols.chevron_right),
+        onTap: () {
+          context.router.push(const PunishmentsRoute());
+        },
+      ),
+      ListTile(
+        minLeadingWidth: 48,
+        leading: const Icon(Symbols.auto_fix_high),
+        title: Text('affiliations').tr(),
+        subtitle: Text('affiliationsDescription').tr().fontSize(12),
+        contentPadding: const EdgeInsets.only(left: 24, right: 17),
+        trailing: const Icon(Symbols.chevron_right),
+        onTap: () {
+          context.router.push(const AffiliationRoute());
+        },
+      ),
+      ListTile(
+        minLeadingWidth: 48,
+        leading: const Icon(Symbols.report),
+        title: Text('tickets').tr(),
+        subtitle: Text('ticketsDescription').tr().fontSize(12),
+        contentPadding: const EdgeInsets.only(left: 24, right: 17),
+        trailing: const Icon(Symbols.chevron_right),
+        onTap: () {
+          context.router.push(const TicketListRoute());
+        },
+      ),
     ];
 
     final dangerZoneSettings = [
@@ -549,12 +643,62 @@ class AccountSettingsScreen extends HookConsumerWidget {
       ),
     ];
 
+    final integrationsSettings = [
+      ListTile(
+        minLeadingWidth: 48,
+        leading: const Icon(Symbols.group),
+        title: const Text('Chat Groups'),
+        subtitle: const Text('Manage your chat room groups').fontSize(12),
+        contentPadding: const EdgeInsets.only(left: 24, right: 17),
+        trailing: const Icon(Symbols.chevron_right),
+        onTap: () async {
+          final accountId = ref.read(userInfoProvider).value?.id;
+          if (accountId == null) return;
+
+          final client = ref.read(apiClientProvider);
+          final db = ref.read(databaseProvider);
+          final groups =
+              ref.read(chatGroupsProvider).value ?? const <SnChatGroup>[];
+
+          final changed = await showChatGroupsManagerSheet(
+            context,
+            client: client,
+            db: db,
+            accountId: accountId,
+            groups: groups,
+          );
+          if (changed) {
+            ref.invalidate(chatGroupsProvider);
+          }
+        },
+      ),
+      ListTile(
+        minLeadingWidth: 48,
+        leading: const Icon(Symbols.cloud_sync),
+        title: Text('storageSettings').tr(),
+        subtitle: Text('storageSettingsDescription').tr().fontSize(12),
+        contentPadding: const EdgeInsets.only(left: 24, right: 17),
+        trailing: const Icon(Symbols.chevron_right),
+        onTap: () {
+          showModalBottomSheet(
+            context: context,
+            isScrollControlled: true,
+            builder: (context) => const StorageSettingsSheet(),
+          );
+        },
+      ),
+    ];
+
     // Create a responsive layout based on screen width
     Widget buildSettingsList() {
       return Column(
         spacing: 16,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          _SettingsSection(
+            title: 'accountProfileTitle',
+            children: profileSettings,
+          ),
           _SettingsSection(
             title: 'accountPublishingTitle',
             children: defaultPublisherSettings,
@@ -564,8 +708,16 @@ class AccountSettingsScreen extends HookConsumerWidget {
             children: notificationPreferencesSettings,
           ),
           _SettingsSection(
+            title: 'accountActivityTitle',
+            children: activitySettings,
+          ),
+          _SettingsSection(
             title: 'accountSecurityTitle',
             children: securitySettings,
+          ),
+          _SettingsSection(
+            title: 'accountIntegrationsTitle',
+            children: integrationsSettings,
           ),
           _SettingsSection(
             title: 'accountDangerZoneTitle',
@@ -1236,5 +1388,303 @@ class _NotificationCustomTopicSheetState
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
+  }
+}
+
+class NotificationSubscriptionsSheet extends ConsumerWidget {
+  const NotificationSubscriptionsSheet({super.key});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final subscriptions = ref.watch(notificationSubscriptionsProvider);
+
+    return SheetScaffold(
+      titleText: 'notificationSubscriptions'.tr(),
+      heightFactor: 0.8,
+      child: subscriptions.when(
+        data: (subs) => subs.isEmpty
+            ? Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      Symbols.cell_tower,
+                      size: 48,
+                      color: Theme.of(context).colorScheme.outline,
+                    ),
+                    const SizedBox(height: 16),
+                    Text(
+                      'notificationSubscriptionsEmpty'.tr(),
+                      style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                        color: Theme.of(context).colorScheme.outline,
+                      ),
+                    ),
+                  ],
+                ),
+              )
+            : ListView.builder(
+                padding: EdgeInsets.zero,
+                itemCount: subs.length,
+                itemBuilder: (context, index) {
+                  final sub = subs[index];
+                  final presentation =
+                      _NotificationSubscriptionPresentation.forProvider(
+                        sub.provider,
+                      );
+                  return ListTile(
+                    minLeadingWidth: 48,
+                    contentPadding: const EdgeInsets.only(
+                      left: 16,
+                      right: 17,
+                      top: 2,
+                      bottom: 4,
+                    ),
+                    title: Text(presentation.label),
+                    subtitle: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        if (sub.deviceName != null &&
+                            sub.deviceName!.isNotEmpty)
+                          Text(sub.deviceName!),
+                        const SizedBox(height: 2),
+                        Text(
+                          presentation.roleHint,
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: Theme.of(context).colorScheme.outline,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          sub.deviceId,
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: Theme.of(context).colorScheme.outline,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          sub.isActivated
+                              ? 'notificationSubscriptionActive'.tr()
+                              : 'notificationSubscriptionInactive'.tr(),
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: sub.isActivated
+                                ? Theme.of(context).colorScheme.primary
+                                : Theme.of(context).colorScheme.outline,
+                          ),
+                        ),
+                      ],
+                    ),
+                    leading: CircleAvatar(
+                      backgroundColor: Theme.of(
+                        context,
+                      ).colorScheme.primaryContainer,
+                      child: Icon(presentation.icon, size: 16),
+                    ).padding(top: 4),
+                    trailing: const Icon(Symbols.chevron_right),
+                    onTap: () {
+                      showModalBottomSheet(
+                        context: context,
+                        isScrollControlled: true,
+                        builder: (context) =>
+                            NotificationSubscriptionDetailSheet(
+                              subscription: sub,
+                            ),
+                      ).then((value) {
+                        if (value == true) {
+                          ref.invalidate(notificationSubscriptionsProvider);
+                        }
+                      });
+                    },
+                  );
+                },
+              ),
+        error: (err, _) => ResponseErrorWidget(
+          error: err,
+          onRetry: () => ref.invalidate(notificationSubscriptionsProvider),
+        ),
+        loading: () => const ResponseLoadingWidget(),
+      ),
+    );
+  }
+}
+
+class NotificationSubscriptionDetailSheet extends ConsumerWidget {
+  final SnNotificationPushSubscription subscription;
+
+  const NotificationSubscriptionDetailSheet({
+    super.key,
+    required this.subscription,
+  });
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final presentation = _NotificationSubscriptionPresentation.forProvider(
+      subscription.provider,
+    );
+
+    Future<void> unsubscribe() async {
+      final confirm = await showConfirmAlert(
+        'notificationSubscriptionDeleteHint'.tr(),
+        'notificationSubscriptionDelete'.tr(),
+        isDanger: true,
+      );
+      if (!confirm || !context.mounted) return;
+      try {
+        showLoadingModal(context);
+        final client = ref.read(solarNetworkClientProvider);
+        await client.notifications.deleteSubscription(subscription.id);
+        if (context.mounted) {
+          Navigator.pop(context, true);
+          showSnackBar('settingsSaved'.tr());
+        }
+      } catch (err) {
+        showErrorAlert(err);
+      } finally {
+        if (context.mounted) hideLoadingModal(context);
+      }
+    }
+
+    return SheetScaffold(
+      titleText: 'notificationSubscriptionDetail'.tr(),
+      heightFactor: 0.5,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Padding(
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(
+                  presentation.icon,
+                  size: 32,
+                  color: Theme.of(context).colorScheme.primary,
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  presentation.label,
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+                const SizedBox(height: 4),
+                if (subscription.deviceName != null &&
+                    subscription.deviceName!.isNotEmpty) ...[
+                  Text(
+                    subscription.deviceName!,
+                    style: Theme.of(context).textTheme.bodyMedium,
+                  ),
+                  const SizedBox(height: 4),
+                ],
+                Text(
+                  presentation.roleHint,
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: Theme.of(context).colorScheme.outline,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  subscription.deviceId,
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: Theme.of(context).colorScheme.outline,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    Icon(
+                      subscription.isActivated
+                          ? Symbols.check_circle
+                          : Symbols.cancel,
+                      size: 16,
+                      color: subscription.isActivated
+                          ? Theme.of(context).colorScheme.primary
+                          : Theme.of(context).colorScheme.outline,
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      subscription.isActivated
+                          ? 'notificationSubscriptionActive'.tr()
+                          : 'notificationSubscriptionInactive'.tr(),
+                      style: TextStyle(
+                        fontSize: 13,
+                        color: subscription.isActivated
+                            ? Theme.of(context).colorScheme.primary
+                            : Theme.of(context).colorScheme.outline,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          const Divider(height: 1),
+          ListTile(
+            leading: Icon(
+              Symbols.delete,
+              color: Theme.of(context).colorScheme.error,
+            ),
+            title: Text(
+              'notificationSubscriptionDelete'.tr(),
+              style: TextStyle(color: Theme.of(context).colorScheme.error),
+            ),
+            onTap: unsubscribe,
+            contentPadding: const EdgeInsets.symmetric(horizontal: 20),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _NotificationSubscriptionPresentation {
+  final String label;
+  final String roleHint;
+  final IconData icon;
+
+  const _NotificationSubscriptionPresentation({
+    required this.label,
+    required this.roleHint,
+    required this.icon,
+  });
+
+  factory _NotificationSubscriptionPresentation.forProvider(
+    SnNotificationPushSubscriptionProvider provider,
+  ) {
+    return switch (provider) {
+      SnNotificationPushSubscriptionProvider.fcm =>
+        const _NotificationSubscriptionPresentation(
+          label: 'Firebase Cloud Messaging',
+          roleHint:
+              'Standard push notifications on Android and supported web flows.',
+          icon: Symbols.android,
+        ),
+      SnNotificationPushSubscriptionProvider.apple =>
+        const _NotificationSubscriptionPresentation(
+          label: 'Apple Push (APNs)',
+          roleHint:
+              'Standard alerts, badges, and message notifications on Apple devices.',
+          icon: Symbols.phone_iphone,
+        ),
+      SnNotificationPushSubscriptionProvider.sop =>
+        const _NotificationSubscriptionPresentation(
+          label: 'Solar Network Push (SOP)',
+          roleHint:
+              'Solar Network native stream-based delivery for this device session.',
+          icon: Symbols.cloud,
+        ),
+      SnNotificationPushSubscriptionProvider.unifiedPush =>
+        const _NotificationSubscriptionPresentation(
+          label: 'UnifiedPush',
+          roleHint: 'Self-hosted push endpoint registration.',
+          icon: Symbols.link,
+        ),
+      SnNotificationPushSubscriptionProvider.appk =>
+        const _NotificationSubscriptionPresentation(
+          label: 'Apple PushKit',
+          roleHint: 'VoIP push delivery for incoming calls on iPhone and iPad.',
+          icon: Symbols.call,
+        ),
+    };
   }
 }

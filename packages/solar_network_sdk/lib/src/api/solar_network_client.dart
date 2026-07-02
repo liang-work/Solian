@@ -10,10 +10,9 @@ import 'domains/thoughts_api.dart';
 import 'domains/e2ee_api.dart';
 import 'domains/drive_api.dart';
 import 'domains/stickers_api.dart';
-import 'domains/livestreams_api.dart';
 import 'domains/notifications_api.dart';
 import 'domains/tickets_api.dart';
-import 'domains/polls_api.dart';
+import 'domains/surveys_api.dart';
 import 'domains/sites_api.dart';
 import 'domains/developers_api.dart';
 import 'domains/payments_api.dart';
@@ -73,17 +72,14 @@ class SolarNetworkClient {
   /// Stickers API (sticker endpoints).
   late final StickersApi stickers;
 
-  /// Livestreams API (livestream endpoints).
-  late final LivestreamsApi livestreams;
-
   /// Notifications API (notification endpoints).
   late final NotificationsApi notifications;
 
   /// Tickets API (ticket endpoints).
   late final TicketsApi tickets;
 
-  /// Polls API (poll endpoints).
-  late final PollsApi polls;
+  /// Surveys API (survey endpoints).
+  late final SurveysApi surveys;
 
   /// Sites API (site endpoints).
   late final SitesApi sites;
@@ -154,10 +150,9 @@ class SolarNetworkClient {
     e2ee = E2EEApi(dio);
     drive = DriveApi(dio);
     stickers = StickersApi(dio);
-    livestreams = LivestreamsApi(dio);
     notifications = NotificationsApi(dio);
     tickets = TicketsApi(dio);
-    polls = PollsApi(dio);
+    surveys = SurveysApi(dio);
     sites = SitesApi(dio);
     developers = DevelopersApi(dio);
     payments = PaymentsApi(dio);

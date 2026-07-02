@@ -3,6 +3,7 @@ import 'package:auto_route/auto_route.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter_hooks/flutter_hooks.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 import 'package:gap/gap.dart';
@@ -176,7 +177,9 @@ class _PostsSearchTab extends HookConsumerWidget {
     final realmController = useTextEditingController();
 
     final categoryTabController = useTabController(initialLength: 3);
-    final queryState = useState(const PostListQuery());
+    final queryState = useState(
+      const PostListQuery(includeReplies: false),
+    );
 
     final noti = ref.read(
       postListProvider(PostListQueryConfig(id: kSearchPostListId)).notifier,
@@ -316,8 +319,10 @@ class _PostsSearchTab extends HookConsumerWidget {
                                 ),
                               ),
                             ),
-                            const Gap(8),
-                            if (showFilters.value) buildFilterPanel(),
+                            if (showFilters.value) ...[
+                              const Gap(8),
+                              buildFilterPanel().padding(horizontal: 8),
+                            ],
                           ],
                         ),
                       ),
@@ -325,78 +330,78 @@ class _PostsSearchTab extends HookConsumerWidget {
                   ),
                 ],
               )
-            : CustomScrollView(
-                slivers: [
-                  const SliverGap(8),
-                  SliverToBoxAdapter(
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Card(
-                          margin: EdgeInsets.symmetric(horizontal: 8),
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 12,
-                              vertical: 8,
-                            ),
-                            child: Row(
-                              children: [
-                                const Icon(Symbols.tune).padding(horizontal: 8),
-                                Expanded(
-                                  child: Text(
-                                    'filters'.tr(),
-                                    style: Theme.of(
-                                      context,
-                                    ).textTheme.bodyLarge,
-                                  ),
-                                ),
-                                IconButton(
-                                  icon: Icon(
-                                    Symbols.filter_alt,
-                                    fill: showFilters.value ? 1 : null,
-                                  ),
-                                  onPressed: toggleFilterDisplay,
-                                  tooltip: 'toggleFilters'.tr(),
-                                ),
-                                const Gap(4),
-                              ],
-                            ),
-                          ),
-                        ),
-                        const Gap(4),
-                        if (showFilters.value) buildFilterPanel(),
-                      ],
+            : Column(
+                children: [
+                  AnimatedSlide(
+                    duration: const Duration(milliseconds: 220),
+                    curve: Curves.easeOutCubic,
+                    offset: showFilters.value
+                        ? Offset.zero
+                        : const Offset(0, -0.08),
+                    child: AnimatedSize(
+                      duration: const Duration(milliseconds: 220),
+                      curve: Curves.easeOutCubic,
+                      alignment: Alignment.topCenter,
+                      child: AnimatedSwitcher(
+                        duration: const Duration(milliseconds: 180),
+                        switchInCurve: Curves.easeOutCubic,
+                        switchOutCurve: Curves.easeInCubic,
+                        child: showFilters.value
+                            ? Padding(
+                                key: const ValueKey('filters-visible'),
+                                padding:
+                                    const EdgeInsets.fromLTRB(8, 12, 8, 12),
+                                child: buildFilterPanel()
+                                    .padding(horizontal: 8),
+                              )
+                            : const SizedBox(key: ValueKey('filters-hidden')),
+                      ),
                     ),
                   ),
-                  PaginationList(
-                    provider: postListProvider(
-                      PostListQueryConfig(id: kSearchPostListId),
-                    ),
-                    notifier: postListProvider(
-                      PostListQueryConfig(id: kSearchPostListId),
-                    ).notifier,
-                    isSliver: true,
-                    isRefreshable: false,
-                    footerSkeletonChild: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 8),
-                      child: const PostItemSkeleton(maxWidth: double.infinity),
-                    ),
-                    itemBuilder: (context, index, post) {
-                      return Card(
-                        margin: EdgeInsets.symmetric(
-                          horizontal: 8,
-                          vertical: 4,
+                  Expanded(
+                    child: NotificationListener<UserScrollNotification>(
+                      onNotification: (notification) {
+                        if (notification.depth != 0) return false;
+                        switch (notification.direction) {
+                          case ScrollDirection.reverse:
+                            if (showFilters.value) {
+                              showFilters.value = false;
+                            }
+                          case ScrollDirection.forward:
+                            if (!showFilters.value) {
+                              showFilters.value = true;
+                            }
+                          case ScrollDirection.idle:
+                            break;
+                        }
+                        return false;
+                      },
+                      child: PaginationList(
+                        provider: postListProvider(
+                          PostListQueryConfig(id: kSearchPostListId),
                         ),
-                        child: PostActionableItem(item: post, borderRadius: 8),
-                      );
-                    },
-                  ),
-                  if (searchState.value?.items.isEmpty == true &&
-                      searchQuery.value.isNotEmpty &&
-                      !searchState.isLoading)
-                    SliverFillRemaining(
-                      child: Center(child: Text('noResultsFound'.tr())),
+                        notifier: postListProvider(
+                          PostListQueryConfig(id: kSearchPostListId),
+                        ).notifier,
+                        padding: const EdgeInsets.symmetric(horizontal: 12),
+                        footerSkeletonChild: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 8),
+                          child:
+                              const PostItemSkeleton(maxWidth: double.infinity),
+                        ),
+                        itemBuilder: (context, index, post) {
+                          return Card(
+                            margin: EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 4,
+                            ),
+                            child:
+                                PostActionableItem(item: post, borderRadius: 8),
+                          );
+                        },
+                      ),
                     ),
+                  ),
                 ],
               );
       },
@@ -630,17 +635,10 @@ class _AccountSearchTab extends HookConsumerWidget {
                                     : publisher.name,
                                 style: Theme.of(context).textTheme.titleMedium,
                               ),
-                              subtitle: Row(
-                                children: [
-                                  if (publisher.bio.isNotEmpty)
-                                    Text(
-                                      publisher.bio,
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                    )
-                                  else
-                                    Text('@${publisher.name}'),
-                                ],
+                              subtitle: Text(
+                                publisher.bio,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
                               ),
                               trailing: const Icon(
                                 Symbols.chevron_right,
@@ -785,21 +783,11 @@ class _AccountSearchTab extends HookConsumerWidget {
                                 account: account,
                                 style: Theme.of(context).textTheme.titleMedium,
                               ),
-                              subtitle: Row(
-                                children: [
-                                  Text('@${account.name}'),
-                                  if (account.profile.bio.isNotEmpty)
-                                    Expanded(
-                                      child: Text(
-                                        account.profile.bio,
-                                        maxLines: 2,
-                                        overflow: TextOverflow.ellipsis,
-                                        style: Theme.of(
-                                          context,
-                                        ).textTheme.bodySmall,
-                                      ),
-                                    ),
-                                ],
+                              subtitle: Text(
+                                account.profile.bio,
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                style: Theme.of(context).textTheme.bodySmall,
                               ),
                               trailing: const Icon(
                                 Symbols.chevron_right,

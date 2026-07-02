@@ -160,7 +160,7 @@ class BadgesScreen extends ConsumerWidget {
   }
 }
 
-class _BadgeCard extends StatelessWidget {
+class _BadgeCard extends ConsumerWidget {
   final SnAccountBadge badge;
   final bool isLoading;
   final VoidCallback onActivate;
@@ -172,19 +172,14 @@ class _BadgeCard extends StatelessWidget {
   });
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
     final isActive = badge.activatedAt != null;
-    final template = kBadgeTemplates[badge.type];
-    final name = template?.name.tr() ?? badge.label ?? 'unknown'.tr();
-    final templateDesc = template?.description.tr();
-    final badgeCaption = badge.caption;
-    final description = [
-      if (templateDesc != null && templateDesc.isNotEmpty) templateDesc,
-      if (badgeCaption != null && badgeCaption.isNotEmpty) badgeCaption,
-    ].join('\n');
-
-    final badgeColor = getBadgeColor(badge);
+    final manifest = ref.watch(badgeManifestMapProvider);
+    final name = getBadgeName(badge, manifest: manifest).tr();
+    final description = getBadgeDescription(badge, manifest: manifest);
+    final badgeColor = getBadgeColor(badge, manifest: manifest);
+    final iconUrl = getBadgeIconUrl(badge, manifest: manifest);
 
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
@@ -202,10 +197,14 @@ class _BadgeCard extends StatelessWidget {
                   color: badgeColor.withOpacity(0.15),
                   borderRadius: BorderRadius.circular(12),
                 ),
-                child: Icon(
-                  template?.icon ?? Symbols.stars,
-                  color: badgeColor,
-                  size: 28,
+                child: Center(
+                  child: CachedBadgeIcon(
+                    iconUrl: iconUrl,
+                    color: badgeColor,
+                    fallbackIcon:
+                        kBadgeTemplates[badge.type]?.icon ?? Symbols.stars,
+                    size: 28,
+                  ),
                 ),
               ),
               const Gap(16),
@@ -219,7 +218,7 @@ class _BadgeCard extends StatelessWidget {
                         fontWeight: FontWeight.w600,
                       ),
                     ),
-                    if (description.isNotEmpty) ...[
+                    if (description != null && description.isNotEmpty) ...[
                       const Gap(4),
                       Text(
                         description,

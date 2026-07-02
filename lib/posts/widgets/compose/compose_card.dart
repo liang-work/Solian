@@ -2,9 +2,11 @@ import 'dart:math' as math;
 
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_hooks/flutter_hooks.dart';
 import 'package:gap/gap.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
+import 'package:island/core/database.dart';
 import 'package:island/creators/screens/publishers_form.dart';
 import 'package:island/posts/compose.dart';
 import 'package:island/posts/compose_storage_db.dart';
@@ -18,6 +20,7 @@ import 'package:island/posts/widgets/compose/compose_state_utils.dart';
 import 'package:island/posts/widgets/compose/compose_toolbar.dart';
 import 'package:island/posts/widgets/compose/post_item.dart';
 import 'package:island/posts/widgets/compose/publishers_modal.dart';
+import 'package:island/stickers/widgets/stickers/sticker_picker.dart';
 import 'package:material_symbols_icons/symbols.dart';
 import 'package:styled_widget/styled_widget.dart';
 import 'package:solar_network_sdk/solar_network_sdk.dart';
@@ -30,6 +33,7 @@ class PostComposeCard extends HookConsumerWidget {
   final PostComposeInitialState? initialState;
   final VoidCallback? onCancel;
   final Function()? onSubmit;
+  final Future<void> Function()? onSubmitRequest;
   final Function(ComposeState)? onStateChanged;
   final bool isContained;
   final bool showHeader;
@@ -41,6 +45,7 @@ class PostComposeCard extends HookConsumerWidget {
     this.initialState,
     this.onCancel,
     this.onSubmit,
+    this.onSubmitRequest,
     this.onStateChanged,
     this.isContained = false,
     this.showHeader = true,
@@ -76,6 +81,43 @@ class PostComposeCard extends HookConsumerWidget {
           ],
         );
 
+    void insertPlaceholder(String placeholder) {
+      final text = composeState.contentController.text;
+      final selection = composeState.contentController.selection;
+      final start = selection.start >= 0 ? selection.start : text.length;
+      final end = selection.end >= 0 ? selection.end : text.length;
+      final newText = text.replaceRange(start, end, placeholder);
+      composeState.contentController.value = TextEditingValue(
+        text: newText,
+        selection: TextSelection.collapsed(offset: start + placeholder.length),
+      );
+    }
+
+    void showStickerPicker() {
+      final buttonContext = context;
+      final box = buttonContext.findRenderObject() as RenderBox?;
+      final rawOffset = box?.localToGlobal(Offset.zero) ?? Offset.zero;
+      final screenHeight = MediaQuery.of(context).size.height;
+      const popoverHeight = 480.0;
+      final offset = Offset(
+        rawOffset.dx,
+        rawOffset.dy + popoverHeight > screenHeight
+            ? (rawOffset.dy - popoverHeight - 16).clamp(16.0, screenHeight)
+            : rawOffset.dy,
+      );
+
+      showStickerPickerPopover(
+        context,
+        offset,
+        onPick: (pack, sticker) {
+          insertPlaceholder(':${pack.prefix}+${sticker.slug}:');
+        },
+        onLongPress: (pack, sticker) {
+          insertPlaceholder(':${pack.prefix}+${sticker.slug}:');
+        },
+      );
+    }
+
     // Add a listener to the entire state to trigger rebuilds
     final stateNotifier = useMemoized(
       () => Listenable.merge([
@@ -106,12 +148,16 @@ class PostComposeCard extends HookConsumerWidget {
 
     // Dispose state when widget is disposed
     useEffect(() {
+      final database = ref.read(databaseProvider);
       return () {
         if (providedState == null) {
           if (!submitted.value &&
               originalPost == null &&
               composeState.currentPublisher.value != null) {
-            ComposeLogic.saveDraftWithoutUpload(ref, composeState);
+            ComposeLogic.saveDraftWithoutUploadWithDatabase(
+              database,
+              composeState,
+            );
           }
           ComposeLogic.dispose(composeState);
         }
@@ -124,6 +170,11 @@ class PostComposeCard extends HookConsumerWidget {
     }
 
     Future<void> performSubmit() async {
+      if (onSubmitRequest != null) {
+        await onSubmitRequest!();
+        return;
+      }
+
       await ComposeLogic.performSubmit(
         ref,
         composeState,
@@ -195,6 +246,15 @@ class PostComposeCard extends HookConsumerWidget {
                       ),
                     ),
                     IconButton(
+                      icon: const Icon(Symbols.sticky_note_2),
+                      onPressed: showStickerPicker,
+                      tooltip: 'stickers'.tr(),
+                      visualDensity: const VisualDensity(
+                        horizontal: -4,
+                        vertical: -2,
+                      ),
+                    ),
+                    IconButton(
                       onPressed:
                           (composeState.submitting.value ||
                               composeState.currentPublisher.value == null)
@@ -257,129 +317,131 @@ class PostComposeCard extends HookConsumerWidget {
             Expanded(
               child: KeyboardListener(
                 focusNode: FocusNode(),
-                onKeyEvent: (event) => ComposeLogic.handleKeyPress(
-                  event,
-                  composeState,
-                  ref,
-                  context,
-                  originalPost: originalPost,
-                  repliedPost: repliedPost,
-                  forwardedPost: forwardedPost,
-                ),
+                onKeyEvent: (event) {
+                  if (event is! KeyDownEvent) {
+                    return;
+                  }
+
+                  final isModifierPressed =
+                      HardwareKeyboard.instance.isMetaPressed ||
+                      HardwareKeyboard.instance.isControlPressed;
+                  final isSubmit = event.logicalKey == LogicalKeyboardKey.enter;
+
+                  if (isSubmit &&
+                      isModifierPressed &&
+                      !composeState.submitting.value) {
+                    performSubmit();
+                    return;
+                  }
+
+                  ComposeLogic.handleKeyPress(
+                    event,
+                    composeState,
+                    ref,
+                    context,
+                    originalPost: originalPost,
+                    repliedPost: repliedPost,
+                    forwardedPost: forwardedPost,
+                  );
+                },
                 child: SingleChildScrollView(
                   padding: const EdgeInsets.all(16),
-                  child: ConstrainedBox(
-                    constraints: const BoxConstraints(maxWidth: 560),
-                    child: Row(
-                      spacing: 12,
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        // Publisher profile picture
-                        GestureDetector(
-                          child: ProfilePictureWidget(
-                            fileId: composeState
-                                .currentPublisher
-                                .value
-                                ?.picture
-                                ?.id,
-                            radius: 20,
-                            fallbackIcon:
-                                composeState.currentPublisher.value == null
-                                ? Symbols.question_mark
-                                : null,
-                          ),
-                          onTap: () {
-                            if (composeState.currentPublisher.value == null) {
-                              // No publisher loaded, guide user to create one
-                              if (isContained) {
-                                Navigator.of(context).pop();
-                              }
-                              showModalBottomSheet(
-                                context: context,
-                                isScrollControlled: true,
-                                useRootNavigator: true,
-                                builder: (context) =>
-                                    const NewPublisherScreen(),
-                              ).then((value) {
-                                if (value != null) {
-                                  composeState.currentPublisher.value =
-                                      value as SnPublisher;
-                                  ref.invalidate(publishersManagedProvider);
-                                }
-                              });
-                            } else {
-                              // Show modal to select from existing publishers
-                              showModalBottomSheet(
-                                isScrollControlled: true,
-                                useRootNavigator: true,
-                                context: context,
-                                builder: (context) => const PublisherModal(),
-                              ).then((value) {
-                                if (value != null) {
-                                  composeState.currentPublisher.value = value;
-                                }
-                              });
-                            }
-                          },
-                        ).padding(top: 8),
-
-                        // Post content form
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              ComposeFormFields(
-                                state: composeState,
-                                showPublisherAvatar: false,
-                                onPublisherTap: () {
-                                  if (composeState.currentPublisher.value ==
-                                      null) {
-                                    // No publisher loaded, guide user to create one
-                                    if (isContained) {
-                                      Navigator.of(context).pop();
-                                    }
-                                    showModalBottomSheet(
-                                      context: context,
-                                      isScrollControlled: true,
-                                      useRootNavigator: true,
-                                      builder: (context) =>
-                                          const NewPublisherScreen(),
-                                    ).then((value) {
-                                      if (value != null) {
-                                        composeState.currentPublisher.value =
-                                            value as SnPublisher;
-                                        ref.invalidate(
-                                          publishersManagedProvider,
-                                        );
-                                      }
-                                    });
-                                  } else {
-                                    // Show modal to select from existing publishers
-                                    showModalBottomSheet(
-                                      isScrollControlled: true,
-                                      useRootNavigator: true,
-                                      context: context,
-                                      builder: (context) =>
-                                          const PublisherModal(),
-                                    ).then((value) {
-                                      if (value != null) {
-                                        composeState.currentPublisher.value =
-                                            value;
-                                      }
-                                    });
-                                  }
-                                },
-                              ),
-                              const Gap(8),
-                              ComposeAttachments(
-                                state: composeState,
-                                isCompact: true,
-                              ),
-                            ],
-                          ),
+                  child: Row(
+                    spacing: 12,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // Publisher profile picture
+                      GestureDetector(
+                        child: ProfilePictureWidget(
+                          file: composeState.currentPublisher.value?.picture,
+                          radius: 20,
+                          borderRadius:
+                              composeState.currentPublisher.value?.type == 0
+                              ? null
+                              : 12,
+                          fallbackIcon:
+                              composeState.currentPublisher.value == null
+                              ? Symbols.question_mark
+                              : null,
                         ),
-                      ],
-                    ),
+                        onTap: () {
+                          if (composeState.currentPublisher.value == null) {
+                            showModalBottomSheet(
+                              context: context,
+                              isScrollControlled: true,
+                              useRootNavigator: true,
+                              builder: (context) => const NewPublisherScreen(),
+                            ).then((value) {
+                              if (value != null) {
+                                composeState.currentPublisher.value =
+                                    value as SnPublisher;
+                                ref.invalidate(publishersManagedProvider);
+                              }
+                            });
+                          } else {
+                            showModalBottomSheet(
+                              isScrollControlled: true,
+                              useRootNavigator: true,
+                              context: context,
+                              builder: (context) => const PublisherModal(),
+                            ).then((value) {
+                              if (value != null) {
+                                composeState.currentPublisher.value = value;
+                              }
+                            });
+                          }
+                        },
+                      ).padding(top: 8),
+
+                      // Post content form
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            ComposeFormFields(
+                              state: composeState,
+                              showPublisherAvatar: false,
+                              onPublisherTap: () {
+                                if (composeState.currentPublisher.value ==
+                                    null) {
+                                  showModalBottomSheet(
+                                    context: context,
+                                    isScrollControlled: true,
+                                    useRootNavigator: true,
+                                    builder: (context) =>
+                                        const NewPublisherScreen(),
+                                  ).then((value) {
+                                    if (value != null) {
+                                      composeState.currentPublisher.value =
+                                          value as SnPublisher;
+                                      ref.invalidate(publishersManagedProvider);
+                                    }
+                                  });
+                                } else {
+                                  showModalBottomSheet(
+                                    isScrollControlled: true,
+                                    useRootNavigator: true,
+                                    context: context,
+                                    builder: (context) =>
+                                        const PublisherModal(),
+                                  ).then((value) {
+                                    if (value != null) {
+                                      composeState.currentPublisher.value =
+                                          value;
+                                    }
+                                  });
+                                }
+                              },
+                            ),
+                            const Gap(8),
+                            ComposeAttachments(
+                              state: composeState,
+                              isCompact: true,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               ),

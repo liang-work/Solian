@@ -4,6 +4,20 @@ import 'package:solar_network_sdk/solar_network_sdk.dart';
 part 'account.freezed.dart';
 part 'account.g.dart';
 
+abstract interface class IDisplayableAccount {
+  String get id;
+  String get name;
+  String get nick;
+  SnCloudFileReference? get profilePicture;
+  SnCloudFileReference? get profileBackground;
+  SnVerificationMark? get profileVerification;
+}
+
+extension IDisplayableAccountDisplayName on IDisplayableAccount {
+  String get displayName =>
+      nick.isNotEmpty ? nick : (name.isNotEmpty ? '@$name' : 'Unknown');
+}
+
 abstract final class SnAccountStatusType {
   static const int defaultType = 0;
   static const int busy = 1;
@@ -26,7 +40,9 @@ int _statusTypeFromJson(Object? value) =>
     (value as num?)?.toInt() ?? SnAccountStatusType.defaultType;
 
 @freezed
-sealed class SnAccount with _$SnAccount {
+sealed class SnAccount with _$SnAccount implements IDisplayableAccount {
+  const SnAccount._();
+
   const factory SnAccount({
     required String id,
     required String name,
@@ -47,6 +63,15 @@ sealed class SnAccount with _$SnAccount {
 
   factory SnAccount.fromJson(Map<String, dynamic> json) =>
       _$SnAccountFromJson(json);
+
+  @override
+  SnCloudFileReference? get profilePicture => profile.picture;
+
+  @override
+  SnCloudFileReference? get profileBackground => profile.background;
+
+  @override
+  SnVerificationMark? get profileVerification => profile.verification;
 }
 
 @freezed
@@ -109,8 +134,8 @@ sealed class SnAccountProfile with _$SnAccountProfile {
     @Default(100) double socialCredits,
     @Default(0) int socialCreditsLevel,
     required double levelingProgress,
-    required SnCloudFile? picture,
-    required SnCloudFile? background,
+    required SnCloudFileReference? picture,
+    required SnCloudFileReference? background,
     required SnVerificationMark? verification,
     UsernameColor? usernameColor,
     required DateTime createdAt,
@@ -128,17 +153,22 @@ sealed class SnAccountStatus with _$SnAccountStatus {
     required String id,
     required int attitude,
     required bool isOnline,
+    @Default(false) bool isIdle,
+    DateTime? idleSince,
     required bool isCustomized,
     @JsonKey(readValue: _readStatusType, fromJson: _statusTypeFromJson)
     @Default(SnAccountStatusType.defaultType)
     int type,
     @Default("") String label,
     String? symbol,
+    SnCloudFileReference? icon,
+    SnCloudFileReference? background,
     required Map<String, dynamic>? meta,
     required DateTime? clearedAt,
     String? appIdentifier,
     @Default(false) bool isAutomated,
     required String accountId,
+    SnAccount? account,
     required DateTime createdAt,
     required DateTime updatedAt,
     required DateTime? deletedAt,
@@ -152,6 +182,7 @@ extension SnAccountStatusCompat on SnAccountStatus {
   bool get isInvisible => type == SnAccountStatusType.invisible;
   bool get isNotDisturb => type == SnAccountStatusType.doNotDisturb;
   bool get isBusy => type == SnAccountStatusType.busy;
+  bool get isIdleOrOnline => isOnline && isIdle;
 }
 
 @freezed
@@ -172,6 +203,38 @@ sealed class SnAccountBadge with _$SnAccountBadge {
 
   factory SnAccountBadge.fromJson(Map<String, dynamic> json) =>
       _$SnAccountBadgeFromJson(json);
+}
+
+@freezed
+sealed class BadgeManifestSeries with _$BadgeManifestSeries {
+  const factory BadgeManifestSeries({
+    required String identifier,
+    required String? title,
+    @Default(0) int order,
+  }) = _BadgeManifestSeries;
+
+  factory BadgeManifestSeries.fromJson(Map<String, dynamic> json) =>
+      _$BadgeManifestSeriesFromJson(json);
+}
+
+@freezed
+sealed class BadgeManifestEntry with _$BadgeManifestEntry {
+  const factory BadgeManifestEntry({
+    required String identifier,
+    String? achievementIdentifier,
+    required String? label,
+    String? caption,
+    String? icon,
+    String? color,
+    String? iconUrl,
+    String? localizationKey,
+    String? category,
+    BadgeManifestSeries? series,
+    @Default(false) bool hidden,
+  }) = _BadgeManifestEntry;
+
+  factory BadgeManifestEntry.fromJson(Map<String, dynamic> json) =>
+      _$BadgeManifestEntryFromJson(json);
 }
 
 @freezed
@@ -197,15 +260,13 @@ sealed class SnContactMethod with _$SnContactMethod {
 sealed class SnNotification with _$SnNotification {
   const factory SnNotification({
     required DateTime createdAt,
-    required DateTime updatedAt,
-    required DateTime? deletedAt,
     required String id,
+    String? appId,
     required String topic,
     required String title,
     @Default('') String subtitle,
-    required String content,
+    @JsonKey(name: 'content') required String body,
     @Default({}) Map<String, dynamic> meta,
-    required int priority,
     required DateTime? viewedAt,
     required String accountId,
   }) = _SnNotification;
@@ -225,6 +286,57 @@ sealed class SnVerificationMark with _$SnVerificationMark {
 
   factory SnVerificationMark.fromJson(Map<String, dynamic> json) =>
       _$SnVerificationMarkFromJson(json);
+}
+
+@freezed
+sealed class SnAccountProfileRef with _$SnAccountProfileRef {
+  const factory SnAccountProfileRef({
+    required String id,
+    @Default('') String firstName,
+    @Default('') String middleName,
+    @Default('') String lastName,
+    @Default('') String bio,
+    SnCloudFileReference? picture,
+    SnCloudFileReference? background,
+    SnVerificationMark? verification,
+    UsernameColor? usernameColor,
+  }) = _SnAccountProfileRef;
+
+  factory SnAccountProfileRef.fromJson(Map<String, dynamic> json) =>
+      _$SnAccountProfileRefFromJson(json);
+}
+
+@freezed
+sealed class SnAccountReference
+    with _$SnAccountReference
+    implements IDisplayableAccount {
+  const SnAccountReference._();
+
+  const factory SnAccountReference({
+    required String id,
+    required String name,
+    required String nick,
+    SnAccountProfileRef? profile,
+    @Default([]) List<SnAccountBadge> badges,
+    String? automatedId,
+  }) = _SnAccountReference;
+
+  factory SnAccountReference.fromJson(Map<String, dynamic> json) =>
+      _$SnAccountReferenceFromJson(json);
+
+  @override
+  SnCloudFileReference? get profilePicture => profile?.picture;
+
+  @override
+  SnCloudFileReference? get profileBackground => profile?.background;
+
+  @override
+  SnVerificationMark? get profileVerification => profile?.verification;
+}
+
+extension SnAccountReferenceDisplay on SnAccountReference {
+  String get displayName =>
+      nick.isNotEmpty ? nick : (name.isNotEmpty ? '@$name' : 'Unknown');
 }
 
 @freezed
@@ -348,4 +460,44 @@ sealed class SnNotificationTopic with _$SnNotificationTopic {
 
   factory SnNotificationTopic.fromJson(Map<String, dynamic> json) =>
       _$SnNotificationTopicFromJson(json);
+}
+
+@JsonEnum(valueField: 'value')
+enum SnNotificationPushSubscriptionProvider {
+  apple(0),
+  fcm(1),
+  sop(2),
+  unifiedPush(3),
+  appk(4);
+
+  final int value;
+  const SnNotificationPushSubscriptionProvider(this.value);
+
+  static SnNotificationPushSubscriptionProvider fromValue(int value) {
+    return SnNotificationPushSubscriptionProvider.values.firstWhere(
+      (e) => e.value == value,
+      orElse: () => SnNotificationPushSubscriptionProvider.fcm,
+    );
+  }
+}
+
+@freezed
+sealed class SnNotificationPushSubscription
+    with _$SnNotificationPushSubscription {
+  const factory SnNotificationPushSubscription({
+    required String id,
+    required String accountId,
+    String? appId,
+    required String deviceId,
+    required String deviceToken,
+    String? deviceName,
+    required SnNotificationPushSubscriptionProvider provider,
+    required bool isActivated,
+    DateTime? lastUsedAt,
+    required DateTime createdAt,
+    required DateTime updatedAt,
+  }) = _SnNotificationPushSubscription;
+
+  factory SnNotificationPushSubscription.fromJson(Map<String, dynamic> json) =>
+      _$SnNotificationPushSubscriptionFromJson(json);
 }

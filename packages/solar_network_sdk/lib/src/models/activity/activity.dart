@@ -1,5 +1,6 @@
 import 'package:freezed_annotation/freezed_annotation.dart';
 import 'package:solar_network_sdk/src/models/accounts/account.dart';
+import 'package:solar_network_sdk/src/models/drive/file.dart';
 
 part 'activity.freezed.dart';
 part 'activity.g.dart';
@@ -17,6 +18,26 @@ sealed class SnNotableDay with _$SnNotableDay {
 
   factory SnNotableDay.fromJson(Map<String, dynamic> json) =>
       _$SnNotableDayFromJson(json);
+}
+
+/// Notable day detail (from generated notable days API)
+@freezed
+sealed class SnNotableDayDetail with _$SnNotableDayDetail {
+  const factory SnNotableDayDetail({
+    required DateTime date,
+    required String localName,
+    required String globalName,
+    String? localizableKey,
+    String? countryCode,
+    String? description,
+    Map<String, dynamic>? meta,
+    String? occurrenceKey,
+    List<String>? holidays,
+    List<String>? tags,
+  }) = _SnNotableDayDetail;
+
+  factory SnNotableDayDetail.fromJson(Map<String, dynamic> json) =>
+      _$SnNotableDayDetailFromJson(json);
 }
 
 @freezed
@@ -41,6 +62,7 @@ sealed class SnCheckInResult with _$SnCheckInResult {
     required String id,
     required int level,
     required List<SnFortuneTip> tips,
+    SnCheckInFortuneReport? fortuneReport,
     required String accountId,
     required SnAccount? account,
     required DateTime createdAt,
@@ -50,6 +72,32 @@ sealed class SnCheckInResult with _$SnCheckInResult {
 
   factory SnCheckInResult.fromJson(Map<String, dynamic> json) =>
       _$SnCheckInResultFromJson(json);
+}
+
+@freezed
+sealed class SnCheckInFortuneReport with _$SnCheckInFortuneReport {
+  const factory SnCheckInFortuneReport({
+    required int version,
+    required String poem,
+    required String summary,
+    required String? summaryDetail,
+    required String wish,
+    required String love,
+    required String study,
+    required String career,
+    required String health,
+    required String lostItem,
+    required String luckyColor,
+    required String luckyDirection,
+    required String luckyTime,
+    required String luckyItem,
+    required String luckyAction,
+    required String avoidAction,
+    required String ritual,
+  }) = _SnCheckInFortuneReport;
+
+  factory SnCheckInFortuneReport.fromJson(Map<String, dynamic> json) =>
+      _$SnCheckInFortuneReportFromJson(json);
 }
 
 @freezed
@@ -118,8 +166,12 @@ sealed class SnUserCalendarEvent with _$SnUserCalendarEvent {
     @Default(false) bool isAllDay,
     @Default(SnEventVisibility.private) int visibility,
     SnRecurrencePattern? recurrence,
+    @Default([]) List<String> tags,
     Map<String, dynamic>? meta,
+    SnCloudFileReference? icon,
+    SnCloudFileReference? background,
     required String accountId,
+    SnAccount? account,
     required DateTime createdAt,
     required DateTime updatedAt,
     DateTime? deletedAt,
@@ -179,6 +231,7 @@ sealed class SnPresenceActivity with _$SnPresenceActivity {
     required int leaseMinutes,
     required DateTime leaseExpiresAt,
     required String accountId,
+    SnAccount? account,
     required DateTime createdAt,
     required DateTime updatedAt,
     required DateTime? deletedAt,
@@ -227,6 +280,8 @@ sealed class SnEventCountdownItem with _$SnEventCountdownItem {
     required bool isOngoing,
     Map<String, dynamic>? meta,
     String? accountId,
+    SnCloudFileReference? background,
+    SnCloudFileReference? icon,
   }) = _SnEventCountdownItem;
 
   factory SnEventCountdownItem.fromJson(Map<String, dynamic> json) =>

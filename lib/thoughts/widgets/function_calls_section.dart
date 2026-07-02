@@ -46,11 +46,14 @@ class FunctionCallsSection extends HookWidget {
           tilePadding: const EdgeInsets.symmetric(horizontal: 8),
           minTileHeight: 24,
           backgroundColor: Theme.of(context).colorScheme.tertiaryContainer,
-          collapsedBackgroundColor:
-              Theme.of(context).colorScheme.tertiaryContainer,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+          collapsedBackgroundColor: Theme.of(
+            context,
+          ).colorScheme.tertiaryContainer,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
           collapsedShape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(8),
+            borderRadius: BorderRadius.circular(12),
           ),
           trailing: SizedBox(
             width: 30, // Specify desired width
@@ -60,10 +63,9 @@ class FunctionCallsSection extends HookWidget {
                   ? Icons.keyboard_arrow_down
                   : Icons.keyboard_arrow_up,
               size: 16,
-              color:
-                  isExpanded.value
-                      ? Theme.of(context).colorScheme.tertiary
-                      : Theme.of(context).colorScheme.tertiaryFixedDim,
+              color: isExpanded.value
+                  ? Theme.of(context).colorScheme.tertiary
+                  : Theme.of(context).colorScheme.tertiaryFixedDim,
             ),
           ),
           showTrailingIcon: !showSpinner,
@@ -123,7 +125,7 @@ class FunctionCallsSection extends HookWidget {
           ],
         ),
       ],
-    );
+    ).padding(vertical: 4);
   }
 
   Widget _buildBlock(
@@ -177,8 +179,8 @@ class FunctionCallsSection extends HookWidget {
                   child: IconButton(
                     iconSize: 16,
                     icon: const Icon(Symbols.content_copy),
-                    onPressed:
-                        () => Clipboard.setData(ClipboardData(text: data)),
+                    onPressed: () =>
+                        Clipboard.setData(ClipboardData(text: data)),
                     tooltip: 'Copy response',
                     visualDensity: const VisualDensity(
                       horizontal: -4,

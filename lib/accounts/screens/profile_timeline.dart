@@ -2,18 +2,32 @@ import 'dart:async';
 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_hooks/flutter_hooks.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 import 'package:solar_network_sdk/solar_network_sdk.dart';
 import 'package:island/accounts/widgets/account/activity_presence.dart';
+import 'package:island/core/config.dart';
 import 'package:island/core/network.dart';
 import 'package:island/core/services/time.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:material_symbols_icons/symbols.dart';
+import 'package:url_launcher/url_launcher_string.dart';
 import 'package:gap/gap.dart';
 import 'package:visibility_detector/visibility_detector.dart';
 import 'package:island/shared/widgets/confuse_spinner.dart';
 
-class AccountTimelineList extends ConsumerWidget {
+enum TimelineFilter { all, status, gaming, music, workout, other }
+
+const _timelineFilterLabels = <TimelineFilter, String>{
+  TimelineFilter.all: 'all',
+  TimelineFilter.status: 'status',
+  TimelineFilter.gaming: 'presenceTypeGaming',
+  TimelineFilter.music: 'presenceTypeMusic',
+  TimelineFilter.workout: 'presenceTypeWorkout',
+  TimelineFilter.other: 'unknown',
+};
+
+class AccountTimelineList extends HookConsumerWidget {
   final String uname;
 
   const AccountTimelineList({super.key, required this.uname});
@@ -26,6 +40,8 @@ class AccountTimelineList extends ConsumerWidget {
       data: (state) {
         final items = state.items;
         final groupedItems = _groupDuplicateItems(items);
+        final filter = useState(TimelineFilter.all);
+        final filteredItems = _applyFilter(groupedItems, filter.value);
 
         if (groupedItems.isEmpty) {
           return SliverToBoxAdapter(
@@ -42,36 +58,43 @@ class AccountTimelineList extends ConsumerWidget {
           padding: const EdgeInsets.only(bottom: 16),
           sliver: SliverList(
             delegate: SliverChildBuilderDelegate((context, index) {
-              if (index == groupedItems.length) {
+              if (index == 0) {
+                return _TimelineFilterBar(
+                  selectedFilter: filter.value,
+                  onFilterChanged: (f) => filter.value = f,
+                );
+              }
+
+              final itemIndex = index - 1;
+              if (itemIndex == filteredItems.length) {
                 if (state.hasMore) {
                   return _TimelineLoadMore(
-                    onVisible: () {
-                      if (!state.isLoading) {
-                        ref
-                            .read(accountTimelineProvider(uname).notifier)
-                            .fetchFurther();
-                      }
-                    },
+                    state: state,
+                    notifier: ref.read(accountTimelineProvider(uname).notifier),
                   );
                 }
                 return const SizedBox.shrink();
               }
 
-              final groupedItem = groupedItems[index];
+              final groupedItem = filteredItems[itemIndex];
               if (groupedItem.items.length > 1) {
                 return Padding(
                   padding: const EdgeInsets.only(bottom: 8),
                   child: AccountTimelineItem(
                     item: groupedItem.items.first,
                     duplicateCount: groupedItem.items.length,
+                    duration: groupedItem.duration,
                   ),
                 );
               }
               return Padding(
                 padding: const EdgeInsets.only(bottom: 8),
-                child: AccountTimelineItem(item: groupedItem.items.first),
+                child: AccountTimelineItem(
+                  item: groupedItem.items.first,
+                  duration: groupedItem.duration,
+                ),
               );
-            }, childCount: groupedItems.length + 1),
+            }, childCount: filteredItems.length + 2),
           ),
         );
       },
@@ -99,6 +122,13 @@ class AccountTimelineList extends ConsumerWidget {
       } else {
         currentGroup.items.add(item);
       }
+    }
+
+    final now = DateTime.now();
+    for (var i = 0; i < grouped.length; i++) {
+      final current = grouped[i];
+      final end = i == 0 ? now : grouped[i - 1].items.first.createdAt;
+      current.duration = end.difference(current.items.first.createdAt);
     }
 
     return grouped;
@@ -132,12 +162,86 @@ class AccountTimelineList extends ConsumerWidget {
     }
     return false;
   }
+
+  List<_GroupedTimelineItem> _applyFilter(
+    List<_GroupedTimelineItem> items,
+    TimelineFilter filter,
+  ) {
+    if (filter == TimelineFilter.all) return items;
+
+    return items.where((group) {
+      final item = group.items.first;
+      switch (filter) {
+        case TimelineFilter.status:
+          return item.eventType == 0;
+        case TimelineFilter.gaming:
+          return item.eventType == 1 && item.activity?.type == 1;
+        case TimelineFilter.music:
+          return item.eventType == 1 && item.activity?.type == 2;
+        case TimelineFilter.workout:
+          return item.eventType == 1 && item.activity?.type == 3;
+        case TimelineFilter.other:
+          return item.eventType == 1 &&
+              (item.activity == null || item.activity!.type == 0);
+        default:
+          return true;
+      }
+    }).toList();
+  }
+}
+
+class _TimelineFilterBar extends StatelessWidget {
+  final TimelineFilter selectedFilter;
+  final ValueChanged<TimelineFilter> onFilterChanged;
+
+  const _TimelineFilterBar({
+    required this.selectedFilter,
+    required this.onFilterChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Card(
+      margin: EdgeInsets.only(bottom: 8),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        child: SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: Row(
+            spacing: 8,
+            children: TimelineFilter.values.map((filter) {
+              final isSelected = filter == selectedFilter;
+              return ChoiceChip(
+                label: Text(
+                  _timelineFilterLabels[filter]!.tr(),
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    color: isSelected
+                        ? theme.colorScheme.onPrimaryContainer
+                        : theme.colorScheme.onSurfaceVariant,
+                  ),
+                ),
+                selected: isSelected,
+                onSelected: (_) => onFilterChanged(filter),
+                selectedColor: theme.colorScheme.primaryContainer,
+                backgroundColor: theme.colorScheme.surfaceContainerHighest,
+                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 0),
+                visualDensity: VisualDensity.compact,
+                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              );
+            }).toList(),
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 class _TimelineLoadMore extends StatefulWidget {
-  final VoidCallback onVisible;
+  final PaginationState<SnAccountTimelineItem> state;
+  final AccountTimelineNotifier notifier;
 
-  const _TimelineLoadMore({required this.onVisible});
+  const _TimelineLoadMore({required this.state, required this.notifier});
 
   @override
   State<_TimelineLoadMore> createState() => _TimelineLoadMoreState();
@@ -145,48 +249,89 @@ class _TimelineLoadMore extends StatefulWidget {
 
 class _TimelineLoadMoreState extends State<_TimelineLoadMore> {
   bool _hasTriggered = false;
+  bool _hasBeenVisible = false;
 
   @override
   Widget build(BuildContext context) {
+    final child = _hasBeenVisible
+        ? (widget.state.isLoading)
+              ? Container(
+                  height: 60,
+                  alignment: Alignment.center,
+                  child: ConfuseSpinner(
+                    size: 32,
+                    speed: 3,
+                    text: 'o.O O.o',
+                    fontSize: 16,
+                  ),
+                )
+              : SizedBox(
+                  height: 64,
+                  child: Row(
+                    spacing: 8,
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      const Icon(Symbols.close, size: 16, color: Colors.grey),
+                      Text(
+                        'noFurtherData'.tr(),
+                        style: Theme.of(
+                          context,
+                        ).textTheme.bodySmall?.copyWith(color: Colors.grey),
+                      ),
+                    ],
+                  ),
+                )
+        : Container(
+            height: 60,
+            alignment: Alignment.center,
+            child: ConfuseSpinner(
+              size: 32,
+              speed: 3,
+              text: 'o.O O.o',
+              fontSize: 16,
+            ),
+          );
+
     return VisibilityDetector(
-      key: const ValueKey('timeline-load-more'),
+      key: Key("timeline-load-more-${widget.notifier.hashCode}"),
       onVisibilityChanged: (info) {
+        if (!mounted) return;
+        setState(() => _hasBeenVisible = true);
         if (info.visibleFraction > 0.1 && !_hasTriggered) {
           _hasTriggered = true;
-          widget.onVisible();
+          if (!widget.notifier.fetchedAll &&
+              !widget.state.isLoading &&
+              !widget.state.isReloading) {
+            widget.notifier.fetchFurther();
+          }
         }
       },
-      child: Container(
-        height: 60,
-        alignment: Alignment.center,
-        child: ConfuseSpinner(
-          size: 32,
-          speed: 3,
-          text: 'o.O O.o',
-          fontSize: 16,
-        ),
-      ),
+      child: child,
     );
   }
 }
 
 class _GroupedTimelineItem {
   final List<SnAccountTimelineItem> items;
+  Duration? duration;
+
   _GroupedTimelineItem({required this.items});
 }
 
-class AccountTimelineItem extends StatelessWidget {
+class AccountTimelineItem extends ConsumerWidget {
   final SnAccountTimelineItem item;
   final int duplicateCount;
+  final Duration? duration;
 
   const AccountTimelineItem({
     super.key,
     required this.item,
     this.duplicateCount = 1,
+    this.duration,
   });
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
     final createdAt = item.createdAt;
 
@@ -267,10 +412,14 @@ class AccountTimelineItem extends StatelessWidget {
                     Row(
                       spacing: 6,
                       children: [
-                        Text(
-                          '${createdAt.toLocal().formatRelative(context)} · ${createdAt.toLocal().formatSystem()}',
-                          style: theme.textTheme.bodySmall?.copyWith(
-                            color: theme.colorScheme.onSurfaceVariant,
+                        Expanded(
+                          child: Text(
+                            '${createdAt.toLocal().formatRelative(context)} · ${createdAt.toLocal().formatSystem()}',
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: theme.colorScheme.onSurfaceVariant,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
                           ),
                         ),
                         if (status.appIdentifier != null &&
@@ -293,6 +442,25 @@ class AccountTimelineItem extends StatelessWidget {
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                             ),
+                          ),
+                        if (duration != null)
+                          Row(
+                            mainAxisSize: MainAxisSize.min,
+                            spacing: 2,
+                            children: [
+                              Icon(
+                                Symbols.schedule,
+                                size: 12,
+                                color: theme.colorScheme.onSurfaceVariant,
+                              ),
+                              Text(
+                                duration!.abs().formatDuration(),
+                                style: theme.textTheme.labelSmall?.copyWith(
+                                  color: theme.colorScheme.onSurfaceVariant,
+                                  fontSize: 10,
+                                ),
+                              ),
+                            ],
                           ),
                       ],
                     ),
@@ -426,11 +594,16 @@ class AccountTimelineItem extends StatelessWidget {
                           ),
                       ],
                     ),
-                    if (activity.largeImage != null && !isSteam)
+                    if ((activity.largeImage != null ||
+                            activity.smallImage != null) &&
+                        !isSteam)
                       ClipRRect(
                         borderRadius: BorderRadius.circular(8),
                         child: CachedNetworkImage(
-                          imageUrl: activity.largeImage!,
+                          imageUrl: _resolveArtworkUrl(
+                            ref,
+                            activity.largeImage ?? activity.smallImage!,
+                          ),
                           width: 48,
                           height: 48,
                           fit: BoxFit.cover,
@@ -440,24 +613,60 @@ class AccountTimelineItem extends StatelessWidget {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text(
-                            activity.title ?? 'unknown'.tr(),
-                            style: theme.textTheme.bodyMedium?.copyWith(
-                              fontWeight: FontWeight.w500,
-                            ),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
+                          Row(
+                            spacing: 4,
+                            children: [
+                              Flexible(
+                                child: Text(
+                                  activity.title ?? 'unknown'.tr(),
+                                  style: theme.textTheme.bodyMedium?.copyWith(
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                              if (activity.titleUrl != null &&
+                                  activity.titleUrl!.isNotEmpty)
+                                GestureDetector(
+                                  onTap: () =>
+                                      launchUrlString(activity.titleUrl!),
+                                  child: Icon(
+                                    Symbols.launch_rounded,
+                                    size: 14,
+                                    color: theme.colorScheme.onSurfaceVariant,
+                                  ),
+                                ),
+                            ],
                           ),
                           if (activity.subtitle != null &&
                               activity.subtitle!.isNotEmpty) ...[
                             const Gap(2),
-                            Text(
-                              activity.subtitle!,
-                              style: theme.textTheme.bodySmall?.copyWith(
-                                color: theme.colorScheme.onSurfaceVariant,
-                              ),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
+                            Row(
+                              spacing: 4,
+                              children: [
+                                Flexible(
+                                  child: Text(
+                                    activity.subtitle!,
+                                    style: theme.textTheme.bodySmall?.copyWith(
+                                      color: theme.colorScheme.onSurfaceVariant,
+                                    ),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                                if (activity.subtitleUrl != null &&
+                                    activity.subtitleUrl!.isNotEmpty)
+                                  GestureDetector(
+                                    onTap: () =>
+                                        launchUrlString(activity.subtitleUrl!),
+                                    child: Icon(
+                                      Symbols.launch_rounded,
+                                      size: 14,
+                                      color: theme.colorScheme.onSurfaceVariant,
+                                    ),
+                                  ),
+                              ],
                             ),
                           ],
                           if (activity.caption != null &&
@@ -480,6 +689,27 @@ class AccountTimelineItem extends StatelessWidget {
                               color: theme.colorScheme.onSurfaceVariant,
                             ),
                           ),
+                          if (duration != null) ...[
+                            const Gap(4),
+                            Row(
+                              mainAxisSize: MainAxisSize.min,
+                              spacing: 2,
+                              children: [
+                                Icon(
+                                  Symbols.schedule,
+                                  size: 12,
+                                  color: theme.colorScheme.onSurfaceVariant,
+                                ),
+                                Text(
+                                  duration!.abs().formatDuration(),
+                                  style: theme.textTheme.labelSmall?.copyWith(
+                                    color: theme.colorScheme.onSurfaceVariant,
+                                    fontSize: 10,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
                         ],
                       ),
                     ),
@@ -583,6 +813,14 @@ class AccountTimelineItem extends StatelessWidget {
       default:
         return Symbols.category;
     }
+  }
+
+  String _resolveArtworkUrl(WidgetRef ref, String imageUri) {
+    if (imageUri.startsWith('sha256:')) {
+      final serverURL = ref.read(serverUrlProvider);
+      return '$serverURL/passport/presence/artworks/$imageUri';
+    }
+    return imageUri;
   }
 }
 

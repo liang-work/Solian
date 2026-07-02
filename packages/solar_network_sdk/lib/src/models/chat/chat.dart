@@ -7,6 +7,24 @@ part 'chat.freezed.dart';
 part 'chat.g.dart';
 
 @freezed
+sealed class SnChatGroup with _$SnChatGroup {
+  const factory SnChatGroup({
+    required String id,
+    required String accountId,
+    required String name,
+    String? color,
+    String? icon,
+    required int order,
+    @JsonKey(name: 'room_ids') @Default([]) List<String> roomIds,
+    required DateTime createdAt,
+    required DateTime updatedAt,
+  }) = _SnChatGroup;
+
+  factory SnChatGroup.fromJson(Map<String, dynamic> json) =>
+      _$SnChatGroupFromJson(json);
+}
+
+@freezed
 sealed class SnChatRoom with _$SnChatRoom {
   const factory SnChatRoom({
     required String id,
@@ -17,8 +35,8 @@ sealed class SnChatRoom with _$SnChatRoom {
     @JsonKey(name: 'mls_group_id') String? mlsGroupId,
     @Default(false) bool isPublic,
     @Default(false) bool isCommunity,
-    required SnCloudFile? picture,
-    required SnCloudFile? background,
+    required SnCloudFileReference? picture,
+    required SnCloudFileReference? background,
     required String? realmId,
     required String? accountId,
     required SnRealm? realm,
@@ -48,7 +66,7 @@ sealed class SnChatMessage with _$SnChatMessage {
     @Default({}) Map<String, dynamic> meta,
     @Default([]) List<String> membersMentioned,
     DateTime? editedAt,
-    @Default([]) List<SnCloudFile> attachments,
+    @Default([]) List<SnCloudFileReference> attachments,
     @Default([]) List<SnChatReaction> reactions,
     @JsonKey(name: 'reactions_count')
     @Default({})
@@ -86,6 +104,24 @@ sealed class SnChatReaction with _$SnChatReaction {
 }
 
 @freezed
+sealed class SnChatMessagePin with _$SnChatMessagePin {
+  const factory SnChatMessagePin({
+    required String id,
+    @JsonKey(name: 'message_id') required String messageId,
+    @JsonKey(name: 'chat_room_id') required String chatRoomId,
+    @JsonKey(name: 'pinned_by_member_id') required String pinnedByMemberId,
+    @JsonKey(name: 'expires_at') DateTime? expiresAt,
+    @JsonKey(name: 'created_at') required DateTime createdAt,
+    @JsonKey(name: 'updated_at') required DateTime updatedAt,
+    SnChatMessage? message,
+    @JsonKey(name: 'pinned_by') SnChatMember? pinnedBy,
+  }) = _SnChatMessagePin;
+
+  factory SnChatMessagePin.fromJson(Map<String, dynamic> json) =>
+      _$SnChatMessagePinFromJson(json);
+}
+
+@freezed
 sealed class SnChatMember with _$SnChatMember {
   const factory SnChatMember({
     required DateTime createdAt,
@@ -101,6 +137,8 @@ sealed class SnChatMember with _$SnChatMember {
     required DateTime? joinedAt,
     required DateTime? breakUntil,
     required DateTime? timeoutUntil,
+    @JsonKey(name: 'chat_group_id') String? chatGroupId,
+    @JsonKey(name: 'chat_group') SnChatGroup? chatGroup,
     required DateTime? lastReadAt,
     required SnAccountStatus? status,
     // Realm related-content

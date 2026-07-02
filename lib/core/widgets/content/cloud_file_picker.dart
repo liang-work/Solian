@@ -5,6 +5,7 @@ import 'package:flutter_hooks/flutter_hooks.dart';
 import 'package:gap/gap.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:island/core/services/image.dart';
 import 'package:island/drive/drive_service.dart';
 import 'package:island/posts/widgets/compose/compose_link_attachments.dart';
 import 'package:island/shared/widgets/alert.dart';
@@ -16,6 +17,7 @@ import 'package:solar_network_sdk/solar_network_sdk.dart';
 class CloudFilePicker extends HookConsumerWidget {
   final bool allowMultiple;
   final Set<UniversalFileType> allowedTypes;
+  final String? usage;
   const CloudFilePicker({
     super.key,
     this.allowMultiple = false,
@@ -24,6 +26,7 @@ class CloudFilePicker extends HookConsumerWidget {
       UniversalFileType.video,
       UniversalFileType.file,
     },
+    this.usage,
   });
 
   @override
@@ -62,6 +65,7 @@ class CloudFilePicker extends HookConsumerWidget {
               .read(driveFileUploaderProvider)
               .createCloudFile(
                 fileData: file,
+                usage: usage,
                 onProgress: (progress, _) {
                   uploadProgress.value = progress;
                 },
@@ -129,13 +133,23 @@ class CloudFilePicker extends HookConsumerWidget {
         if (context.mounted) hideLoadingModal(context);
         return;
       }
+      if (!context.mounted) return;
 
-      final newFiles = results
-          .map(
-            (xfile) =>
-                UniversalFile(data: xfile, type: UniversalFileType.image),
-          )
-          .toList();
+      final newFiles = <UniversalFile>[];
+      for (final xfile in results) {
+        final editedImage = !allowMultiple
+            ? await cropImage(context, image: xfile, replacePath: false)
+            : xfile;
+        if (editedImage == null) continue;
+        newFiles.add(
+          UniversalFile(data: editedImage, type: UniversalFileType.image),
+        );
+      }
+
+      if (newFiles.isEmpty) {
+        if (context.mounted) hideLoadingModal(context);
+        return;
+      }
 
       if (!allowMultiple) {
         files.value = newFiles;
@@ -267,6 +281,11 @@ class CloudFilePicker extends HookConsumerWidget {
                         itemCount: files.value.length,
                         itemBuilder: (context, idx) {
                           return AttachmentPreview(
+                            onUpdate: (updatedFile) {
+                              final updatedFiles = [...files.value];
+                              updatedFiles[idx] = updatedFile;
+                              files.value = updatedFiles;
+                            },
                             onDelete: uploadOverallProgress != null
                                 ? null
                                 : () {

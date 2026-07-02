@@ -1,8 +1,60 @@
+import 'dart:async';
+
+import 'package:hooks_riverpod/hooks_riverpod.dart';
 import 'package:island/core/network.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 import 'package:solar_network_sdk/solar_network_sdk.dart';
 
 part 'event_calendar.g.dart';
+
+/// Search result item that can be either a user event or a notable day
+class CalendarSearchResult {
+  final String type; // 'UserEvent' or 'NotableDay'
+  final DateTime startTime;
+  final DateTime endTime;
+  final SnUserCalendarEvent? userEvent;
+  final SnNotableDayDetail? notableDay;
+
+  const CalendarSearchResult({
+    required this.type,
+    required this.startTime,
+    required this.endTime,
+    this.userEvent,
+    this.notableDay,
+  });
+
+  factory CalendarSearchResult.fromJson(Map<String, dynamic> json) {
+    // API returns type as int: 0=UserEvent, 1=NotableDay
+    final typeValue = json['type'];
+    final isUserEvent = typeValue is int
+        ? typeValue == 0
+        : (typeValue as String) == 'UserEvent';
+
+    if (isUserEvent) {
+      return CalendarSearchResult(
+        type: 'UserEvent',
+        startTime: DateTime.parse(json['start_time'] as String),
+        endTime: DateTime.parse(json['end_time'] as String),
+        userEvent: json['user_event'] != null
+            ? SnUserCalendarEvent.fromJson(
+                json['user_event'] as Map<String, dynamic>,
+              )
+            : null,
+      );
+    } else {
+      return CalendarSearchResult(
+        type: 'NotableDay',
+        startTime: DateTime.parse(json['start_time'] as String),
+        endTime: DateTime.parse(json['end_time'] as String),
+        notableDay: json['notable_day'] != null
+            ? SnNotableDayDetail.fromJson(
+                json['notable_day'] as Map<String, dynamic>,
+              )
+            : null,
+      );
+    }
+  }
+}
 
 /// Query parameters for fetching event calendar data
 class EventCalendarQuery {
@@ -150,54 +202,197 @@ Future<SnUserCalendarEvent> calendarEvent(Ref ref, String eventId) async {
   return await client.accounts.getCalendarEvent(eventId);
 }
 
-/// Provider for fetching upcoming event countdowns
-@riverpod
-Future<List<SnEventCountdownItem>> eventCountdowns(
-  Ref ref, {
-  int take = 5,
-  String? username,
-}) async {
-  final client = ref.watch(solarNetworkClientProvider);
+/// Query parameters for event countdowns
+class EventCountdownQuery {
+  final String? username;
+  final bool includeNotableDays;
+  final String? tag;
 
-  if (username != null && username != 'me') {
-    return await client.accounts.getUserEventCountdowns(username, take: take);
+  const EventCountdownQuery({
+    this.username,
+    this.includeNotableDays = true,
+    this.tag,
+  });
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is EventCountdownQuery &&
+          runtimeType == other.runtimeType &&
+          username == other.username &&
+          includeNotableDays == other.includeNotableDays &&
+          tag == other.tag;
+
+  @override
+  int get hashCode => username.hashCode ^ includeNotableDays.hashCode ^ tag.hashCode;
+}
+
+/// Provider for paginated event countdowns
+final eventCountdownListProvider = AsyncNotifierProvider.autoDispose.family(
+  EventCountdownListNotifier.new,
+);
+
+class EventCountdownListNotifier
+    extends AsyncNotifier<PaginationState<SnEventCountdownItem>>
+    with AsyncPaginationController<SnEventCountdownItem> {
+  static const int pageSize = 20;
+
+  final EventCountdownQuery query;
+  EventCountdownListNotifier(this.query);
+
+  @override
+  FutureOr<PaginationState<SnEventCountdownItem>> build() async {
+    final items = await fetch();
+    return PaginationState(
+      items: items,
+      isLoading: false,
+      isReloading: false,
+      totalCount: totalCount,
+      hasMore: hasMore,
+      cursor: cursor,
+    );
   }
 
-  return await client.accounts.getEventCountdowns(take: take);
+  @override
+  Future<List<SnEventCountdownItem>> fetch() async {
+    final client = ref.read(solarNetworkClientProvider);
+
+    PaginatedResult<SnEventCountdownItem> result;
+    if (query.username != null && query.username != 'me') {
+      result = await client.accounts.getUserEventCountdowns(
+        query.username!,
+        take: pageSize,
+        offset: fetchedCount,
+        includeNotableDays: query.includeNotableDays,
+        tag: query.tag,
+      );
+    } else {
+      result = await client.accounts.getEventCountdowns(
+        take: pageSize,
+        offset: fetchedCount,
+        includeNotableDays: query.includeNotableDays,
+        tag: query.tag,
+      );
+    }
+
+    totalCount = result.totalCount;
+
+    return result.items;
+  }
 }
 
-/// Provider for countdowns within the next week
+/// Provider for the list of account IDs the current user has subscribed to
 @riverpod
-Future<List<SnEventCountdownItem>> weekCountdowns(
-  Ref ref, {
-  String? username,
-}) async {
-  final allCountdowns = await ref.watch(
-    eventCountdownsProvider(take: 20, username: username).future,
-  );
-  return allCountdowns.where((item) => item.daysRemaining <= 7).toList();
+Future<List<String>> calendarSubscriptions(Ref ref) async {
+  final client = ref.watch(solarNetworkClientProvider);
+  return await client.accounts.listCalendarSubscriptions();
 }
 
-/// Provider for countdowns within the next month
+/// Checks if the current user is subscribed to a specific account's calendar
 @riverpod
-Future<List<SnEventCountdownItem>> monthCountdowns(
-  Ref ref, {
-  String? username,
-}) async {
-  final allCountdowns = await ref.watch(
-    eventCountdownsProvider(take: 20, username: username).future,
-  );
-  return allCountdowns.where((item) => item.daysRemaining <= 30).toList();
+Future<bool> isCalendarSubscribed(Ref ref, String accountId) async {
+  final subscriptions = await ref.watch(calendarSubscriptionsProvider.future);
+  return subscriptions.contains(accountId);
 }
 
-/// Provider for countdowns within the next year
+/// Provider for fetching the current user's used calendar tags
 @riverpod
-Future<List<SnEventCountdownItem>> yearCountdowns(
-  Ref ref, {
-  String? username,
-}) async {
-  final allCountdowns = await ref.watch(
-    eventCountdownsProvider(take: 50, username: username).future,
+Future<List<String>> usedCalendarTags(Ref ref) async {
+  final client = ref.watch(solarNetworkClientProvider);
+  return await client.accounts.getUsedCalendarTags();
+}
+
+/// Query parameters for calendar search
+class CalendarSearchQuery {
+  final String? query;
+  final String? accountId;
+  final List<String> tags;
+  final DateTime? startTime;
+  final DateTime? endTime;
+  final int? notableDayTag;
+  final int offset;
+  final int take;
+  final bool isSearchActive;
+
+  const CalendarSearchQuery({
+    this.query,
+    this.accountId,
+    this.tags = const [],
+    this.startTime,
+    this.endTime,
+    this.notableDayTag,
+    this.offset = 0,
+    this.take = 50,
+    this.isSearchActive = false,
+  });
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is CalendarSearchQuery &&
+          runtimeType == other.runtimeType &&
+          query == other.query &&
+          accountId == other.accountId &&
+          _listEquals(tags, other.tags) &&
+          startTime == other.startTime &&
+          endTime == other.endTime &&
+          notableDayTag == other.notableDayTag &&
+          offset == other.offset &&
+          take == other.take &&
+          isSearchActive == other.isSearchActive;
+
+  @override
+  int get hashCode =>
+      Object.hash(
+        query,
+        accountId,
+        Object.hashAll(tags),
+        startTime,
+        endTime,
+        notableDayTag,
+        offset,
+        take,
+        isSearchActive,
+      );
+
+  bool _listEquals(List<String> a, List<String> b) {
+    if (a.length != b.length) return false;
+    for (var i = 0; i < a.length; i++) {
+      if (a[i] != b[i]) return false;
+    }
+    return true;
+  }
+}
+
+/// Provider for searching calendar events + notable days
+@riverpod
+Future<List<CalendarSearchResult>> calendarSearch(
+  Ref ref,
+  CalendarSearchQuery query,
+) async {
+  final normalizedQuery = query.query?.trim();
+  final hasFilters =
+      (normalizedQuery?.isNotEmpty ?? false) ||
+      query.tags.isNotEmpty ||
+      query.notableDayTag != null;
+
+  // Return empty if search is not active (avoids unnecessary API calls)
+  if (!query.isSearchActive || !hasFilters) {
+    return const [];
+  }
+
+  final client = ref.watch(solarNetworkClientProvider);
+  final results = await client.accounts.searchCalendarEvents(
+    query: normalizedQuery,
+    accountId: query.accountId,
+    tags: query.tags.isEmpty ? null : query.tags,
+    startTime: query.startTime,
+    endTime: query.endTime,
+    notableDayTag: query.notableDayTag,
+    offset: query.offset,
+    take: query.take,
   );
-  return allCountdowns.where((item) => item.daysRemaining <= 365).toList();
+  return results
+      .map((json) => CalendarSearchResult.fromJson(json))
+      .toList();
 }

@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:island/data/message.dart';
+import 'package:island/stickers/models/sticker.dart';
 import 'package:solar_network_sdk/solar_network_sdk.dart';
 
 class AppDatabase {
@@ -8,12 +9,35 @@ class AppDatabase {
   AppDatabase.web();
   final Map<String, SnPost> _webDraftStore = {};
   final Map<String, String> _webKvStore = {};
+  final Map<String, SnChatRoom> _webChatRoomStore = {};
+  final Map<String, SnChatMember> _webChatMemberStore = {};
+  final Map<String, SnRealm> _webRealmStore = {};
+  final Map<String, List<SnChatGroup>> _webChatGroupStore = {};
+  final Map<String, SnSticker> _webStickerLookupStore = {};
 
   Future<void> close() async {}
 
   Future<void> reset() async {
     _webDraftStore.clear();
     _webKvStore.clear();
+    _webChatRoomStore.clear();
+    _webChatMemberStore.clear();
+    _webRealmStore.clear();
+    _webRelationshipStore.clear();
+    _webChatGroupStore.clear();
+    _webStickerLookupStore.clear();
+  }
+
+  Future<Map<String, int>> getDatabaseStats() async {
+    return {
+      'messages': 0,
+      'chatRooms': _webChatRoomStore.length,
+      'chatMembers': _webChatMemberStore.length,
+      'realms': _webRealmStore.length,
+      'relationships': _webRelationshipStore.length,
+      'postDrafts': _webDraftStore.length,
+      'stickerLookups': _webStickerLookupStore.length,
+    };
   }
 
   Future<T> transaction<T>(Future<T> Function() action) async => action();
@@ -41,6 +65,8 @@ class AppDatabase {
 
   Future<int> getTotalMessagesForRoom(String roomId) async => 0;
 
+  Future<Map<String, int>> getChatRoomMessageStats() async => {};
+
   Future<List<LocalChatMessage>> searchMessages(
     String roomId,
     String query, {
@@ -56,29 +82,105 @@ class AppDatabase {
   Future<void> saveChatRooms(
     List<SnChatRoom> rooms, {
     bool override = false,
-  }) async {}
+  }) async {
+    if (override) {
+      final remoteRoomIds = rooms.map((room) => room.id).toSet();
+      final idsToRemove = _webChatRoomStore.keys
+          .where((id) => !remoteRoomIds.contains(id))
+          .toList();
+      for (final roomId in idsToRemove) {
+        _webChatRoomStore.remove(roomId);
+        _webChatMemberStore.removeWhere(
+          (_, member) => member.chatRoomId == roomId,
+        );
+      }
+    }
 
-  Future<void> toggleChatRoomPinned(String roomId) async {}
+    for (final room in rooms) {
+      final existing = _webChatRoomStore[room.id];
+      final roomToSave = room.copyWith(
+        isPinned: existing?.isPinned ?? room.isPinned,
+      );
+      _webChatRoomStore[room.id] = roomToSave;
 
-  Future<List<SnChatRoom>> getAllChatRooms() async => const [];
+      final realm = room.realm;
+      if (realm != null) {
+        _webRealmStore[realm.id] = realm;
+      }
 
-  Future<SnChatRoom?> getChatRoomById(String id) async => null;
+      for (final member in room.members ?? const <SnChatMember>[]) {
+        _webChatMemberStore[member.id] = member;
+      }
+    }
+  }
+
+  Future<void> toggleChatRoomPinned(String roomId) async {
+    final room = _webChatRoomStore[roomId];
+    if (room == null) return;
+    _webChatRoomStore[roomId] = room.copyWith(isPinned: !room.isPinned);
+  }
+
+  Future<List<SnChatRoom>> getAllChatRooms() async =>
+      _webChatRoomStore.values.toList();
+
+  Future<SnChatRoom?> getChatRoomById(String id) async => _webChatRoomStore[id];
+
+  Future<List<SnChatGroup>> getChatGroups(String accountId) async {
+    final groups = _webChatGroupStore[accountId] ?? const [];
+    return groups.toList()..sort((a, b) => a.order.compareTo(b.order));
+  }
+
+  Future<void> saveChatGroups(
+    String accountId,
+    List<SnChatGroup> groups,
+  ) async {
+    _webChatGroupStore[accountId] = groups.toList()
+      ..sort((a, b) => a.order.compareTo(b.order));
+  }
+
+  Future<void> assignChatRoomToGroup(
+    String accountId,
+    String roomId, {
+    String? groupId,
+  }) async {
+    final groups = (_webChatGroupStore[accountId] ?? const []).map((group) {
+      final roomIds = group.roomIds.where((id) => id != roomId).toList();
+      if (group.id == groupId) roomIds.add(roomId);
+      return group.copyWith(
+        roomIds: roomIds,
+        updatedAt: DateTime.now().toUtc(),
+      );
+    }).toList();
+    _webChatGroupStore[accountId] = groups;
+  }
 
   Future<List<SnChatMember>> getMembersByRoomId(String roomId) async =>
-      const [];
+      _webChatMemberStore.values
+          .where((member) => member.chatRoomId == roomId)
+          .toList();
 
   Future<SnChatMember?> getMemberByRoomAndAccount(
     String roomId,
     String accountId,
-  ) async => null;
+  ) async {
+    for (final member in _webChatMemberStore.values) {
+      if (member.chatRoomId == roomId && member.accountId == accountId) {
+        return member;
+      }
+    }
+    return null;
+  }
 
-  Future<SnChatMember?> getMemberById(String id) async => null;
+  Future<SnChatMember?> getMemberById(String id) async =>
+      _webChatMemberStore[id];
 
-  Future<List<SnRealm>> getAllRealms() async => const [];
+  Future<List<SnRealm>> getAllRealms() async => _webRealmStore.values.toList();
 
-  Future<SnRealm?> getRealmById(String id) async => null;
+  Future<SnRealm?> getRealmById(String id) async => _webRealmStore[id];
 
-  Future<void> saveMember(SnChatMember member) async {}
+  Future<void> saveMember(SnChatMember member) async {
+    _webChatMemberStore[member.id] = member;
+  }
 
   // ---------------------------------------------------------------------------
   // Post drafts
@@ -122,6 +224,22 @@ class AppDatabase {
   }
 
   // ---------------------------------------------------------------------------
+  // Sticker lookups
+  // ---------------------------------------------------------------------------
+
+  Future<SnSticker?> getStickerLookup(String identifier) async {
+    return _webStickerLookupStore[identifier];
+  }
+
+  Future<void> setStickerLookup(String identifier, SnSticker sticker) async {
+    _webStickerLookupStore[identifier] = sticker;
+  }
+
+  Future<void> clearStickerLookups() async {
+    _webStickerLookupStore.clear();
+  }
+
+  // ---------------------------------------------------------------------------
   // Secrets / KV store
   // ---------------------------------------------------------------------------
 
@@ -137,5 +255,67 @@ class AppDatabase {
 
   Future<Map<String, String>> getAllSecrets() async {
     return Map<String, String>.from(_webKvStore);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Relationships
+  // ---------------------------------------------------------------------------
+
+  final Map<String, SnRelationship> _webRelationshipStore = {};
+
+  Future<List<SnRelationship>> getAllRelationships() async {
+    return _webRelationshipStore.values.toList()..sort(
+      (a, b) =>
+          (b.updatedAt ?? DateTime(0)).compareTo(a.updatedAt ?? DateTime(0)),
+    );
+  }
+
+  Future<SnRelationship?> getRelationshipById(String id) async {
+    return _webRelationshipStore[id];
+  }
+
+  Future<SnRelationship?> getRelationshipByAccounts(
+    String accountId,
+    String relatedId,
+  ) async {
+    final uid = '$accountId:$relatedId';
+    return _webRelationshipStore[uid];
+  }
+
+  Future<void> saveRelationships(List<SnRelationship> relationships) async {
+    for (final rel in relationships) {
+      final uid = '${rel.accountId}:${rel.relatedId}';
+      _webRelationshipStore[uid] = rel;
+    }
+  }
+
+  Future<void> deleteRelationship(String accountId, String relatedId) async {
+    final uid = '$accountId:$relatedId';
+    _webRelationshipStore.remove(uid);
+  }
+
+  Future<List<String>> getBlockedAccountIds(String accountId) async {
+    return _webRelationshipStore.values
+        .where((r) => r.accountId == accountId && r.status <= -100)
+        .map((r) => r.relatedId)
+        .toList();
+  }
+
+  Future<List<String>> getMutedAccountIds(String accountId) async {
+    return _webRelationshipStore.values
+        .where((r) => r.accountId == accountId && r.status == -50)
+        .map((r) => r.relatedId)
+        .toList();
+  }
+
+  Future<List<String>> getCloseFriendAccountIds(String accountId) async {
+    return _webRelationshipStore.values
+        .where((r) => r.accountId == accountId && r.status >= 200)
+        .map((r) => r.relatedId)
+        .toList();
+  }
+
+  Future<Map<String, int>> getRelationshipStats() async {
+    return {'relationships': _webRelationshipStore.length};
   }
 }

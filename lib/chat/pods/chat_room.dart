@@ -1,15 +1,20 @@
 import 'dart:async';
 import 'dart:convert';
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 import 'package:island/data/database.dart';
 import 'package:island/data/message.dart';
+import 'package:island/core/audio.dart';
 import 'package:island/core/database.dart';
 import 'package:island/core/network.dart';
 import 'package:island/core/config.dart';
+import 'package:island/core/lifecycle.dart';
 import 'package:island/core/services/event_bus.dart';
 import 'package:island/core/websocket.dart';
 import 'package:island/accounts/account_pod.dart';
+import 'package:island/chat/pods/chat_foreground_rooms.dart';
+import 'package:island/chat/pods/chat_summary.dart';
 import 'package:island/e2ee/e2ee.dart';
 import 'package:logging/logging.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
@@ -41,22 +46,29 @@ class ChatSyncHintNotifier extends Notifier<String?> {
 }
 
 final flashingMessagesProvider =
-    NotifierProvider<FlashingMessagesNotifier, Set<String>>(
+    NotifierProvider<FlashingMessagesNotifier, Map<String, int>>(
       FlashingMessagesNotifier.new,
     );
 
-class FlashingMessagesNotifier extends Notifier<Set<String>> {
+class FlashingMessagesNotifier extends Notifier<Map<String, int>> {
   @override
-  Set<String> build() => {};
+  Map<String, int> build() => {};
 
-  void update(Set<String> Function(Set<String>) cb) {
-    state = cb(state);
+  void trigger(String messageId) {
+    state = {...state, messageId: (state[messageId] ?? 0) + 1};
+  }
+
+  void clearMessage(String messageId) {
+    final next = Map<String, int>.from(state);
+    next.remove(messageId);
+    state = next;
   }
 
   void clear() => state = {};
 }
 
 const String _chatSyncCursorStoreKey = 'chat_messages_sync_cursor_ms';
+const String _chatRoomSyncCursorStoreKey = 'chat_rooms_sync_cursor_ms';
 const String _chatRoomEncryptionModePrefix = 'chat_room_encryption_mode_';
 
 String _chatRoomEncryptionModeStoreKey(String roomId) =>
@@ -67,6 +79,32 @@ int _safeToInt(dynamic value, {int fallback = 0}) {
   if (value is String) return int.tryParse(value) ?? fallback;
   if (value is num) return value.toInt();
   return fallback;
+}
+
+SnChatMessage _mergeUpdatedRemoteMessage(
+  SnChatMessage existingRemote,
+  SnChatMessage updateRemote, {
+  DateTime? editedAt,
+}) {
+  final mergedMeta = Map<String, dynamic>.of(existingRemote.meta);
+  mergedMeta.addAll(updateRemote.meta);
+  mergedMeta.remove('message_id');
+  final isLinkPreviewUpdate = updateRemote.type == 'messages.sync.links';
+  final isSilentSync =
+      updateRemote.type == 'messages.sync.links' ||
+      updateRemote.type == 'messages.sync.finalize';
+
+  return existingRemote.copyWith(
+    content: isLinkPreviewUpdate
+        ? existingRemote.content
+        : updateRemote.content,
+    attachments: updateRemote.attachments,
+    membersMentioned: updateRemote.membersMentioned,
+    repliedMessageId: updateRemote.repliedMessageId,
+    forwardedMessageId: updateRemote.forwardedMessageId,
+    meta: mergedMeta,
+    editedAt: isSilentSync ? existingRemote.editedAt : editedAt,
+  );
 }
 
 int _parseEncryptionMode(dynamic value) {
@@ -87,6 +125,31 @@ int _parseEncryptionMode(dynamic value) {
   return parsed;
 }
 
+DateTime? _parseWebSocketActivityTimestamp(dynamic value) {
+  if (value is DateTime) return value.toUtc();
+  if (value is String) {
+    final parsed = DateTime.tryParse(value);
+    return parsed?.toUtc();
+  }
+  if (value is int) {
+    return DateTime.fromMillisecondsSinceEpoch(value, isUtc: true);
+  }
+  if (value is num) {
+    return DateTime.fromMillisecondsSinceEpoch(value.toInt(), isUtc: true);
+  }
+  return null;
+}
+
+double? _parseWebSocketActivityProgress(dynamic value) {
+  if (value == null) return null;
+  if (value is num) return value.toDouble().clamp(0.0, 1.0);
+  if (value is String) {
+    final parsed = double.tryParse(value);
+    return parsed?.clamp(0.0, 1.0);
+  }
+  return null;
+}
+
 Future<void> _persistRoomEncryptionModeFromJson(
   AppDatabase db,
   Map<String, dynamic> roomJson,
@@ -104,6 +167,20 @@ Future<int> _getLatestMessageTimestamp(AppDatabase db) async {
     Logger.root.info('Error getting latest message timestamp: $e');
   }
   return 0;
+}
+
+DateTime _parseSyncTimestamp(dynamic value) {
+  if (value is DateTime) return value.toUtc();
+  if (value is String) {
+    return DateTime.tryParse(value)?.toUtc() ?? DateTime.now().toUtc();
+  }
+  if (value is int) {
+    return DateTime.fromMillisecondsSinceEpoch(value, isUtc: true);
+  }
+  if (value is num) {
+    return DateTime.fromMillisecondsSinceEpoch(value.toInt(), isUtc: true);
+  }
+  return DateTime.now().toUtc();
 }
 
 /// Global chat sync notifier that syncs messages from all chat rooms
@@ -207,6 +284,28 @@ class ChatGlobalSyncNotifier extends _$ChatGlobalSyncNotifier {
     }
   }
 
+  bool get _isDesktop =>
+      !kIsWeb &&
+      (defaultTargetPlatform == TargetPlatform.macOS ||
+          defaultTargetPlatform == TargetPlatform.windows ||
+          defaultTargetPlatform == TargetPlatform.linux);
+
+  bool _shouldPlayForegroundRoomMessageSfx(
+    SnChatMessage message, {
+    required String? currentUserId,
+  }) {
+    if (!_isDesktop) return false;
+    if (ref.read(desktopWindowFocusedProvider)) return false;
+    if (!ref.read(foregroundChatRoomIdsProvider).contains(message.chatRoomId)) {
+      return false;
+    }
+    if (message.type.startsWith('system.') ||
+        message.type.startsWith('messages.')) {
+      return false;
+    }
+    return currentUserId == null || message.sender.accountId != currentUserId;
+  }
+
   @override
   Future<void> build() async {
     // Set up global WebSocket listener for real-time message handling
@@ -236,8 +335,20 @@ class ChatGlobalSyncNotifier extends _$ChatGlobalSyncNotifier {
         context: 'ws typing',
       );
       if (sender == null) return;
+      final activityType = pkt.data?['type']?.toString() ?? 'typing';
+      final timestamp = _parseWebSocketActivityTimestamp(
+        pkt.data?['timestamp'] ?? pkt.data?['ts'],
+      );
+      final progress = _parseWebSocketActivityProgress(pkt.data?['progress']);
       eventBus.fire(
-        ChatTypingEvent(roomId: roomId, sender: sender, isTyping: true),
+        ChatTypingEvent(
+          roomId: roomId,
+          sender: sender,
+          isTyping: true,
+          activityType: activityType,
+          progress: progress,
+          timestamp: timestamp,
+        ),
       );
       return;
     }
@@ -265,39 +376,51 @@ class ChatGlobalSyncNotifier extends _$ChatGlobalSyncNotifier {
             );
           }
           await db.saveMessageWithSender(localMessage);
+          if (_shouldPlayForegroundRoomMessageSfx(
+            message,
+            currentUserId: currentUserId,
+          )) {
+            playMessageSfxRef(ref);
+          }
           eventBus.fire(ChatMessageNewEvent(message));
         }
       case 'messages.update':
-      case 'messages.update.links':
+      case 'messages.sync.finalize':
+      case 'messages.sync.links':
         {
-          var eventMessage = LocalChatMessage.fromRemoteMessage(
-            message,
-            MessageStatus.sent,
-          );
-          final existingEvent = await _fetchMessageFromDb(
-            db,
-            message.id,
-            roomId,
-          );
-          if (existingEvent != null) {
-            eventMessage = _mergeReactionFieldsFromExisting(
-              eventMessage,
-              existingEvent,
+          final shouldPersistEventRow = message.type == 'messages.update';
+          if (shouldPersistEventRow) {
+            var eventMessage = LocalChatMessage.fromRemoteMessage(
+              message,
+              MessageStatus.sent,
             );
+            final existingEvent = await _fetchMessageFromDb(
+              db,
+              message.id,
+              roomId,
+            );
+            if (existingEvent != null) {
+              eventMessage = _mergeReactionFieldsFromExisting(
+                eventMessage,
+                existingEvent,
+              );
+            }
+            await db.saveMessageWithSender(eventMessage);
           }
-          await db.saveMessageWithSender(eventMessage);
 
           final targetId = pkt.data?['meta']?['message_id'] ?? message.id;
           final existingMsg = await _fetchMessageFromDb(db, targetId, roomId);
 
           if (existingMsg != null) {
             final existingRemote = existingMsg.toRemoteMessage();
-            final mergedMeta = Map<String, dynamic>.of(existingRemote.meta);
-            mergedMeta.addAll(message.meta);
-            mergedMeta.remove('message_id');
+            final updatePayload = LocalChatMessage.fromRemoteMessage(
+              message,
+              MessageStatus.sent,
+            ).toRemoteMessage();
 
-            final updatedRemote = existingRemote.copyWith(
-              meta: mergedMeta,
+            final updatedRemote = _mergeUpdatedRemoteMessage(
+              existingRemote,
+              updatePayload,
               editedAt: message.createdAt,
             );
 
@@ -443,6 +566,36 @@ class ChatGlobalSyncNotifier extends _$ChatGlobalSyncNotifier {
     await db.saveMessageWithSender(deletedMessage);
   }
 
+  Future<void> _applyMessageUpdateToTarget(
+    AppDatabase db,
+    SnChatMessage message,
+  ) async {
+    final targetId = message.meta['message_id']?.toString() ?? message.id;
+    final existingMsg = await _fetchMessageFromDb(
+      db,
+      targetId,
+      message.chatRoomId,
+    );
+
+    if (existingMsg == null) return;
+
+    final existingRemote = existingMsg.toRemoteMessage();
+    final updatePayload = LocalChatMessage.fromRemoteMessage(
+      message,
+      MessageStatus.sent,
+    ).toRemoteMessage();
+
+    final updatedRemote = _mergeUpdatedRemoteMessage(
+      existingRemote,
+      updatePayload,
+      editedAt: message.createdAt,
+    );
+
+    await db.saveMessageWithSender(
+      LocalChatMessage.fromRemoteMessage(updatedRemote, existingMsg.status),
+    );
+  }
+
   Map<String, int> _extractReactionsCount(LocalChatMessage message) {
     final raw = message.data['reactions_count'];
     if (raw is! Map) return {};
@@ -568,6 +721,8 @@ class ChatGlobalSyncNotifier extends _$ChatGlobalSyncNotifier {
     final snapshot = _extractReactionSnapshot(packet);
     final reactionsCount = snapshot ?? _extractReactionsCount(targetMessage);
     final reactionsMade = _extractReactionsMade(targetMessage);
+    final isCurrentUserReaction =
+        currentUserId != null && packet.sender.accountId == currentUserId;
 
     if (packet.type == 'messages.reaction.added') {
       final symbol =
@@ -579,7 +734,7 @@ class ChatGlobalSyncNotifier extends _$ChatGlobalSyncNotifier {
       if (snapshot == null) {
         reactionsCount[symbol] = (reactionsCount[symbol] ?? 0) + 1;
       }
-      if (currentUserId != null && packet.senderId == currentUserId) {
+      if (isCurrentUserReaction) {
         reactionsMade[symbol] = true;
       }
     } else if (packet.type == 'messages.reaction.removed') {
@@ -597,7 +752,7 @@ class ChatGlobalSyncNotifier extends _$ChatGlobalSyncNotifier {
           reactionsCount.remove(symbol);
         }
       }
-      if (currentUserId != null && packet.senderId == currentUserId) {
+      if (isCurrentUserReaction) {
         reactionsMade.remove(symbol);
       }
     }
@@ -829,8 +984,20 @@ class ChatGlobalSyncNotifier extends _$ChatGlobalSyncNotifier {
 
           // Save normal messages in one write transaction to avoid UI jank.
           final normalMessages = <LocalChatMessage>[];
+          final updateMessages = <SnChatMessage>[];
+          final deleteMessages = <SnChatMessage>[];
           final reactionMessages = <SnChatMessage>[];
           for (final msg in messages) {
+            if (msg.type == 'messages.update' ||
+                msg.type == 'messages.sync.finalize' ||
+                msg.type == 'messages.sync.links') {
+              updateMessages.add(msg);
+              continue;
+            }
+            if (msg.type == 'messages.delete') {
+              deleteMessages.add(msg);
+              continue;
+            }
             if (msg.type == 'messages.reaction.added' ||
                 msg.type == 'messages.reaction.removed') {
               reactionMessages.add(msg);
@@ -866,24 +1033,55 @@ class ChatGlobalSyncNotifier extends _$ChatGlobalSyncNotifier {
             }
           }
 
-          for (final msg in reactionMessages) {
+          for (final msg in updateMessages) {
             try {
-              final targetId = msg.meta['message_id']?.toString();
-              final existed = targetId == null || targetId.isEmpty
-                  ? null
-                  : await db.getMessageById(targetId);
-              if (existed == null) {
-                await _applyReactionUpdate(
-                  db,
-                  msg,
-                  currentUserId: currentUserId,
+              if (msg.type == 'messages.update') {
+                await db.saveMessageWithSender(
+                  LocalChatMessage.fromRemoteMessage(msg, MessageStatus.sent),
                 );
               }
+              await _applyMessageUpdateToTarget(db, msg);
+              updatedRoomIds.add(msg.chatRoomId);
+              roundSynced += 1;
+              final createdAtMs = msg.createdAt.millisecondsSinceEpoch;
+              if (createdAtMs > roundMaxSeenTimestamp) {
+                roundMaxSeenTimestamp = createdAtMs;
+              }
+            } catch (e) {
+              Logger.root.info('Error applying message update from sync: $e');
+            }
+          }
+
+          for (final msg in deleteMessages) {
+            try {
+              await db.saveMessageWithSender(
+                LocalChatMessage.fromRemoteMessage(msg, MessageStatus.sent),
+              );
+              final targetId = msg.meta['message_id']?.toString() ?? msg.id;
+              await _markMessageAsDeleted(db, targetId, msg.chatRoomId);
+              updatedRoomIds.add(msg.chatRoomId);
+              roundSynced += 1;
+              final createdAtMs = msg.createdAt.millisecondsSinceEpoch;
+              if (createdAtMs > roundMaxSeenTimestamp) {
+                roundMaxSeenTimestamp = createdAtMs;
+              }
+            } catch (e) {
+              Logger.root.info('Error applying message delete from sync: $e');
+            }
+          }
+
+          for (final msg in reactionMessages) {
+            try {
+              await _applyReactionUpdate(db, msg, currentUserId: currentUserId);
               await db.saveMessageWithSender(
                 LocalChatMessage.fromRemoteMessage(msg, MessageStatus.sent),
               );
               updatedRoomIds.add(msg.chatRoomId);
               roundSynced += 1;
+              final createdAtMs = msg.createdAt.millisecondsSinceEpoch;
+              if (createdAtMs > roundMaxSeenTimestamp) {
+                roundMaxSeenTimestamp = createdAtMs;
+              }
             } catch (e) {
               Logger.root.info('Error saving reaction from global sync: $e');
             }
@@ -955,71 +1153,126 @@ class ChatGlobalSyncNotifier extends _$ChatGlobalSyncNotifier {
 @riverpod
 class ChatRoomJoinedNotifier extends _$ChatRoomJoinedNotifier {
   @override
-  Future<List<SnChatRoom>> build() async {
+  Stream<List<SnChatRoom>> build() async* {
     final db = ref.watch(databaseProvider);
+    final prefs = ref.watch(sharedPreferencesProvider);
+    final userInfo = ref.watch(userInfoProvider);
 
-    try {
+    Future<List<SnChatRoom>> loadLocalRooms() async {
       final localRooms = await db.getAllChatRooms();
       final localRealms = await db.getAllRealms();
-      if (localRooms.isNotEmpty) {
-        final roomsWithDetails = await Future.wait(
-          localRooms.map((room) async {
-            final encryptionModeRaw = await db.getSecret(
-              _chatRoomEncryptionModeStoreKey(room.id),
-            );
-            final encryptionMode = int.tryParse(encryptionModeRaw ?? '') ?? 0;
-            final members = await db.getMembersByRoomId(room.id);
-            final realm = localRealms
-                .where((e) => e.id == room.realmId)
-                .firstOrNull;
-            return room.copyWith(
-              encryptionMode: encryptionMode,
-              members: members,
-              realm: realm,
-            );
-          }),
-        );
-
-        // Always fetch remote chat rooms to check for new ones
-        try {
-          final client = ref.watch(apiClientProvider);
-          final resp = await client.get('/messager/chat');
-          final rawRooms = (resp.data as List).whereType<Map>().toList();
-          for (final roomJson in rawRooms) {
-            await _persistRoomEncryptionModeFromJson(
-              db,
-              Map<String, dynamic>.from(roomJson),
-            );
-          }
-          final rooms = rawRooms
-              .map((e) => SnChatRoom.fromJson(Map<String, dynamic>.from(e)))
-              .cast<SnChatRoom>()
-              .toList();
-          await db.saveChatRooms(rooms, override: true);
-          return rooms;
-        } catch (_) {
-          // If remote fetch fails, return local rooms
-          return roomsWithDetails;
-        }
-      }
-    } catch (_) {}
-
-    // Fallback to API
-    final client = ref.watch(apiClientProvider);
-    final resp = await client.get('/messager/chat');
-    final rawRooms = (resp.data as List).whereType<Map>().toList();
-    for (final roomJson in rawRooms) {
-      await _persistRoomEncryptionModeFromJson(
-        db,
-        Map<String, dynamic>.from(roomJson),
+      return Future.wait(
+        localRooms.map((room) async {
+          final encryptionModeRaw = await db.getSecret(
+            _chatRoomEncryptionModeStoreKey(room.id),
+          );
+          final encryptionMode = int.tryParse(encryptionModeRaw ?? '') ?? 0;
+          final members = await db.getMembersByRoomId(room.id);
+          final realm = localRealms
+              .where((e) => e.id == room.realmId)
+              .firstOrNull;
+          return room.copyWith(
+            encryptionMode: encryptionMode,
+            members: members,
+            realm: realm,
+          );
+        }),
       );
     }
-    final rooms = rawRooms
-        .map((e) => SnChatRoom.fromJson(Map<String, dynamic>.from(e)))
-        .cast<SnChatRoom>()
-        .toList();
-    await db.saveChatRooms(rooms, override: true);
-    return rooms;
+
+    Future<void> syncRemoteRooms(List<SnChatRoom> localRooms) async {
+      final client = ref.read(apiClientProvider);
+      final savedCursor = prefs.getInt(_chatRoomSyncCursorStoreKey) ?? 0;
+      final syncCursor = localRooms.isEmpty ? 0 : savedCursor;
+
+      final resp = await client.post(
+        '/messager/chat/rooms/sync',
+        data: {'last_sync_timestamp': syncCursor},
+      );
+      final body = resp.data as Map<String, dynamic>;
+      final rawChanges = (body['changes'] as List?) ?? const [];
+      final rawSummaries = (body['summaries'] as List?) ?? const [];
+      final rawGroups = (body['groups'] as List?) ?? const [];
+      final currentTimestampRaw =
+          body['current_timestamp'] ?? body['currentTimestamp'];
+      final currentTimestamp = _parseSyncTimestamp(currentTimestampRaw);
+
+      final roomsById = {
+        for (final room in await db.getAllChatRooms()) room.id: room,
+      };
+      final removedRoomIds = <String>{};
+
+      for (final rawChange in rawChanges.whereType<Map>()) {
+        final change = Map<String, dynamic>.from(rawChange);
+        final roomId = change['room_id']?.toString();
+        final changeType = change['type']?.toString();
+
+        if (roomId != null && changeType == 'removed') {
+          roomsById.remove(roomId);
+          removedRoomIds.add(roomId);
+          continue;
+        }
+
+        final rawRoom = change['room'];
+        if (rawRoom is Map) {
+          final roomJson = Map<String, dynamic>.from(rawRoom);
+          await _persistRoomEncryptionModeFromJson(db, roomJson);
+          roomsById[SnChatRoom.fromJson(roomJson).id] = SnChatRoom.fromJson(
+            roomJson,
+          );
+        }
+
+        final rawMember = change['member'];
+        if (rawMember is Map) {
+          try {
+            await db.saveMember(
+              SnChatMember.fromJson(Map<String, dynamic>.from(rawMember)),
+            );
+          } catch (e) {
+            Logger.root.info('Skipping invalid synced chat member: $e');
+          }
+        }
+      }
+
+      await db.saveChatRooms(roomsById.values.toList(), override: true);
+      if (userInfo.value != null) {
+        final groups = rawGroups
+            .whereType<Map>()
+            .map(
+              (group) => SnChatGroup.fromJson(Map<String, dynamic>.from(group)),
+            )
+            .toList();
+        await db.saveChatGroups(userInfo.value!.id, groups);
+        eventBus.fire(const ChatGroupsRefreshEvent());
+      }
+      if (!ref.mounted) return;
+      ref
+          .read(chatSummaryProvider.notifier)
+          .applySyncedSummaries(rawSummaries, removedRoomIds: removedRoomIds);
+      await prefs.setInt(
+        _chatRoomSyncCursorStoreKey,
+        currentTimestamp.millisecondsSinceEpoch,
+      );
+    }
+
+    final localRooms = await loadLocalRooms();
+    yield localRooms;
+
+    try {
+      await syncRemoteRooms(localRooms);
+      final syncedRooms = await loadLocalRooms();
+      yield syncedRooms;
+    } catch (e, stackTrace) {
+      if (localRooms.isEmpty) {
+        Logger.root.info('Error loading synced chat rooms', e, stackTrace);
+        rethrow;
+      }
+      Logger.root.info(
+        'Using local chat rooms after sync failed',
+        e,
+        stackTrace,
+      );
+    }
   }
 }
 

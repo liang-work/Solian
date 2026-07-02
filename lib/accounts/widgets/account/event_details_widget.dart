@@ -4,13 +4,14 @@ import 'package:gap/gap.dart';
 import 'package:island/accounts/utils/account_status_utils.dart';
 import 'package:island/core/services/time.dart';
 import 'package:island/core/utils/activity_utils.dart';
+import 'package:island/drive/widgets/cloud_files.dart';
 import 'package:material_symbols_icons/symbols.dart';
 import 'package:solar_network_sdk/solar_network_sdk.dart';
 
 class EventDetailsWidget extends StatelessWidget {
   final DateTime selectedDay;
   final SnEventCalendarEntry? event;
-  final void Function(DateTime)? onEditEvent;
+  final void Function(DateTime, {SnUserCalendarEvent? event})? onEditEvent;
 
   const EventDetailsWidget({
     super.key,
@@ -191,6 +192,11 @@ class EventDetailsWidget extends StatelessWidget {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
 
+    // Use localizable key for display name if available
+    final displayName = day.localizableKey != null && day.localizableKey!.isNotEmpty
+        ? day.localizableKey!.tr()
+        : (day.globalName.isNotEmpty ? day.globalName : day.localName);
+
     return Card(
       margin: EdgeInsets.zero,
       color: colorScheme.tertiaryContainer,
@@ -212,7 +218,7 @@ class EventDetailsWidget extends StatelessWidget {
                 const Gap(12),
                 Expanded(
                   child: Text(
-                    day.globalName.isNotEmpty ? day.globalName : day.localName,
+                    displayName,
                     style: theme.textTheme.titleSmall?.copyWith(
                       color: colorScheme.onTertiaryContainer,
                       fontWeight: FontWeight.w600,
@@ -221,8 +227,7 @@ class EventDetailsWidget extends StatelessWidget {
                 ),
               ],
             ),
-            if (day.localName.isNotEmpty &&
-                day.localName != day.globalName) ...[
+            if (day.localName.isNotEmpty && day.localName != displayName) ...[
               const Gap(4),
               Padding(
                 padding: const EdgeInsets.only(left: 30),
@@ -317,90 +322,144 @@ class EventDetailsWidget extends StatelessWidget {
         visibilityColor = colorScheme.outline;
     }
 
+    final hasBackground = userEvent.background != null;
+    final hasIcon = userEvent.icon != null;
+
     return Card(
       margin: EdgeInsets.zero,
-      color: colorScheme.primaryContainer,
+      color: hasBackground ? null : colorScheme.primaryContainer,
       elevation: 0,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      clipBehavior: Clip.antiAlias,
       child: InkWell(
-        onTap: onEditEvent != null ? () => onEditEvent!(selectedDay) : null,
-        borderRadius: BorderRadius.circular(12),
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      userEvent.title,
-                      style: theme.textTheme.titleSmall?.copyWith(
-                        color: colorScheme.onPrimaryContainer,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ),
-                  Icon(visibilityIcon, size: 16, color: visibilityColor),
-                  if (userEvent.recurrence != null &&
-                      userEvent.recurrence!.frequency !=
-                          SnRecurrenceFrequency.none) ...[
-                    const Gap(4),
-                    Icon(
-                      Symbols.repeat,
-                      size: 16,
-                      color: colorScheme.onPrimaryContainer.withOpacity(0.7),
-                    ),
-                  ],
-                ],
+        onTap: onEditEvent != null
+            ? () => onEditEvent!(selectedDay, event: userEvent)
+            : null,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            // Background image
+            if (hasBackground)
+              SizedBox(
+                height: 80,
+                child: CloudFileWidget(
+                  item: userEvent.background!,
+                  fit: BoxFit.cover,
+                ),
               ),
-              const Gap(8),
-              Row(
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Icon(
-                    Symbols.schedule,
-                    size: 14,
-                    color: colorScheme.onPrimaryContainer.withOpacity(0.7),
+                  Row(
+                    children: [
+                      // Icon
+                      if (hasIcon) ...[
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(8),
+                          child: SizedBox(
+                            width: 32,
+                            height: 32,
+                            child: CloudFileWidget(
+                              item: userEvent.icon!,
+                              fit: BoxFit.cover,
+                            ),
+                          ),
+                        ),
+                        const Gap(8),
+                      ],
+                      Expanded(
+                        child: Text(
+                          userEvent.title,
+                          style: theme.textTheme.titleSmall?.copyWith(
+                            color: hasBackground
+                                ? null
+                                : colorScheme.onPrimaryContainer,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                      Icon(visibilityIcon, size: 16, color: visibilityColor),
+                      if (userEvent.recurrence != null &&
+                          userEvent.recurrence!.frequency !=
+                              SnRecurrenceFrequency.none) ...[
+                        const Gap(4),
+                        Icon(
+                          Symbols.repeat,
+                          size: 16,
+                          color: (hasBackground
+                                  ? colorScheme.onSurface
+                                  : colorScheme.onPrimaryContainer)
+                              .withOpacity(0.7),
+                        ),
+                      ],
+                    ],
                   ),
                   const Gap(8),
-                  Text(
-                    timeText,
-                    style: theme.textTheme.bodyMedium?.copyWith(
-                      color: colorScheme.onPrimaryContainer.withOpacity(0.7),
-                    ),
+                  Row(
+                    children: [
+                      Icon(
+                        Symbols.schedule,
+                        size: 14,
+                        color: (hasBackground
+                                ? colorScheme.onSurface
+                                : colorScheme.onPrimaryContainer)
+                            .withOpacity(0.7),
+                      ),
+                      const Gap(8),
+                      Text(
+                        timeText,
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          color: (hasBackground
+                                  ? colorScheme.onSurface
+                                  : colorScheme.onPrimaryContainer)
+                              .withOpacity(0.7),
+                        ),
+                      ),
+                    ],
                   ),
-                ],
-              ),
-              if (userEvent.location?.isNotEmpty ?? false) ...[
-                const Gap(4),
-                Row(
-                  children: [
-                    Icon(
-                      Symbols.location_on,
-                      size: 14,
-                      color: colorScheme.onPrimaryContainer.withOpacity(0.7),
+                  if (userEvent.location?.isNotEmpty ?? false) ...[
+                    const Gap(4),
+                    Row(
+                      children: [
+                        Icon(
+                          Symbols.location_on,
+                          size: 14,
+                          color: (hasBackground
+                                  ? colorScheme.onSurface
+                                  : colorScheme.onPrimaryContainer)
+                              .withOpacity(0.7),
+                        ),
+                        const Gap(8),
+                        Text(
+                          userEvent.location!,
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                            color: (hasBackground
+                                    ? colorScheme.onSurface
+                                    : colorScheme.onPrimaryContainer)
+                                .withOpacity(0.7),
+                          ),
+                        ),
+                      ],
                     ),
+                  ],
+                  if (userEvent.description?.isNotEmpty ?? false) ...[
                     const Gap(8),
                     Text(
-                      userEvent.location!,
+                      userEvent.description!,
                       style: theme.textTheme.bodyMedium?.copyWith(
-                        color: colorScheme.onPrimaryContainer.withOpacity(0.7),
+                        color: (hasBackground
+                                ? colorScheme.onSurface
+                                : colorScheme.onPrimaryContainer)
+                            .withOpacity(0.8),
                       ),
                     ),
                   ],
-                ),
-              ],
-              if (userEvent.description?.isNotEmpty ?? false) ...[
-                const Gap(8),
-                Text(
-                  userEvent.description!,
-                  style: theme.textTheme.bodyMedium?.copyWith(
-                    color: colorScheme.onPrimaryContainer.withOpacity(0.8),
-                  ),
-                ),
-              ],
-            ],
-          ),
+                ],
+              ),
+            ),
+          ],
         ),
       ),
     );

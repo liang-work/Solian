@@ -380,157 +380,97 @@ final class CalendarEventFamily extends $Family
   String toString() => r'calendarEventProvider';
 }
 
-/// Provider for fetching upcoming event countdowns
+/// Provider for the list of account IDs the current user has subscribed to
 
-@ProviderFor(eventCountdowns)
-final eventCountdownsProvider = EventCountdownsFamily._();
+@ProviderFor(calendarSubscriptions)
+final calendarSubscriptionsProvider = CalendarSubscriptionsProvider._();
 
-/// Provider for fetching upcoming event countdowns
+/// Provider for the list of account IDs the current user has subscribed to
 
-final class EventCountdownsProvider
+final class CalendarSubscriptionsProvider
     extends
         $FunctionalProvider<
-          AsyncValue<List<SnEventCountdownItem>>,
-          List<SnEventCountdownItem>,
-          FutureOr<List<SnEventCountdownItem>>
+          AsyncValue<List<String>>,
+          List<String>,
+          FutureOr<List<String>>
         >
-    with
-        $FutureModifier<List<SnEventCountdownItem>>,
-        $FutureProvider<List<SnEventCountdownItem>> {
-  /// Provider for fetching upcoming event countdowns
-  EventCountdownsProvider._({
-    required EventCountdownsFamily super.from,
-    required ({int take, String? username}) super.argument,
-  }) : super(
-         retry: null,
-         name: r'eventCountdownsProvider',
-         isAutoDispose: true,
-         dependencies: null,
-         $allTransitiveDependencies: null,
-       );
+    with $FutureModifier<List<String>>, $FutureProvider<List<String>> {
+  /// Provider for the list of account IDs the current user has subscribed to
+  CalendarSubscriptionsProvider._()
+    : super(
+        from: null,
+        argument: null,
+        retry: null,
+        name: r'calendarSubscriptionsProvider',
+        isAutoDispose: true,
+        dependencies: null,
+        $allTransitiveDependencies: null,
+      );
 
   @override
-  String debugGetCreateSourceHash() => _$eventCountdownsHash();
-
-  @override
-  String toString() {
-    return r'eventCountdownsProvider'
-        ''
-        '$argument';
-  }
+  String debugGetCreateSourceHash() => _$calendarSubscriptionsHash();
 
   @$internal
   @override
-  $FutureProviderElement<List<SnEventCountdownItem>> $createElement(
+  $FutureProviderElement<List<String>> $createElement(
     $ProviderPointer pointer,
   ) => $FutureProviderElement(pointer);
 
   @override
-  FutureOr<List<SnEventCountdownItem>> create(Ref ref) {
-    final argument = this.argument as ({int take, String? username});
-    return eventCountdowns(
-      ref,
-      take: argument.take,
-      username: argument.username,
-    );
-  }
-
-  @override
-  bool operator ==(Object other) {
-    return other is EventCountdownsProvider && other.argument == argument;
-  }
-
-  @override
-  int get hashCode {
-    return argument.hashCode;
+  FutureOr<List<String>> create(Ref ref) {
+    return calendarSubscriptions(ref);
   }
 }
 
-String _$eventCountdownsHash() => r'cfaacd6634d3367d789c69e83a7fdc6100abe97f';
+String _$calendarSubscriptionsHash() =>
+    r'00c449239ed0a938fb553d079f280800bda3db3e';
 
-/// Provider for fetching upcoming event countdowns
+/// Checks if the current user is subscribed to a specific account's calendar
 
-final class EventCountdownsFamily extends $Family
-    with
-        $FunctionalFamilyOverride<
-          FutureOr<List<SnEventCountdownItem>>,
-          ({int take, String? username})
-        > {
-  EventCountdownsFamily._()
-    : super(
-        retry: null,
-        name: r'eventCountdownsProvider',
-        dependencies: null,
-        $allTransitiveDependencies: null,
-        isAutoDispose: true,
-      );
+@ProviderFor(isCalendarSubscribed)
+final isCalendarSubscribedProvider = IsCalendarSubscribedFamily._();
 
-  /// Provider for fetching upcoming event countdowns
+/// Checks if the current user is subscribed to a specific account's calendar
 
-  EventCountdownsProvider call({int take = 5, String? username}) =>
-      EventCountdownsProvider._(
-        argument: (take: take, username: username),
-        from: this,
-      );
-
-  @override
-  String toString() => r'eventCountdownsProvider';
-}
-
-/// Provider for countdowns within the next week
-
-@ProviderFor(weekCountdowns)
-final weekCountdownsProvider = WeekCountdownsFamily._();
-
-/// Provider for countdowns within the next week
-
-final class WeekCountdownsProvider
-    extends
-        $FunctionalProvider<
-          AsyncValue<List<SnEventCountdownItem>>,
-          List<SnEventCountdownItem>,
-          FutureOr<List<SnEventCountdownItem>>
-        >
-    with
-        $FutureModifier<List<SnEventCountdownItem>>,
-        $FutureProvider<List<SnEventCountdownItem>> {
-  /// Provider for countdowns within the next week
-  WeekCountdownsProvider._({
-    required WeekCountdownsFamily super.from,
-    required String? super.argument,
+final class IsCalendarSubscribedProvider
+    extends $FunctionalProvider<AsyncValue<bool>, bool, FutureOr<bool>>
+    with $FutureModifier<bool>, $FutureProvider<bool> {
+  /// Checks if the current user is subscribed to a specific account's calendar
+  IsCalendarSubscribedProvider._({
+    required IsCalendarSubscribedFamily super.from,
+    required String super.argument,
   }) : super(
          retry: null,
-         name: r'weekCountdownsProvider',
+         name: r'isCalendarSubscribedProvider',
          isAutoDispose: true,
          dependencies: null,
          $allTransitiveDependencies: null,
        );
 
   @override
-  String debugGetCreateSourceHash() => _$weekCountdownsHash();
+  String debugGetCreateSourceHash() => _$isCalendarSubscribedHash();
 
   @override
   String toString() {
-    return r'weekCountdownsProvider'
+    return r'isCalendarSubscribedProvider'
         ''
         '($argument)';
   }
 
   @$internal
   @override
-  $FutureProviderElement<List<SnEventCountdownItem>> $createElement(
-    $ProviderPointer pointer,
-  ) => $FutureProviderElement(pointer);
+  $FutureProviderElement<bool> $createElement($ProviderPointer pointer) =>
+      $FutureProviderElement(pointer);
 
   @override
-  FutureOr<List<SnEventCountdownItem>> create(Ref ref) {
-    final argument = this.argument as String?;
-    return weekCountdowns(ref, username: argument);
+  FutureOr<bool> create(Ref ref) {
+    final argument = this.argument as String;
+    return isCalendarSubscribed(ref, argument);
   }
 
   @override
   bool operator ==(Object other) {
-    return other is WeekCountdownsProvider && other.argument == argument;
+    return other is IsCalendarSubscribedProvider && other.argument == argument;
   }
 
   @override
@@ -539,88 +479,129 @@ final class WeekCountdownsProvider
   }
 }
 
-String _$weekCountdownsHash() => r'd8d9c8f419c6edf6967164271da13ae847946bdf';
+String _$isCalendarSubscribedHash() =>
+    r'f912fbf6bebcf675bb35f39bb80dbb918fcb8a2c';
 
-/// Provider for countdowns within the next week
+/// Checks if the current user is subscribed to a specific account's calendar
 
-final class WeekCountdownsFamily extends $Family
-    with
-        $FunctionalFamilyOverride<
-          FutureOr<List<SnEventCountdownItem>>,
-          String?
-        > {
-  WeekCountdownsFamily._()
+final class IsCalendarSubscribedFamily extends $Family
+    with $FunctionalFamilyOverride<FutureOr<bool>, String> {
+  IsCalendarSubscribedFamily._()
     : super(
         retry: null,
-        name: r'weekCountdownsProvider',
+        name: r'isCalendarSubscribedProvider',
         dependencies: null,
         $allTransitiveDependencies: null,
         isAutoDispose: true,
       );
 
-  /// Provider for countdowns within the next week
+  /// Checks if the current user is subscribed to a specific account's calendar
 
-  WeekCountdownsProvider call({String? username}) =>
-      WeekCountdownsProvider._(argument: username, from: this);
+  IsCalendarSubscribedProvider call(String accountId) =>
+      IsCalendarSubscribedProvider._(argument: accountId, from: this);
 
   @override
-  String toString() => r'weekCountdownsProvider';
+  String toString() => r'isCalendarSubscribedProvider';
 }
 
-/// Provider for countdowns within the next month
+/// Provider for fetching the current user's used calendar tags
 
-@ProviderFor(monthCountdowns)
-final monthCountdownsProvider = MonthCountdownsFamily._();
+@ProviderFor(usedCalendarTags)
+final usedCalendarTagsProvider = UsedCalendarTagsProvider._();
 
-/// Provider for countdowns within the next month
+/// Provider for fetching the current user's used calendar tags
 
-final class MonthCountdownsProvider
+final class UsedCalendarTagsProvider
     extends
         $FunctionalProvider<
-          AsyncValue<List<SnEventCountdownItem>>,
-          List<SnEventCountdownItem>,
-          FutureOr<List<SnEventCountdownItem>>
+          AsyncValue<List<String>>,
+          List<String>,
+          FutureOr<List<String>>
+        >
+    with $FutureModifier<List<String>>, $FutureProvider<List<String>> {
+  /// Provider for fetching the current user's used calendar tags
+  UsedCalendarTagsProvider._()
+    : super(
+        from: null,
+        argument: null,
+        retry: null,
+        name: r'usedCalendarTagsProvider',
+        isAutoDispose: true,
+        dependencies: null,
+        $allTransitiveDependencies: null,
+      );
+
+  @override
+  String debugGetCreateSourceHash() => _$usedCalendarTagsHash();
+
+  @$internal
+  @override
+  $FutureProviderElement<List<String>> $createElement(
+    $ProviderPointer pointer,
+  ) => $FutureProviderElement(pointer);
+
+  @override
+  FutureOr<List<String>> create(Ref ref) {
+    return usedCalendarTags(ref);
+  }
+}
+
+String _$usedCalendarTagsHash() => r'8e1795f4fe61ebc073589277e7a2a635c386b223';
+
+/// Provider for searching calendar events + notable days
+
+@ProviderFor(calendarSearch)
+final calendarSearchProvider = CalendarSearchFamily._();
+
+/// Provider for searching calendar events + notable days
+
+final class CalendarSearchProvider
+    extends
+        $FunctionalProvider<
+          AsyncValue<List<CalendarSearchResult>>,
+          List<CalendarSearchResult>,
+          FutureOr<List<CalendarSearchResult>>
         >
     with
-        $FutureModifier<List<SnEventCountdownItem>>,
-        $FutureProvider<List<SnEventCountdownItem>> {
-  /// Provider for countdowns within the next month
-  MonthCountdownsProvider._({
-    required MonthCountdownsFamily super.from,
-    required String? super.argument,
+        $FutureModifier<List<CalendarSearchResult>>,
+        $FutureProvider<List<CalendarSearchResult>> {
+  /// Provider for searching calendar events + notable days
+  CalendarSearchProvider._({
+    required CalendarSearchFamily super.from,
+    required CalendarSearchQuery super.argument,
   }) : super(
          retry: null,
-         name: r'monthCountdownsProvider',
+         name: r'calendarSearchProvider',
          isAutoDispose: true,
          dependencies: null,
          $allTransitiveDependencies: null,
        );
 
   @override
-  String debugGetCreateSourceHash() => _$monthCountdownsHash();
+  String debugGetCreateSourceHash() => _$calendarSearchHash();
 
   @override
   String toString() {
-    return r'monthCountdownsProvider'
+    return r'calendarSearchProvider'
         ''
         '($argument)';
   }
 
   @$internal
   @override
-  $FutureProviderElement<List<SnEventCountdownItem>> $createElement(
+  $FutureProviderElement<List<CalendarSearchResult>> $createElement(
     $ProviderPointer pointer,
   ) => $FutureProviderElement(pointer);
 
   @override
-  FutureOr<List<SnEventCountdownItem>> create(Ref ref) {
-    final argument = this.argument as String?;
-    return monthCountdowns(ref, username: argument);
+  FutureOr<List<CalendarSearchResult>> create(Ref ref) {
+    final argument = this.argument as CalendarSearchQuery;
+    return calendarSearch(ref, argument);
   }
 
   @override
   bool operator ==(Object other) {
-    return other is MonthCountdownsProvider && other.argument == argument;
+    return other is CalendarSearchProvider && other.argument == argument;
   }
 
   @override
@@ -629,120 +610,30 @@ final class MonthCountdownsProvider
   }
 }
 
-String _$monthCountdownsHash() => r'bd39223335f2bab1b8215d5707598809fdc1e64d';
+String _$calendarSearchHash() => r'41318711e8dabd4cbc06171dd4122c0040207aca';
 
-/// Provider for countdowns within the next month
+/// Provider for searching calendar events + notable days
 
-final class MonthCountdownsFamily extends $Family
+final class CalendarSearchFamily extends $Family
     with
         $FunctionalFamilyOverride<
-          FutureOr<List<SnEventCountdownItem>>,
-          String?
+          FutureOr<List<CalendarSearchResult>>,
+          CalendarSearchQuery
         > {
-  MonthCountdownsFamily._()
+  CalendarSearchFamily._()
     : super(
         retry: null,
-        name: r'monthCountdownsProvider',
+        name: r'calendarSearchProvider',
         dependencies: null,
         $allTransitiveDependencies: null,
         isAutoDispose: true,
       );
 
-  /// Provider for countdowns within the next month
+  /// Provider for searching calendar events + notable days
 
-  MonthCountdownsProvider call({String? username}) =>
-      MonthCountdownsProvider._(argument: username, from: this);
-
-  @override
-  String toString() => r'monthCountdownsProvider';
-}
-
-/// Provider for countdowns within the next year
-
-@ProviderFor(yearCountdowns)
-final yearCountdownsProvider = YearCountdownsFamily._();
-
-/// Provider for countdowns within the next year
-
-final class YearCountdownsProvider
-    extends
-        $FunctionalProvider<
-          AsyncValue<List<SnEventCountdownItem>>,
-          List<SnEventCountdownItem>,
-          FutureOr<List<SnEventCountdownItem>>
-        >
-    with
-        $FutureModifier<List<SnEventCountdownItem>>,
-        $FutureProvider<List<SnEventCountdownItem>> {
-  /// Provider for countdowns within the next year
-  YearCountdownsProvider._({
-    required YearCountdownsFamily super.from,
-    required String? super.argument,
-  }) : super(
-         retry: null,
-         name: r'yearCountdownsProvider',
-         isAutoDispose: true,
-         dependencies: null,
-         $allTransitiveDependencies: null,
-       );
+  CalendarSearchProvider call(CalendarSearchQuery query) =>
+      CalendarSearchProvider._(argument: query, from: this);
 
   @override
-  String debugGetCreateSourceHash() => _$yearCountdownsHash();
-
-  @override
-  String toString() {
-    return r'yearCountdownsProvider'
-        ''
-        '($argument)';
-  }
-
-  @$internal
-  @override
-  $FutureProviderElement<List<SnEventCountdownItem>> $createElement(
-    $ProviderPointer pointer,
-  ) => $FutureProviderElement(pointer);
-
-  @override
-  FutureOr<List<SnEventCountdownItem>> create(Ref ref) {
-    final argument = this.argument as String?;
-    return yearCountdowns(ref, username: argument);
-  }
-
-  @override
-  bool operator ==(Object other) {
-    return other is YearCountdownsProvider && other.argument == argument;
-  }
-
-  @override
-  int get hashCode {
-    return argument.hashCode;
-  }
-}
-
-String _$yearCountdownsHash() => r'd7c6d5901c7822a91a8aeecdd26164e7cdec7913';
-
-/// Provider for countdowns within the next year
-
-final class YearCountdownsFamily extends $Family
-    with
-        $FunctionalFamilyOverride<
-          FutureOr<List<SnEventCountdownItem>>,
-          String?
-        > {
-  YearCountdownsFamily._()
-    : super(
-        retry: null,
-        name: r'yearCountdownsProvider',
-        dependencies: null,
-        $allTransitiveDependencies: null,
-        isAutoDispose: true,
-      );
-
-  /// Provider for countdowns within the next year
-
-  YearCountdownsProvider call({String? username}) =>
-      YearCountdownsProvider._(argument: username, from: this);
-
-  @override
-  String toString() => r'yearCountdownsProvider';
+  String toString() => r'calendarSearchProvider';
 }

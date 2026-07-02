@@ -9,14 +9,20 @@ import 'package:flutter_hooks/flutter_hooks.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 import 'package:island/chat/pods/chat_online_count.dart';
 import 'package:island/chat/pods/chat_room.dart';
+import 'package:island/chat/pods/chat_share_payload.dart';
 import 'package:island/chat/pods/chat_room_state.dart';
 import 'package:island/chat/pods/chat_subscribe.dart';
 import 'package:island/shared/widgets/confuse_spinner.dart';
 import 'package:island/chat/widgets/call_button.dart';
 import 'package:island/chat/widgets/call_overlay.dart';
 import 'package:island/chat/widgets/chat_input.dart';
+import 'package:island/chat/widgets/chat_room_list_tile.dart';
 import 'package:island/chat/widgets/chat_search_screen.dart';
+import 'package:island/chat/widgets/pinned_messages_sheet.dart';
 import 'package:island/chat/widgets/public_room_preview.dart';
+import 'package:island/accounts/account_pod.dart';
+import 'package:island/accounts/widgets/account/account_name.dart';
+import 'package:island/drive/widgets/cloud_files.dart';
 import 'package:island/chat/widgets/room_app_bar.dart';
 import 'package:island/chat/widgets/room_message_list.dart';
 import 'package:island/chat/widgets/room_selection_mode.dart';
@@ -24,38 +30,61 @@ import 'package:island/chat/messages_notifier.dart';
 import 'package:island/core/config.dart';
 import 'package:island/core/lifecycle.dart';
 import 'package:island/core/network.dart';
+import 'package:island/core/services/event_bus.dart';
+import 'package:island/core/services/ios_share_suggestions.dart';
 import 'package:island/core/websocket.dart';
 import 'package:island/core/services/analytics_service.dart';
+import 'package:island/data/message.dart';
 import 'package:island/drive/drive_service.dart';
 import 'package:island/route.gr.dart';
 
 import 'package:island/shared/widgets/alert.dart';
 import 'package:island/shared/widgets/app_scaffold.dart' hide PageBackButton;
 import 'package:island/shared/widgets/attachment_uploader.dart';
+import 'package:island/shared/widgets/layouts/sheet_scaffold.dart';
 import 'package:island/shared/widgets/response.dart';
 import 'package:island/shared/widgets/sync_indicator.dart';
 import 'package:island/thoughts/screens/think_sheet.dart';
+import 'package:material_symbols_icons/material_symbols_icons.dart';
 import 'package:styled_widget/styled_widget.dart';
 import 'package:solar_network_sdk/solar_network_sdk.dart';
 
 @RoutePage()
 class ChatRoomScreen extends HookConsumerWidget {
   final String id;
-  const ChatRoomScreen({super.key, required this.id});
+  const ChatRoomScreen({super.key, @PathParam("id") required this.id});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final chatRoom = ref.watch(chatRoomProvider(id));
     final chatIdentity = ref.watch(chatRoomIdentityProvider(id));
     final onlineCount = ref.watch(chatOnlineCountProvider(id));
-    final settings = ref.watch(appSettingsProvider);
+    final chatEventMessageMode = ref.watch(
+      appSettingsProvider.select((settings) => settings.chatEventMessageMode),
+    );
 
-    // Universal chat room state - manages all UI state for this room
-    final chatState = ref.watch(chatRoomStateProvider(id));
+    // Universal chat room state - manages all UI state for this room.
+    // Watch only the fields that affect the whole screen; input state stays
+    // inside the ChatInput Consumer so attachments/typing don't rebuild the list.
+    final isSelectionMode = ref.watch(
+      chatRoomStateProvider(id).select((state) => state.isSelectionMode),
+    );
+    final selectedMessageIds = ref.watch(
+      chatRoomStateProvider(id).select((state) => state.selectedMessageIds),
+    );
+    final dismissedLastReadAnchorMessageId = ref.watch(
+      chatRoomStateProvider(
+        id,
+      ).select((state) => state.dismissedLastReadAnchorMessageId),
+    );
     final chatStateNotifier = ref.read(chatRoomStateProvider(id).notifier);
     final messagesNotifier = ref.read(messagesProvider(id).notifier);
+    final pendingSharePayloadNotifier = ref.watch(chatSharePayloadProvider(id));
+    final pendingSharePayload = useValueListenable(pendingSharePayloadNotifier);
 
     final analyticsLogged = useRef(false);
+    final donatedRoomId = useRef<String?>(null);
+    final appliedSharePayloadSignature = useRef<String?>(null);
     useEffect(() {
       if (!analyticsLogged.value &&
           !chatRoom.isLoading &&
@@ -68,6 +97,24 @@ class ChatRoomScreen extends HookConsumerWidget {
       }
       return null;
     }, [chatRoom]);
+
+    useEffect(() {
+      final room = chatRoom.value;
+      final currentUserId = ref.read(userInfoProvider).value?.id;
+      if (room == null || room.id == donatedRoomId.value) {
+        return null;
+      }
+
+      Future.microtask(() async {
+        await IosShareSuggestionsService.instance.donateChatRoom(
+          room,
+          currentUserId: currentUserId,
+        );
+        donatedRoomId.value = room.id;
+      });
+
+      return null;
+    }, [chatRoom.value]);
 
     if (chatIdentity.isLoading || chatRoom.isLoading) {
       return AppScaffold(
@@ -163,6 +210,28 @@ class ChatRoomScreen extends HookConsumerWidget {
     final messages = ref.watch(messagesProvider(id));
     final isAtLatestMessages = useState(true);
     final savedLastReadAt = useState<DateTime?>(chatIdentity.value?.lastReadAt);
+    final pinnedPins = useState<List<SnChatMessagePin>>([]);
+    final isPinnedBarCollapsed = useState(false);
+
+    useEffect(() {
+      final payload = pendingSharePayload;
+      if (payload == null) return null;
+
+      final signature =
+          '${payload.text}|${payload.attachments.map((file) => file.data.path).join(",")}';
+      if (appliedSharePayloadSignature.value == signature) {
+        return null;
+      }
+
+      Future.microtask(() {
+        if (!context.mounted) return;
+        chatStateNotifier.applySharedPayload(payload);
+        ref.read(chatSharePayloadProvider(id)).value = null;
+        appliedSharePayloadSignature.value = signature;
+      });
+
+      return null;
+    }, [pendingSharePayload]);
 
     useEffect(() {
       final identity = chatIdentity.value;
@@ -172,14 +241,64 @@ class ChatRoomScreen extends HookConsumerWidget {
       return null;
     }, [chatIdentity.value]);
 
+    // Fetch pinned messages and listen for realtime updates
+    useEffect(() {
+      Future.microtask(() async {
+        final pins = await messagesNotifier.fetchPinnedMessages();
+        if (context.mounted) {
+          pinnedPins.value = pins;
+        }
+      });
+
+      final sub = eventBus.on<ChatMessageNewEvent>().listen((event) {
+        if (event.message.chatRoomId != id) return;
+        if (event.message.type == 'messages.pinned' ||
+            event.message.type == 'messages.unpinned') {
+          Future.microtask(() async {
+            final pins = await messagesNotifier.fetchPinnedMessages();
+            if (context.mounted) {
+              pinnedPins.value = pins;
+            }
+          });
+        }
+      });
+      return sub.cancel;
+    }, [id]);
+
     // Track when app was backgrounded for time-based provider invalidation
     final lastBackgroundTime = useRef<DateTime?>(null);
     const backgroundSyncThreshold = Duration(seconds: 30);
 
+    final lastResyncAt = useRef<DateTime?>(null);
+    final isResyncing = useRef(false);
+    final weakConnectionMode = ref.watch(
+      appSettingsProvider.select((settings) => settings.weakConnectionMode),
+    );
+
+    Future<void> resyncRoom({
+      bool force = false,
+      String reason = 'unknown',
+    }) async {
+      if (isResyncing.value) return;
+      final now = DateTime.now();
+      final cooldownPassed =
+          lastResyncAt.value == null ||
+          now.difference(lastResyncAt.value!) > const Duration(seconds: 8);
+      if (!force && !cooldownPassed) return;
+
+      isResyncing.value = true;
+      lastResyncAt.value = now;
+      try {
+        await messagesNotifier.initialize(forceRemoteRefresh: false);
+      } finally {
+        isResyncing.value = false;
+      }
+    }
+
     useEffect(() {
-      Future.microtask(() async {
+      Future.microtask(() {
         if (!context.mounted) return;
-        await messagesNotifier.syncMessages();
+        resyncRoom(force: true, reason: 'room-open');
       });
       return null;
     }, [id]);
@@ -204,9 +323,23 @@ class ChatRoomScreen extends HookConsumerWidget {
       return timer.cancel;
     }, [id]);
 
+    useEffect(() {
+      if (!weakConnectionMode) return null;
+
+      const weakConnectionSyncInterval = Duration(seconds: 45);
+      final timer = Timer.periodic(weakConnectionSyncInterval, (_) {
+        final currentLifecycle = ref.read(appLifecycleStateProvider).value;
+        if (currentLifecycle != AppLifecycleState.resumed) return;
+        Future.microtask(() {
+          resyncRoom(reason: 'weak-connection-periodic');
+        });
+      });
+
+      return timer.cancel;
+    }, [id, weakConnectionMode, messagesNotifier]);
+
     final lifecycleState = ref.watch(appLifecycleStateProvider);
     final previousLifecycleState = useRef<AppLifecycleState?>(null);
-    final isResyncingAfterResume = useState(false);
     final wsDisconnectedSinceBackground = useRef(false);
     final wasWsConnected = useRef<bool?>(null);
 
@@ -236,7 +369,7 @@ class ChatRoomScreen extends HookConsumerWidget {
         lastBackgroundTime.value = DateTime.now();
       }
 
-      if (resumedFromBackground && !isResyncingAfterResume.value) {
+      if (resumedFromBackground) {
         final backgroundDuration = lastBackgroundTime.value != null
             ? DateTime.now().difference(lastBackgroundTime.value!)
             : Duration.zero;
@@ -247,16 +380,9 @@ class ChatRoomScreen extends HookConsumerWidget {
             !isDesktop ||
             wsDisconnectedSinceBackground.value ||
             wasBackgroundedLongEnough;
-        isResyncingAfterResume.value = true;
         Future<void>(() async {
-          try {
-            if (shouldSync) {
-              await messagesNotifier.initialize(forceRemoteRefresh: false);
-            }
-          } finally {
-            if (context.mounted) {
-              isResyncingAfterResume.value = false;
-            }
+          if (shouldSync) {
+            await resyncRoom(reason: 'app-resume');
           }
         });
         wsDisconnectedSinceBackground.value = false;
@@ -271,18 +397,9 @@ class ChatRoomScreen extends HookConsumerWidget {
       final isConnected = checkWsConnected();
       final previousConnected = wasWsConnected.value;
 
-      if (previousConnected == false &&
-          isConnected &&
-          !isResyncingAfterResume.value) {
-        isResyncingAfterResume.value = true;
+      if (previousConnected == false && isConnected) {
         Future<void>(() async {
-          try {
-            await messagesNotifier.initialize(forceRemoteRefresh: false);
-          } finally {
-            if (context.mounted) {
-              isResyncingAfterResume.value = false;
-            }
-          }
+          await resyncRoom(reason: 'ws-reconnected');
         });
       }
 
@@ -316,6 +433,8 @@ class ChatRoomScreen extends HookConsumerWidget {
     final lastAtLatestRef = useRef<bool?>(true);
     useEffect(() {
       final controller = scrollControllerRef.value;
+      var retryCount = 0;
+
       void updateAtLatestState() {
         if (!controller.hasClients || controller.positions.length != 1) return;
         final atLatest = controller.positions.first.pixels <= 80;
@@ -324,39 +443,41 @@ class ChatRoomScreen extends HookConsumerWidget {
         isAtLatestMessages.value = atLatest;
       }
 
+      void syncWhenAttached() {
+        if (!controller.hasClients || controller.positions.length != 1) {
+          if (retryCount < 10) {
+            retryCount += 1;
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (context.mounted) syncWhenAttached();
+            });
+          }
+          return;
+        }
+        updateAtLatestState();
+      }
+
       controller.addListener(updateAtLatestState);
-      WidgetsBinding.instance.addPostFrameCallback(
-        (_) => updateAtLatestState(),
-      );
+      WidgetsBinding.instance.addPostFrameCallback((_) => syncWhenAttached());
       return () => controller.removeListener(updateAtLatestState);
     }, []);
 
     // Track new messages while scrolled up
     final newMessagesCount = useState<int>(0);
-    final lastMessageCount = useRef<int>(0);
     final isBackToBottomVisible = useState<bool>(false);
     final hideBackToBottomTimer = useRef<Timer?>(null);
-    final lastScrollPosition = useRef<double>(0);
-    final scrollStabilityCounter = useRef<int>(0);
 
-    // Watch loading state from messages notifier
-    final isLoadingMore = messagesNotifier.isLoadingMore;
-
-    // Update new message count when messages change (but not during loadMore)
+    // Count only actual incoming/synced new-message events. Older pagination
+    // loads and list regrouping can change message count without being new.
     useEffect(() {
-      final currentCount = messages.value?.length ?? 0;
-      if (!isAtLatestMessages.value &&
-          currentCount > lastMessageCount.value &&
-          lastMessageCount.value > 0 &&
-          !isLoadingMore) {
-        // Only count as "new" if not from loadMore
-        newMessagesCount.value += (currentCount - lastMessageCount.value);
-      }
-      lastMessageCount.value = currentCount;
-      return null;
-    }, [messages.value?.length, isAtLatestMessages.value, isLoadingMore]);
+      final sub = eventBus.on<ChatMessageNewEvent>().listen((event) {
+        if (event.message.chatRoomId != id) return;
+        if (isAtLatestMessages.value) return;
+        newMessagesCount.value += 1;
+      });
+      return sub.cancel;
+    }, [id]);
 
-    // Auto-hide back-to-bottom button after 3s of no scroll
+    // Auto-hide back-to-bottom button after idle period.
     useEffect(() {
       if (!isAtLatestMessages.value) {
         isBackToBottomVisible.value = true;
@@ -366,23 +487,11 @@ class ChatRoomScreen extends HookConsumerWidget {
           if (!controller.hasClients || controller.positions.length != 1) {
             return;
           }
-          final currentPos = controller.positions.first.pixels;
-          final delta = (currentPos - lastScrollPosition.value).abs();
-
-          // Reset timer on significant scroll movement
-          if (delta > 5) {
-            scrollStabilityCounter.value = 0;
-            isBackToBottomVisible.value = true;
-            hideBackToBottomTimer.value?.cancel();
-            hideBackToBottomTimer.value = Timer(const Duration(seconds: 3), () {
-              isBackToBottomVisible.value = false;
-            });
-          } else {
-            // Small movement, increment stability counter
-            scrollStabilityCounter.value++;
-          }
-
-          lastScrollPosition.value = currentPos;
+          isBackToBottomVisible.value = true;
+          hideBackToBottomTimer.value?.cancel();
+          hideBackToBottomTimer.value = Timer(const Duration(seconds: 2), () {
+            isBackToBottomVisible.value = false;
+          });
         }
 
         final controller = scrollControllerRef.value;
@@ -398,7 +507,7 @@ class ChatRoomScreen extends HookConsumerWidget {
           hideBackToBottomTimer.value?.cancel();
         };
       } else {
-        // At bottom, hide button and reset counter
+        // At bottom, hide button and reset badge.
         isBackToBottomVisible.value = false;
         newMessagesCount.value = 0;
         hideBackToBottomTimer.value?.cancel();
@@ -409,11 +518,11 @@ class ChatRoomScreen extends HookConsumerWidget {
     final inputKey = useMemoized(() => GlobalKey(), []);
 
     final openThinkingSheet = useCallback(() {
-      if (chatState.selectedMessageIds.isEmpty) return;
+      if (selectedMessageIds.isEmpty) return;
 
       final selectedMessageData =
           messages.value
-              ?.where((msg) => chatState.selectedMessageIds.contains(msg.id))
+              ?.where((msg) => selectedMessageIds.contains(msg.id))
               .map(
                 (msg) => {
                   'id': msg.id,
@@ -433,13 +542,126 @@ class ChatRoomScreen extends HookConsumerWidget {
       );
 
       chatStateNotifier.exitSelectionMode();
-    }, [chatState.selectedMessageIds, messages, chatStateNotifier]);
+    }, [selectedMessageIds, messages, chatStateNotifier]);
+
+    final openRedirectSheet = useCallback(() async {
+      if (selectedMessageIds.isEmpty) return;
+
+      final allMessages = messages.value ?? const <LocalChatMessage>[];
+      final selectedMessages =
+          allMessages
+              .where((msg) => selectedMessageIds.contains(msg.id))
+              .toList()
+            ..sort((a, b) => a.createdAt.compareTo(b.createdAt));
+
+      // Safety: ensure selected ids are from current source room only.
+      final crossRoomSelected = selectedMessages
+          .where((msg) => msg.roomId != id)
+          .toList();
+      if (crossRoomSelected.isNotEmpty) {
+        showErrorAlert('chatRedirectSameRoomOnly'.tr());
+        return;
+      }
+
+      if (selectedMessages.isEmpty) return;
+      if (selectedMessages.length > 100) {
+        showErrorAlert('chatRedirectTooMany'.tr());
+        return;
+      }
+      if (selectedMessages.any((msg) => msg.type != 'text')) {
+        showErrorAlert('chatRedirectTextOnly'.tr());
+        return;
+      }
+
+      if (!context.mounted) return;
+
+      final destinationRoomId = await showModalBottomSheet<String>(
+        context: context,
+        isScrollControlled: true,
+        builder: (_) => _RedirectRoomSelectorSheet(currentRoomId: id),
+      );
+
+      if (destinationRoomId == null || !context.mounted) return;
+
+      final rooms = ref
+          .read(chatRoomJoinedProvider)
+          .maybeWhen(data: (items) => items, orElse: () => <SnChatRoom>[]);
+      SnChatRoom? destinationRoom;
+      for (final room in rooms) {
+        if (room.id == destinationRoomId) {
+          destinationRoom = room;
+          break;
+        }
+      }
+      if (destinationRoom == null) {
+        final loadedRooms = await ref.read(chatRoomJoinedProvider.future);
+        for (final room in loadedRooms) {
+          if (room.id == destinationRoomId) {
+            destinationRoom = room;
+            break;
+          }
+        }
+      }
+      final destinationName = destinationRoom?.name?.trim().isNotEmpty == true
+          ? destinationRoom!.name!
+          : 'this room';
+
+      if (!context.mounted) return;
+
+      final shouldProceed =
+          await showDialog<bool>(
+            context: context,
+            builder: (ctx) => AlertDialog(
+              title: Text('chatRedirectConfirmTitle'.tr()),
+              content: Text(
+                'chatRedirectConfirmBody'.tr(
+                  args: [selectedMessages.length.toString(), destinationName],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(ctx).pop(false),
+                  child: Text('cancel'.tr()),
+                ),
+                FilledButton(
+                  onPressed: () => Navigator.of(ctx).pop(true),
+                  child: Text('redirect'.tr()),
+                ),
+              ],
+            ),
+          ) ??
+          false;
+
+      if (!shouldProceed || !context.mounted) return;
+
+      try {
+        showLoadingModal(context);
+        final client = ref.read(solarNetworkClientProvider);
+        await client.chat.redirectMessages(
+          roomId: destinationRoomId,
+          messageIds: selectedMessages.map((m) => m.id).toList(),
+        );
+
+        if (!context.mounted) return;
+        chatStateNotifier.exitSelectionMode();
+        showSnackBar(
+          'chatRedirectSuccess'.tr(args: [selectedMessages.length.toString()]),
+        );
+      } catch (err) {
+        showErrorAlert(err);
+      } finally {
+        if (context.mounted) {
+          hideLoadingModal(context);
+        }
+      }
+    }, [selectedMessageIds, messages, ref, context, id, chatStateNotifier]);
 
     final uploadAttachment = useCallback((
       int index, {
       String? encryptKey,
     }) async {
-      final attachment = chatState.attachments[index];
+      final attachments = ref.read(chatRoomStateProvider(id)).attachments;
+      final attachment = attachments[index];
       if (attachment.isOnCloud) return;
 
       final config = await showModalBottomSheet<AttachmentUploadConfig>(
@@ -447,15 +669,16 @@ class ChatRoomScreen extends HookConsumerWidget {
         isScrollControlled: true,
         builder: (context) => AttachmentUploaderSheet(
           ref: ref,
-          attachments: chatState.attachments,
+          attachments: attachments,
           index: index,
           encryptedUpload: chatRoom.value?.encryptionMode == 3,
         ),
       );
       if (config == null) return;
 
+      var trackedIndex = index;
       try {
-        chatStateNotifier.updateAttachmentProgress('chat-upload', 0);
+        chatStateNotifier.updateAttachmentUploadProgress(trackedIndex, 0);
 
         final cloudFile = await ref
             .read(driveFileUploaderProvider)
@@ -463,12 +686,22 @@ class ChatRoomScreen extends HookConsumerWidget {
               fileData: attachment,
               poolId: config.poolId,
               encryptPassword: encryptKey,
+              usage: 'chat_message',
               mode: attachment.type == UniversalFileType.file
                   ? FileUploadMode.generic
                   : FileUploadMode.mediaSafe,
               onProgress: (progress, _) {
-                chatStateNotifier.updateAttachmentProgress(
-                  'chat-upload',
+                final latestAttachments = ref
+                    .read(chatRoomStateProvider(id))
+                    .attachments;
+                final currentIndex = latestAttachments.indexOf(attachment);
+                if (currentIndex == -1) return;
+                if (currentIndex != trackedIndex) {
+                  chatStateNotifier.clearAttachmentUploadProgress(trackedIndex);
+                  trackedIndex = currentIndex;
+                }
+                chatStateNotifier.updateAttachmentUploadProgress(
+                  currentIndex,
                   progress ?? 0.0,
                 );
               },
@@ -479,18 +712,24 @@ class ChatRoomScreen extends HookConsumerWidget {
           throw ArgumentError('Failed to upload file...');
         }
 
-        final clone = List.of(chatState.attachments);
-        clone[index] = UniversalFile(data: cloudFile, type: attachment.type);
+        final latestAttachments = ref
+            .read(chatRoomStateProvider(id))
+            .attachments;
+        final currentIndex = latestAttachments.indexOf(attachment);
+        if (currentIndex == -1) return;
+
+        final clone = List<UniversalFile>.of(latestAttachments);
+        clone[currentIndex] = UniversalFile(
+          data: cloudFile,
+          type: attachment.type,
+        );
         chatStateNotifier.updateAttachments(clone);
       } catch (err) {
         showErrorAlert(err.toString());
       } finally {
-        final newProgress = Map<String, Map<int, double?>>.from(
-          chatState.attachmentProgress,
-        );
-        newProgress.remove('chat-upload');
+        chatStateNotifier.clearAttachmentUploadProgress(trackedIndex);
       }
-    }, [chatState.attachments, chatStateNotifier, ref, context]);
+    }, [chatStateNotifier, ref, context, id, chatRoom.value?.encryptionMode]);
 
     final onJump = useCallback((String messageId) {
       messages.when(
@@ -506,13 +745,30 @@ class ChatRoomScreen extends HookConsumerWidget {
       );
     }, [messages, chatStateNotifier, messagesNotifier]);
 
+    final jumpAndRevealMessage = useCallback((String messageId) {
+      messagesNotifier.jumpToMessage(messageId).then((index) {
+        if (index != -1 && context.mounted) {
+          messages.when(
+            data: (messageList) {
+              chatStateNotifier.scrollToMessage(
+                messageId: messageId,
+                messageList: messageList,
+                jumpToMessage: messagesNotifier.jumpToMessage,
+              );
+            },
+            loading: () {},
+            error: (_, _) {},
+          );
+        }
+      });
+    }, [messagesNotifier, messages, chatStateNotifier, context]);
+
     final filteredMessages = messages;
 
     final visibleLastReadAnchorMessageId = (() {
       final anchorTime = savedLastReadAt.value;
       final list = messages.value;
       if (anchorTime == null || list == null || list.isEmpty) return null;
-      if (isAtLatestMessages.value) return null;
       final anchorIndex = list.indexWhere(
         (m) =>
             m.createdAt.isBefore(anchorTime) ||
@@ -522,6 +778,11 @@ class ChatRoomScreen extends HookConsumerWidget {
       if (anchorIndex > 0) return list[anchorIndex].id;
       return null;
     })();
+    final effectiveLastReadAnchorMessageId =
+        (isAtLatestMessages.value ||
+            visibleLastReadAnchorMessageId == dismissedLastReadAnchorMessageId)
+        ? null
+        : visibleLastReadAnchorMessageId;
 
     // Update last read anchor in state when calculated
     useEffect(() {
@@ -547,25 +808,8 @@ class ChatRoomScreen extends HookConsumerWidget {
       if (targetIndex == -1) return;
       final targetId = list[targetIndex].id;
 
-      messagesNotifier.jumpToMessage(targetId).then((index) {
-        if (index != -1 && context.mounted) {
-          ref
-              .read(flashingMessagesProvider.notifier)
-              .update((set) => set.union({targetId}));
-          messages.when(
-            data: (messageList) {
-              chatStateNotifier.scrollToMessage(
-                messageId: targetId,
-                messageList: messageList,
-                jumpToMessage: messagesNotifier.jumpToMessage,
-              );
-            },
-            loading: () {},
-            error: (_, _) {},
-          );
-        }
-      });
-    }, [savedLastReadAt.value, messagesNotifier, messages, chatStateNotifier]);
+      jumpAndRevealMessage(targetId);
+    }, [savedLastReadAt.value, messages, jumpAndRevealMessage]);
 
     return Stack(
       children: [
@@ -574,10 +818,8 @@ class ChatRoomScreen extends HookConsumerWidget {
             leading: const AutoLeadingButton(),
             automaticallyImplyLeading: false,
             title: chatRoom.when(
-              data: (room) => RoomAppBar(
-                room: room!,
-                onlineCount: onlineCount.value?.onlineCount ?? 0,
-              ),
+              data: (room) =>
+                  RoomAppBar(room: room!, onlineStatus: onlineCount.value),
               loading: () => const Text('Loading...'),
               error: (err, _) => ResponseErrorWidget(
                 error: err,
@@ -599,24 +841,7 @@ class ChatRoomScreen extends HookConsumerWidget {
                   if (result is SearchMessagesResult &&
                       messages.value != null) {
                     final messageId = result.messageId;
-                    messagesNotifier.jumpToMessage(messageId).then((index) {
-                      if (index != -1 && context.mounted) {
-                        ref
-                            .read(flashingMessagesProvider.notifier)
-                            .update((set) => set.union({messageId}));
-                        messages.when(
-                          data: (messageList) {
-                            chatStateNotifier.scrollToMessage(
-                              messageId: messageId,
-                              messageList: messageList,
-                              jumpToMessage: messagesNotifier.jumpToMessage,
-                            );
-                          },
-                          loading: () {},
-                          error: (_, _) {},
-                        );
-                      }
-                    });
+                    jumpAndRevealMessage(messageId);
                   }
                 },
               ),
@@ -625,6 +850,31 @@ class ChatRoomScreen extends HookConsumerWidget {
           ),
           body: Column(
             children: [
+              const ChatSyncIndicator(),
+              if (pinnedPins.value.isNotEmpty)
+                _PinnedMessagesBar(
+                  pins: pinnedPins.value,
+                  isCollapsed: isPinnedBarCollapsed.value,
+                  onToggleCollapse: () {
+                    isPinnedBarCollapsed.value = !isPinnedBarCollapsed.value;
+                  },
+                  onTapPin: (pin) {
+                    if (pin.messageId.isNotEmpty) {
+                      jumpAndRevealMessage(pin.messageId);
+                    }
+                  },
+                  onViewAll: () {
+                    showModalBottomSheet(
+                      context: context,
+                      isScrollControlled: true,
+                      builder: (_) => PinnedMessagesSheet(
+                        roomId: id,
+                        onJumpToMessage: jumpAndRevealMessage,
+                      ),
+                    );
+                  },
+                  fetchMessageById: messagesNotifier.fetchMessageById,
+                ),
               Expanded(
                 child: Stack(
                   children: [
@@ -644,7 +894,7 @@ class ChatRoomScreen extends HookConsumerWidget {
                             ? Center(
                                 key: const ValueKey('empty-messages'),
                                 child: Text(
-                                  settings.chatEventMessageMode ==
+                                  chatEventMessageMode ==
                                           kChatEventMessageModeNone
                                       ? 'No visible messages (event/system hidden)'
                                       : 'No messages yet'.tr(),
@@ -686,27 +936,29 @@ class ChatRoomScreen extends HookConsumerWidget {
                         top: false,
                         bottom: false,
                         child: AnimatedOpacity(
-                          opacity: visibleLastReadAnchorMessageId != null
+                          opacity: effectiveLastReadAnchorMessageId != null
                               ? 1.0
                               : 0.0,
                           duration: const Duration(milliseconds: 300),
                           curve: Curves.easeInOut,
                           child: AnimatedScale(
-                            scale: visibleLastReadAnchorMessageId != null
+                            scale: effectiveLastReadAnchorMessageId != null
                                 ? 1.0
                                 : 0.8,
                             duration: const Duration(milliseconds: 300),
                             curve: Curves.easeInOut,
                             child: FloatingActionButton.small(
                               heroTag: 'followBack',
-                              onPressed: visibleLastReadAnchorMessageId != null
+                              onPressed:
+                                  effectiveLastReadAnchorMessageId != null
                                   ? jumpToLastReadAnchor
                                   : null,
-                              elevation: visibleLastReadAnchorMessageId != null
+                              elevation:
+                                  effectiveLastReadAnchorMessageId != null
                                   ? 2
                                   : 0,
                               backgroundColor:
-                                  visibleLastReadAnchorMessageId != null
+                                  effectiveLastReadAnchorMessageId != null
                                   ? null
                                   : Colors.transparent,
                               child: const Icon(Icons.bookmark_added_outlined),
@@ -844,92 +1096,556 @@ class ChatRoomScreen extends HookConsumerWidget {
                   ],
                 ),
               ),
-              if (!chatState.isSelectionMode)
+              if (!isSelectionMode)
                 chatRoom.when(
                   data: (room) => room != null
                       ? Align(
                           alignment: Alignment.bottomCenter,
-                          child: ChatInput(
-                            key: inputKey,
-                            messageController:
-                                chatStateNotifier.messageController,
-                            chatRoom: room,
-                            onSend: () => chatStateNotifier.sendMessage(ref),
-                            onClear: () {
-                              if (chatState.messageEditingTo != null) {
-                                chatStateNotifier.clearAttachmentsOnly();
-                              }
-                              chatStateNotifier.setEditingTo(null);
-                              chatStateNotifier.setReplyingTo(null);
-                              chatStateNotifier.setForwardingTo(null);
-                              chatStateNotifier.setPoll(null);
-                              chatStateNotifier.setFund(null);
+                          child: Consumer(
+                            builder: (context, ref, _) {
+                              final inputState = ref.watch(
+                                chatRoomStateProvider(id).select(
+                                  (state) => (
+                                    attachments: state.attachments,
+                                    attachmentProgress:
+                                        state.attachmentProgress,
+                                    editingTo: state.messageEditingTo,
+                                    replyingTo: state.messageReplyingTo,
+                                    forwardingTo: state.messageForwardingTo,
+                                    embeds: state.embeds,
+                                  ),
+                                ),
+                              );
+
+                              return ChatInput(
+                                key: inputKey,
+                                messageController:
+                                    chatStateNotifier.messageController,
+                                chatRoom: room,
+                                onSend: chatStateNotifier.sendMessage,
+                                onClear: () {
+                                  if (inputState.editingTo != null) {
+                                    chatStateNotifier.clearAttachmentsOnly();
+                                  }
+                                  chatStateNotifier.setEditingTo(null);
+                                  chatStateNotifier.setReplyingTo(null);
+                                  chatStateNotifier.setForwardingTo(null);
+                                  chatStateNotifier.clearInput();
+                                },
+                                messageEditingTo: inputState.editingTo,
+                                messageReplyingTo: inputState.replyingTo,
+                                messageForwardingTo: inputState.forwardingTo,
+                                embeds: inputState.embeds,
+                                onEmbedsChanged: chatStateNotifier.setEmbeds,
+                                isMessageListScrolling:
+                                    !isAtLatestMessages.value,
+                                onPickFile: (isPhoto) {
+                                  if (isPhoto) {
+                                    chatStateNotifier.pickPhotos();
+                                  } else {
+                                    chatStateNotifier.pickVideos();
+                                  }
+                                },
+                                onPickAudio: chatStateNotifier.pickAudio,
+                                onPickGeneralFile: chatStateNotifier.pickFiles,
+                                onLinkAttachment: () =>
+                                    chatStateNotifier.linkAttachment(context),
+                                attachments: inputState.attachments,
+                                onUploadAttachment: uploadAttachment,
+                                onDeleteAttachment: (index) async {
+                                  final attachment =
+                                      inputState.attachments[index];
+                                  if (attachment.isOnCloud &&
+                                      !attachment.isLink) {
+                                    final client = ref.read(apiClientProvider);
+                                    await client.delete(
+                                      '/fs/files/${attachment.data.id}',
+                                    );
+                                  }
+                                  final clone = List.of(inputState.attachments);
+                                  clone.removeAt(index);
+                                  chatStateNotifier.updateAttachments(clone);
+                                },
+                                onMoveAttachment: (idx, delta) {
+                                  if (idx + delta < 0 ||
+                                      idx + delta >=
+                                          inputState.attachments.length) {
+                                    return;
+                                  }
+                                  final clone = List.of(inputState.attachments);
+                                  clone.insert(
+                                    idx + delta,
+                                    clone.removeAt(idx),
+                                  );
+                                  chatStateNotifier.updateAttachments(clone);
+                                },
+                                onAttachmentsChanged:
+                                    chatStateNotifier.updateAttachments,
+                                attachmentProgress:
+                                    inputState.attachmentProgress,
+                              );
                             },
-                            messageEditingTo: chatState.messageEditingTo,
-                            messageReplyingTo: chatState.messageReplyingTo,
-                            messageForwardingTo: chatState.messageForwardingTo,
-                            selectedPoll: chatState.selectedPoll,
-                            onPollSelected: (poll) =>
-                                chatStateNotifier.setPoll(poll),
-                            selectedFund: chatState.selectedFund,
-                            onFundSelected: (fund) =>
-                                chatStateNotifier.setFund(fund),
-                            isMessageListScrolling: !isAtLatestMessages.value,
-                            onPickFile: (isPhoto) {
-                              if (isPhoto) {
-                                chatStateNotifier.pickPhotos();
-                              } else {
-                                chatStateNotifier.pickVideos();
-                              }
-                            },
-                            onPickAudio: chatStateNotifier.pickAudio,
-                            onPickGeneralFile: chatStateNotifier.pickFiles,
-                            onLinkAttachment: () =>
-                                chatStateNotifier.linkAttachment(context),
-                            attachments: chatState.attachments,
-                            onUploadAttachment: uploadAttachment,
-                            onDeleteAttachment: (index) async {
-                              final attachment = chatState.attachments[index];
-                              if (attachment.isOnCloud && !attachment.isLink) {
-                                final client = ref.watch(apiClientProvider);
-                                await client.delete(
-                                  '/drive/files/${attachment.data.id}',
-                                );
-                              }
-                              final clone = List.of(chatState.attachments);
-                              clone.removeAt(index);
-                              chatStateNotifier.updateAttachments(clone);
-                            },
-                            onMoveAttachment: (idx, delta) {
-                              if (idx + delta < 0 ||
-                                  idx + delta >= chatState.attachments.length) {
-                                return;
-                              }
-                              final clone = List.of(chatState.attachments);
-                              clone.insert(idx + delta, clone.removeAt(idx));
-                              chatStateNotifier.updateAttachments(clone);
-                            },
-                            onAttachmentsChanged:
-                                chatStateNotifier.updateAttachments,
-                            attachmentProgress: chatState.attachmentProgress,
                           ),
                         )
                       : const SizedBox.shrink(),
                   error: (_, _) => const SizedBox.shrink(),
                   loading: () => const SizedBox.shrink(),
                 ),
-              if (chatState.isSelectionMode)
+              if (isSelectionMode)
                 RoomSelectionMode(
-                  visible: chatState.isSelectionMode,
-                  selectedCount: chatState.selectedMessageIds.length,
+                  visible: isSelectionMode,
+                  selectedCount: selectedMessageIds.length,
                   onClose: chatStateNotifier.exitSelectionMode,
                   onAIThink: openThinkingSheet,
+                  onRedirect: openRedirectSheet,
                 ),
             ],
           ),
         ),
-        const ChatSyncIndicator(height: 56),
       ],
     );
+  }
+}
+
+class _RedirectRoomSelectorSheet extends HookConsumerWidget {
+  final String currentRoomId;
+
+  const _RedirectRoomSelectorSheet({required this.currentRoomId});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final roomsAsync = ref.watch(chatRoomJoinedProvider);
+
+    return SheetScaffold(
+      titleText: 'chatRedirectSelectRoom'.tr(),
+      child: roomsAsync.when(
+        data: (rooms) {
+          final communityRooms = <SnChatRoom>[];
+          final directRooms = <SnChatRoom>[];
+
+          for (final room in rooms) {
+            if (room.encryptionMode != 0) continue;
+            if (room.type == 1) {
+              directRooms.add(room);
+            } else {
+              communityRooms.add(room);
+            }
+          }
+
+          int byName(SnChatRoom a, SnChatRoom b) {
+            final aName = (a.name ?? '').toLowerCase();
+            final bName = (b.name ?? '').toLowerCase();
+            return aName.compareTo(bName);
+          }
+
+          communityRooms.sort(byName);
+          directRooms.sort(byName);
+
+          final hasAny = communityRooms.isNotEmpty || directRooms.isNotEmpty;
+          if (!hasAny) {
+            return Center(
+              child: Text(
+                'noChatRoomsAvailable'.tr(),
+                style: Theme.of(context).textTheme.bodyMedium,
+              ),
+            );
+          }
+
+          return ListView(
+            children: [
+              if (communityRooms.isNotEmpty)
+                _RedirectRoomGroup(
+                  title: 'chatTabGroup'.tr(),
+                  rooms: communityRooms,
+                  currentRoomId: currentRoomId,
+                ),
+              if (directRooms.isNotEmpty)
+                _RedirectRoomGroup(
+                  title: 'chatTabDirect'.tr(),
+                  rooms: directRooms,
+                  currentRoomId: currentRoomId,
+                ),
+            ],
+          );
+        },
+        loading: () => Center(
+          child: ConfuseSpinner(
+            size: 34,
+            speed: 6,
+            color: Theme.of(
+              context,
+            ).colorScheme.onSurfaceVariant.withOpacity(0.65),
+          ),
+        ),
+        error: (error, _) => ResponseErrorWidget(
+          error: error,
+          onRetry: () => ref.invalidate(chatRoomJoinedProvider),
+        ),
+      ),
+    );
+  }
+}
+
+class _RedirectRoomGroup extends StatelessWidget {
+  final String title;
+  final List<SnChatRoom> rooms;
+  final String currentRoomId;
+
+  const _RedirectRoomGroup({
+    required this.title,
+    required this.rooms,
+    required this.currentRoomId,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 6),
+          child: Text(
+            title,
+            style: Theme.of(context).textTheme.labelLarge?.copyWith(
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
+          ),
+        ),
+        for (final room in rooms)
+          ChatRoomListTile(
+            room: room,
+            isDirect: room.type == 1,
+            selected: room.id == currentRoomId,
+            subtitle: room.id == currentRoomId
+                ? Text(
+                    'Current room',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      fontStyle: FontStyle.italic,
+                    ),
+                  )
+                : null,
+            onTap: () => Navigator.of(context).pop(room.id),
+          ),
+      ],
+    );
+  }
+}
+
+class _PinnedMessagesBar extends StatefulWidget {
+  final List<SnChatMessagePin> pins;
+  final bool isCollapsed;
+  final VoidCallback onToggleCollapse;
+  final void Function(SnChatMessagePin pin) onTapPin;
+  final VoidCallback onViewAll;
+  final Future<LocalChatMessage?> Function(String messageId) fetchMessageById;
+
+  const _PinnedMessagesBar({
+    required this.pins,
+    required this.isCollapsed,
+    required this.onToggleCollapse,
+    required this.onTapPin,
+    required this.onViewAll,
+    required this.fetchMessageById,
+  });
+
+  @override
+  State<_PinnedMessagesBar> createState() => _PinnedMessagesBarState();
+}
+
+class _PinnedMessagesBarState extends State<_PinnedMessagesBar> {
+  late final PageController _pageController;
+  int _currentPage = 0;
+  final Map<String, LocalChatMessage> _fetchedMessages = {};
+
+  @override
+  void initState() {
+    super.initState();
+    _pageController = PageController();
+    _fetchAllMessages();
+  }
+
+  @override
+  void didUpdateWidget(_PinnedMessagesBar oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.pins != widget.pins) {
+      _fetchAllMessages();
+    }
+  }
+
+  Future<void> _fetchAllMessages() async {
+    for (final pin in widget.pins) {
+      if (_fetchedMessages.containsKey(pin.messageId)) continue;
+      final message = await widget.fetchMessageById(pin.messageId);
+      if (mounted && message != null) {
+        setState(() => _fetchedMessages[pin.messageId] = message);
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    _pageController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (widget.pins.isEmpty) return const SizedBox.shrink();
+
+    return Material(
+      color: Theme.of(context).colorScheme.surfaceContainerHigh,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          InkWell(
+            onTap: widget.onToggleCollapse,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              child: Row(
+                children: [
+                  Icon(
+                    Symbols.push_pin,
+                    size: 15,
+                    color: Theme.of(context).colorScheme.primary,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      '${widget.pins.length} pinned message${widget.pins.length == 1 ? '' : 's'}',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: Theme.of(context).colorScheme.onSurface,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ),
+                  if (widget.pins.length > 1) ...[
+                    _buildPageIndicator(context),
+                    const SizedBox(width: 4),
+                  ],
+                  if (widget.pins.length > 1)
+                    IconButton(
+                      icon: const Icon(Symbols.list, size: 16),
+                      onPressed: widget.onViewAll,
+                      tooltip: 'viewAll'.tr(),
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(
+                        minWidth: 28,
+                        minHeight: 28,
+                      ),
+                      visualDensity: VisualDensity.compact,
+                    ),
+                  Icon(
+                    widget.isCollapsed
+                        ? Icons.keyboard_arrow_down
+                        : Icons.keyboard_arrow_up,
+                    size: 18,
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+                ],
+              ),
+            ),
+          ),
+          if (!widget.isCollapsed)
+            SizedBox(
+              height: 42,
+              child: PageView.builder(
+                controller: _pageController,
+                scrollDirection: Axis.vertical,
+                itemCount: widget.pins.length,
+                onPageChanged: (index) {
+                  setState(() => _currentPage = index);
+                },
+                itemBuilder: (context, index) {
+                  final pin = widget.pins[index];
+                  final message = _fetchedMessages[pin.messageId];
+                  final sender = message?.sender;
+                  final content = message?.content ?? '';
+                  final createdAt = message?.createdAt;
+
+                  final timestamp = createdAt != null
+                      ? (DateTime.now().difference(createdAt).inDays > 365
+                            ? DateFormat(
+                                'yyyy/MM/dd HH:mm',
+                              ).format(createdAt.toLocal())
+                            : DateTime.now().difference(createdAt).inDays > 0
+                            ? DateFormat(
+                                'MM/dd HH:mm',
+                              ).format(createdAt.toLocal())
+                            : DateFormat('HH:mm').format(createdAt.toLocal()))
+                      : '';
+
+                  return InkWell(
+                    onTap: () => widget.onTapPin(pin),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 4,
+                      ),
+                      child: message == null
+                          ? Row(
+                              children: [
+                                SizedBox(
+                                  width: 12,
+                                  height: 12,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 1.5,
+                                    color: Theme.of(context)
+                                        .colorScheme
+                                        .onSurfaceVariant
+                                        .withOpacity(0.4),
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                Text(
+                                  'Loading...',
+                                  style: Theme.of(context).textTheme.bodySmall
+                                      ?.copyWith(
+                                        color: Theme.of(context)
+                                            .colorScheme
+                                            .onSurfaceVariant
+                                            .withOpacity(0.5),
+                                      ),
+                                ),
+                              ],
+                            )
+                          : Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                if (sender != null)
+                                  ProfilePictureWidget(
+                                    file: sender.account.profile.picture,
+                                    radius: 14,
+                                  ),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Row(
+                                        children: [
+                                          if (sender != null)
+                                            Flexible(
+                                              child: AccountName(
+                                                account: sender.account,
+                                                textOverride:
+                                                    sender.nick?.isNotEmpty ==
+                                                        true
+                                                    ? sender.nick
+                                                    : sender.account.nick,
+                                                style: Theme.of(context)
+                                                    .textTheme
+                                                    .labelMedium
+                                                    ?.copyWith(
+                                                      fontWeight:
+                                                          FontWeight.w600,
+                                                    ),
+                                                hideVerificationMark: true,
+                                                hideOverlay: true,
+                                              ),
+                                            ),
+                                          if (timestamp.isNotEmpty) ...[
+                                            const SizedBox(width: 6),
+                                            Text(
+                                              timestamp,
+                                              style: Theme.of(context)
+                                                  .textTheme
+                                                  .labelSmall
+                                                  ?.copyWith(
+                                                    color: Theme.of(context)
+                                                        .colorScheme
+                                                        .onSurfaceVariant
+                                                        .withOpacity(0.5),
+                                                  ),
+                                            ),
+                                          ],
+                                        ],
+                                      ),
+                                      const SizedBox(height: 1),
+                                      _buildContentPreview(
+                                        context,
+                                        content,
+                                        message.attachments,
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
+                    ),
+                  );
+                },
+              ),
+            ),
+          Divider(
+            height: 1,
+            thickness: 1 / MediaQuery.devicePixelRatioOf(context),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildPageIndicator(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: List.generate(widget.pins.length.clamp(0, 5), (index) {
+        final isActive = index == _currentPage;
+        return AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          margin: const EdgeInsets.symmetric(horizontal: 2),
+          width: isActive ? 12 : 5,
+          height: 5,
+          decoration: BoxDecoration(
+            color: isActive
+                ? Theme.of(context).colorScheme.primary
+                : Theme.of(
+                    context,
+                  ).colorScheme.onSurfaceVariant.withOpacity(0.3),
+            borderRadius: BorderRadius.circular(2.5),
+          ),
+        );
+      }),
+    );
+  }
+
+  Widget _buildContentPreview(
+    BuildContext context,
+    String content,
+    List<Map<String, dynamic>> attachments,
+  ) {
+    if (content.isNotEmpty) {
+      return Text(
+        content,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: Theme.of(context).textTheme.bodySmall,
+      );
+    }
+    if (attachments.isNotEmpty) {
+      return Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            Symbols.attach_file,
+            size: 14,
+            color: Theme.of(
+              context,
+            ).colorScheme.onSurfaceVariant.withOpacity(0.6),
+          ),
+          const SizedBox(width: 4),
+          Text(
+            'hasAttachments'.plural(attachments.length),
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: Theme.of(
+                context,
+              ).colorScheme.onSurfaceVariant.withOpacity(0.6),
+            ),
+          ),
+        ],
+      );
+    }
+    return const SizedBox.shrink();
   }
 }

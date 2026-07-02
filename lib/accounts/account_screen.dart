@@ -18,8 +18,10 @@ import 'package:island/core/services/responsive.dart';
 import 'package:island/route.gr.dart';
 import 'package:island/shared/widgets/alert.dart';
 import 'package:island/shared/widgets/app_scaffold.dart';
+import 'package:island/shared/widgets/attention_modal.dart';
 import 'package:island/drive/widgets/cloud_files.dart';
 import 'package:island/core/debug_sheet.dart';
+import 'package:island/core/config.dart';
 import 'package:island/notifications/notification.dart';
 import 'package:material_symbols_icons/symbols.dart';
 import 'package:styled_widget/styled_widget.dart';
@@ -73,6 +75,7 @@ class AccountFeatureWidget extends HookConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final isWide = isWideScreen(context);
+    final isDeveloperMode = ref.watch(developerModeProvider);
 
     final user = ref.watch(userInfoProvider);
     final notificationUnreadCount = ref.watch(notificationUnreadCountProvider);
@@ -229,19 +232,13 @@ class AccountFeatureWidget extends HookConsumerWidget {
                     'title': 'notifications',
                     'badgeCount': notificationUnreadCount.value ?? 0,
                     'onTap': () {
-                      showModalBottomSheet(
-                        context: context,
-                        isScrollControlled: true,
-                        useRootNavigator: true,
-                        builder: (context) => const NotificationSheet(),
+                      showAttentionModal(
+                        id: 'notifications',
+                        replaceIfExists: true,
+                        barrierDismissible: true,
+                        builder: (context, dismiss) =>
+                            NotificationModal(onDismiss: dismiss),
                       );
-                    },
-                  },
-                  {
-                    'icon': Symbols.wallet,
-                    'title': 'wallet',
-                    'onTap': () {
-                      context.router.push(const WalletRoute());
                     },
                   },
                   {
@@ -265,13 +262,6 @@ class AccountFeatureWidget extends HookConsumerWidget {
                       context.router.push(const MeetRoute());
                     },
                   },
-                  {
-                    'icon': Symbols.history,
-                    'title': 'actionLogs',
-                    'onTap': () {
-                      context.router.push(const ActionLogsRoute());
-                    },
-                  },
                   if (!kIsWeb && (Platform.isAndroid || Platform.isIOS))
                     {
                       'icon': Symbols.nfc,
@@ -280,6 +270,13 @@ class AccountFeatureWidget extends HookConsumerWidget {
                         context.router.push(const PhysicalPassportRoute());
                       },
                     },
+                  {
+                    'icon': Symbols.qr_code_rounded,
+                    'title': 'qrCode',
+                    'onTap': () {
+                      context.router.push(const AccountQrRoute());
+                    },
+                  },
                   {
                     'icon': Symbols.people,
                     'title': 'relationships',
@@ -292,34 +289,6 @@ class AccountFeatureWidget extends HookConsumerWidget {
                     'title': 'stickers',
                     'onTap': () {
                       context.router.push(const StickerMarketplaceRoute());
-                    },
-                  },
-                  {
-                    'icon': Symbols.rss_feed,
-                    'title': 'webFeeds',
-                    'onTap': () {
-                      context.router.push(const FeedMarketplaceRoute());
-                    },
-                  },
-                  {
-                    'icon': Symbols.confirmation_number,
-                    'title': 'tickets',
-                    'onTap': () {
-                      context.router.push(const TicketListRoute());
-                    },
-                  },
-                  {
-                    'icon': Symbols.fitness_center,
-                    'title': 'fitness',
-                    'onTap': () {
-                      context.router.push(const FitnessDashboardRoute());
-                    },
-                  },
-                  {
-                    'icon': Symbols.gavel,
-                    'title': 'punishments',
-                    'onTap': () {
-                      context.router.push(const PunishmentsRoute());
                     },
                   },
                 ];
@@ -359,16 +328,6 @@ class AccountFeatureWidget extends HookConsumerWidget {
               },
             ),
             ListTile(
-              leading: const Icon(Symbols.person_edit),
-              trailing: const Icon(Symbols.chevron_right),
-              contentPadding: const EdgeInsets.symmetric(horizontal: 24),
-              dense: true,
-              title: Text('updateYourProfile').tr(),
-              onTap: () {
-                context.router.push(const AccountUpdateProfileRoute());
-              },
-            ),
-            ListTile(
               leading: const Icon(Symbols.manage_accounts),
               trailing: const Icon(Symbols.chevron_right),
               contentPadding: const EdgeInsets.symmetric(horizontal: 24),
@@ -379,26 +338,17 @@ class AccountFeatureWidget extends HookConsumerWidget {
               },
             ),
             const Divider(height: 1).padding(vertical: 8),
-            ListTile(
-              leading: const Icon(Symbols.info),
-              trailing: const Icon(Symbols.chevron_right),
-              contentPadding: EdgeInsets.symmetric(horizontal: 24),
-              dense: true,
-              title: Text('about').tr(),
-              onTap: () {
-                context.router.push(const AboutRoute());
-              },
-            ),
-            ListTile(
-              leading: const Icon(Symbols.bug_report),
-              trailing: const Icon(Symbols.chevron_right),
-              contentPadding: EdgeInsets.symmetric(horizontal: 24),
-              title: Text('debugOptions').tr(),
-              dense: true,
-              onTap: () {
-                toggleDebugOverlay();
-              },
-            ),
+            if (isDeveloperMode)
+              ListTile(
+                leading: const Icon(Symbols.bug_report),
+                trailing: const Icon(Symbols.chevron_right),
+                contentPadding: EdgeInsets.symmetric(horizontal: 24),
+                title: Text('debugOptions').tr(),
+                dense: true,
+                onTap: () {
+                  toggleDebugOverlay(ref);
+                },
+              ),
             ListTile(
               leading: const Icon(Symbols.logout),
               trailing: const Icon(Symbols.chevron_right),
@@ -426,11 +376,13 @@ class AccountFeatureWidget extends HookConsumerWidget {
   }
 }
 
-class _UnauthorizedAccountScreen extends StatelessWidget {
+class _UnauthorizedAccountScreen extends HookConsumerWidget {
   const _UnauthorizedAccountScreen();
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final isDeveloperMode = ref.watch(developerModeProvider);
+
     return AppScaffold(
       appBar: AppBar(title: const Text('account').tr()),
       body: ConstrainedBox(
@@ -497,15 +449,16 @@ class _UnauthorizedAccountScreen extends StatelessWidget {
                   icon: const Icon(Icons.info, fill: 1),
                   tooltip: 'about'.tr(),
                 ),
-                IconButton(
-                  icon: const Icon(Icons.bug_report, fill: 1),
-                  onPressed: () {
-                    toggleDebugOverlay();
-                  },
-                  iconSize: 18,
-                  color: Theme.of(context).colorScheme.secondary,
-                  tooltip: 'debugOptions'.tr(),
-                ),
+                if (isDeveloperMode)
+                  IconButton(
+                    icon: const Icon(Icons.bug_report, fill: 1),
+                    onPressed: () {
+                      toggleDebugOverlay(ref);
+                    },
+                    iconSize: 18,
+                    color: Theme.of(context).colorScheme.secondary,
+                    tooltip: 'debugOptions'.tr(),
+                  ),
                 IconButton(
                   onPressed: () {
                     context.router.push(const SettingsRoute());

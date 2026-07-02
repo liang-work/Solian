@@ -3,6 +3,7 @@ import 'dart:io' show HandshakeException;
 import 'dart:math' as math;
 
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_blurhash/flutter_blurhash.dart';
 import 'package:flutter_cache_manager/flutter_cache_manager.dart';
@@ -96,7 +97,13 @@ class UniversalImage extends HookConsumerWidget {
               _isValidBlurHash(blurHash!))
             BlurHash(hash: blurHash!),
           if (isCached.value == null)
-            Center(child: CircularProgressIndicator())
+            Center(
+              child: SizedBox(
+                width: (width ?? 32).clamp(12, 48),
+                height: (height ?? 32).clamp(12, 48),
+                child: const CircularProgressIndicator(strokeWidth: 2),
+              ),
+            )
           else if (isCached.value!)
             CachedNetworkImage(
               imageUrl: uri,
@@ -134,6 +141,7 @@ class UniversalImage extends HookConsumerWidget {
                   child: AnimatedCircularProgressIndicator(
                     value: progress.progress,
                     color: Colors.white.withOpacity(0.5),
+                    strokeWidth: 2,
                   ),
                 );
               },
@@ -196,8 +204,8 @@ class CachedImageErrorWidget extends StatelessWidget {
     if (error is HandshakeException) {
       return null;
     }
-    if (error.response?.statusCode != null) {
-      return error.response.statusCode;
+    if (error is DioException) {
+      return error.response?.statusCode;
     }
     return null;
   }
@@ -228,7 +236,7 @@ class CachedImageErrorWidget extends StatelessWidget {
               BlurHash(hash: blurHash!)
             else
               Image.asset(
-                'assets/images/media-offline.jpg',
+                'assets/images/media-offline.webp',
                 fit: BoxFit.cover,
                 key: Key('-$uri'),
               ),

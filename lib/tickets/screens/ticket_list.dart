@@ -94,7 +94,7 @@ class _TicketListScreenState extends ConsumerState<TicketListScreen> {
       floatingActionButton: FloatingActionButton(
         child: const Icon(Icons.add),
         onPressed: () {
-          showAbuseReportSheet(context, resourceIdentifier: 'unidentified');
+          showAbuseReportSheet(context);
         },
       ).padding(bottom: MediaQuery.paddingOf(context).bottom + 8),
       body: FutureBuilder<List<SnTicket>>(
@@ -115,14 +115,7 @@ class _TicketListScreenState extends ConsumerState<TicketListScreen> {
                 itemBuilder: (context, index) {
                   final ticket = tickets[index];
                   return Card(
-                    elevation: 0,
                     margin: const EdgeInsets.symmetric(horizontal: 16),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                      side: BorderSide(
-                        color: Theme.of(context).colorScheme.outlineVariant,
-                      ),
-                    ),
                     clipBehavior: Clip.antiAlias,
                     child: InkWell(
                       onTap: () {

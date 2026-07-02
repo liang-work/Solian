@@ -8,6 +8,7 @@ export 'src/models/accounts/account.dart';
 export 'src/models/accounts/abuse_report.dart';
 export 'src/models/accounts/abuse_report_type.dart';
 export 'src/models/accounts/action_log.dart';
+export 'src/models/accounts/affiliation.dart';
 export 'src/models/accounts/discovery.dart';
 export 'src/models/accounts/fortune.dart';
 export 'src/models/accounts/progression.dart';
@@ -38,18 +39,21 @@ export 'src/models/drive/file.dart';
 export 'src/models/drive/file_list_item.dart';
 export 'src/models/drive/file_pool.dart';
 export 'src/models/drive/folder.dart';
-
-// Live models
-export 'src/models/live/livestream.dart';
+export 'src/models/drive/file_permission.dart';
 
 // Posts models
 export 'src/models/posts/embed.dart';
 export 'src/models/posts/heatmap.dart';
-export 'src/models/posts/poll.dart';
+export 'src/models/posts/survey.dart';
+export 'src/models/posts/post_collection.dart';
 export 'src/models/posts/post.dart';
 export 'src/models/posts/post_category.dart';
 export 'src/models/posts/post_tag.dart';
 export 'src/models/posts/publisher.dart';
+export 'src/models/posts/publisher_leaderboard.dart';
+export 'src/models/posts/publisher_rating_record.dart';
+export 'src/models/posts/tag_quota.dart';
+export 'src/models/posts/verified_domain.dart';
 
 // Realms models
 export 'src/models/realms/realm.dart';

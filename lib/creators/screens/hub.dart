@@ -21,6 +21,7 @@ import 'package:island/shared/widgets/layouts/sheet_scaffold.dart';
 import 'package:island/shared/widgets/pagination_list.dart';
 import 'package:island/shared/widgets/response.dart';
 import 'package:island/posts/activity_heatmap.dart';
+import 'package:island/posts/widgets/publisher_leaderboard_sheet.dart';
 import 'package:material_symbols_icons/symbols.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 import 'package:styled_widget/styled_widget.dart';
@@ -44,6 +45,26 @@ Future<SnHeatmap?> publisherHeatmap(Ref ref, String? uname) async {
   final apiClient = ref.watch(apiClientProvider);
   final resp = await apiClient.get('/sphere/publishers/$uname/heatmap');
   return SnHeatmap.fromJson(resp.data);
+}
+
+@riverpod
+Future<SnPublisherRatingOverview?> publisherRatingOverview(
+  Ref ref,
+  String? uname,
+) async {
+  if (uname == null) return null;
+  final apiClient = ref.watch(apiClientProvider);
+  try {
+    final resp = await apiClient.get(
+      '/sphere/publishers/$uname/rating/overview',
+    );
+    return SnPublisherRatingOverview.fromJson(resp.data);
+  } catch (err) {
+    if (err is DioException && err.response?.statusCode == 404) {
+      return null;
+    }
+    rethrow;
+  }
 }
 
 @riverpod
@@ -327,7 +348,7 @@ class PublisherMemberListNotifier
 
 class PublisherSelector extends StatelessWidget {
   final SnPublisher? currentPublisher;
-  final List<DropdownItem<SnPublisher>> publishersMenu;
+  final List<DropdownItem<SnPublisher?>> publishersMenu;
   final ValueChanged<SnPublisher?>? onChanged;
   final bool isReadOnly;
 
@@ -341,10 +362,11 @@ class PublisherSelector extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (isReadOnly || currentPublisher == null) {
+    if (isReadOnly) {
       return ProfilePictureWidget(
         radius: 16,
         file: currentPublisher?.picture,
+        borderRadius: currentPublisher?.type == 0 ? null : 12,
       ).center().padding(right: 8);
     }
 
@@ -355,7 +377,9 @@ class PublisherSelector extends StatelessWidget {
         publishersMenu.any((item) => item.value?.id == currentValue.id);
 
     return DropdownButtonHideUnderline(
-      child: DropdownButton2<SnPublisher>(
+      child: DropdownButton2<SnPublisher?>(
+        // Keep the dropdown interactive even when nothing is selected.
+        // The first menu entry clears the current selection.
         valueListenable: ValueNotifier<SnPublisher?>(
           isValueValid ? currentValue : null,
         ),
@@ -372,6 +396,9 @@ class PublisherSelector extends StatelessWidget {
               ProfilePictureWidget(
                 radius: 10,
                 file: isValueValid ? currentValue.picture : null,
+                borderRadius: isValueValid && currentValue.type != 0
+                    ? 12
+                    : null,
               ),
               Flexible(
                 child: Text(
@@ -392,36 +419,7 @@ class PublisherSelector extends StatelessWidget {
             ],
           ),
         ),
-        items: publishersMenu
-            .map(
-              (item) => DropdownItem<SnPublisher>(
-                value: item.value,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      item.value?.nick ?? '',
-                      style: DefaultTextStyle.of(context).style.copyWith(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w500,
-                        color: Theme.of(context).colorScheme.onSurface,
-                      ),
-                    ),
-                    Text(
-                      '@${item.value?.name ?? ''}',
-                      style: DefaultTextStyle.of(context).style.copyWith(
-                        fontSize: 12,
-                        color: Theme.of(context).colorScheme.onSurfaceVariant,
-                      ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ],
-                ),
-              ),
-            )
-            .toList(),
+        items: publishersMenu,
         onChanged: onChanged,
         isDense: true,
         buttonStyleData: const ButtonStyleData(
@@ -545,7 +543,10 @@ class _PublisherUnselectedWidget extends HookConsumerWidget {
                             Radius.circular(8),
                           ),
                         ),
-                        leading: ProfilePictureWidget(file: publisher.picture),
+                        leading: ProfilePictureWidget(
+                          file: publisher.picture,
+                          borderRadius: publisher.type == 0 ? null : 12,
+                        ),
                         title: Text(publisher.nick),
                         subtitle: Text('@${publisher.name}'),
                         onTap: () => onPublisherSelected(publisher),
@@ -606,9 +607,7 @@ class CreatorHubContentWidget extends HookConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final publishers = ref.watch(publishersManagedProvider);
-    final currentPublisher = useState<SnPublisher?>(
-      publishers.value?.firstOrNull,
-    );
+    final currentPublisher = useState<SnPublisher?>(null);
 
     void updatePublisher() {
       showModalBottomSheet(
@@ -640,24 +639,44 @@ class CreatorHubContentWidget extends HookConsumerWidget {
       });
     }
 
-    final List<DropdownItem<SnPublisher>> publishersMenu = publishers.when(
-      data: (data) => data
-          .map(
-            (item) => DropdownItem<SnPublisher>(
-              value: item,
-              child: ListTile(
-                minTileHeight: 48,
-                leading: ProfilePictureWidget(radius: 16, file: item.picture),
-                title: Text(item.nick),
-                subtitle: Text('@${item.name}'),
-                trailing: currentPublisher.value?.id == item.id
-                    ? const Icon(Icons.check)
-                    : null,
-                contentPadding: EdgeInsets.symmetric(horizontal: 8),
+    final List<DropdownItem<SnPublisher?>> publishersMenu = publishers.when(
+      data: (data) =>
+          data
+              .map(
+                (item) => DropdownItem<SnPublisher?>(
+                  height: 64,
+                  value: item,
+                  child: ListTile(
+                    minTileHeight: 48,
+                    dense: true,
+                    leading: ProfilePictureWidget(
+                      radius: 16,
+                      file: item.picture,
+                      borderRadius: item.type == 0 ? null : 12,
+                    ),
+                    title: Text(item.nick),
+                    subtitle: Text('@${item.name}'),
+                    trailing: currentPublisher.value?.id == item.id
+                        ? const Icon(Icons.check)
+                        : null,
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 8),
+                  ),
+                ),
+              )
+              .toList()
+            ..insert(
+              0,
+              DropdownItem<SnPublisher?>(
+                height: 64,
+                value: null,
+                child: ListTile(
+                  dense: true,
+                  minTileHeight: 48,
+                  leading: Icon(Symbols.close),
+                  title: Text('clearSelection').tr(),
+                ),
               ),
             ),
-          )
-          .toList(),
       loading: () => [],
       error: (_, _) => [],
     );
@@ -668,6 +687,10 @@ class CreatorHubContentWidget extends HookConsumerWidget {
 
     final publisherHeatmap = ref.watch(
       publisherHeatmapProvider(currentPublisher.value?.name),
+    );
+
+    final publisherRatingOverview = ref.watch(
+      publisherRatingOverviewProvider(currentPublisher.value?.name),
     );
 
     final publisherFeatures = ref.watch(
@@ -709,12 +732,14 @@ class CreatorHubContentWidget extends HookConsumerWidget {
             borderRadius: const BorderRadius.all(Radius.circular(8)),
           ),
           minTileHeight: 48,
-          title: const Text('Livestreams'),
-          trailing: const Icon(Symbols.chevron_right),
-          leading: const Icon(Symbols.live_tv),
+          title: Text('collections').tr(),
+          trailing: Icon(Symbols.chevron_right),
+          leading: const Icon(Symbols.collections),
           onTap: () {
             context.router.push(
-              CreatorLivestreamListRoute(pubName: currentPublisher.value!.name),
+              CreatorPostCollectionsRoute(
+                pubName: currentPublisher.value!.name,
+              ),
             );
           },
         ),
@@ -723,40 +748,12 @@ class CreatorHubContentWidget extends HookConsumerWidget {
             borderRadius: const BorderRadius.all(Radius.circular(8)),
           ),
           minTileHeight: 48,
-          title: Text('polls').tr(),
+          title: Text('surveys').tr(),
           trailing: const Icon(Symbols.chevron_right),
           leading: const Icon(Symbols.poll),
           onTap: () {
             context.router.push(
-              CreatorPollListRoute(pubName: currentPublisher.value!.name),
-            );
-          },
-        ),
-        ListTile(
-          shape: RoundedRectangleBorder(
-            borderRadius: const BorderRadius.all(Radius.circular(8)),
-          ),
-          minTileHeight: 48,
-          title: Text('publicationSites').tr(),
-          trailing: const Icon(Symbols.chevron_right),
-          leading: const Icon(Symbols.web),
-          onTap: () {
-            context.router.push(
-              CreatorSiteListRoute(pubName: currentPublisher.value!.name),
-            );
-          },
-        ),
-        ListTile(
-          shape: RoundedRectangleBorder(
-            borderRadius: const BorderRadius.all(Radius.circular(8)),
-          ),
-          minTileHeight: 48,
-          title: const Text('webFeeds').tr(),
-          trailing: const Icon(Symbols.chevron_right),
-          leading: const Icon(Symbols.rss_feed),
-          onTap: () {
-            context.router.push(
-              CreatorFeedListRoute(pubName: currentPublisher.value!.name),
+              CreatorSurveyListRoute(pubName: currentPublisher.value!.name),
             );
           },
         ),
@@ -897,6 +894,21 @@ class CreatorHubContentWidget extends HookConsumerWidget {
             borderRadius: const BorderRadius.all(Radius.circular(8)),
           ),
           minTileHeight: 48,
+          title: Text('verifiedDomains').tr(),
+          trailing: const Icon(Symbols.chevron_right),
+          leading: const Icon(Symbols.domain),
+          onTap: () {
+            context.router.push(
+              CreatorDomainManageRoute(
+                  pubName: currentPublisher.value!.name),
+            );
+          },
+        ),
+        ListTile(
+          shape: RoundedRectangleBorder(
+            borderRadius: const BorderRadius.all(Radius.circular(8)),
+          ),
+          minTileHeight: 48,
           title: Text('deletePublisher').tr(),
           trailing: Icon(Symbols.chevron_right),
           leading: const Icon(Symbols.delete),
@@ -956,6 +968,11 @@ class CreatorHubContentWidget extends HookConsumerWidget {
                         heatmap: publisherHeatmap.value,
                       ).padding(horizontal: 16),
                     buildNavigationWidget(),
+                    if (publisherRatingOverview.value != null)
+                      _buildRatingCardStatic(
+                        context,
+                        publisherRatingOverview.value!,
+                      ).padding(horizontal: 16),
                   ],
                 ),
         ),
@@ -985,7 +1002,7 @@ class CreatorHubScreen extends HookConsumerWidget {
                     child: ClipRRect(
                       borderRadius: const BorderRadius.all(Radius.circular(8)),
                       child: const CreatorHubContentWidget(),
-                    ).padding(left: 16, vertical: 16),
+                    ).padding(left: 16, top: 16),
                   ),
                   const Gap(8),
                   Flexible(
@@ -1116,6 +1133,150 @@ class _PublisherStatsWidget extends StatelessWidget {
   }
 }
 
+Widget _buildRatingCardStatic(
+  BuildContext context,
+  SnPublisherRatingOverview overview,
+) {
+  final theme = Theme.of(context);
+  final textColor = switch (overview.grade) {
+    'S++' => theme.colorScheme.tertiary,
+    'S+' => theme.colorScheme.tertiary,
+    'S' => theme.colorScheme.primary,
+    'A++' => theme.colorScheme.primary,
+    'A+' => theme.colorScheme.primary,
+    'A' => theme.colorScheme.primary,
+    'A-' => theme.colorScheme.primary,
+    'B+' => theme.colorScheme.secondary,
+    'B' => theme.colorScheme.secondary,
+    'C' => theme.colorScheme.onSurfaceVariant,
+    'D' => theme.colorScheme.error,
+    _ => theme.colorScheme.onSurfaceVariant,
+  };
+  final bgColor = switch (overview.grade) {
+    'S++' => theme.colorScheme.tertiaryContainer,
+    'S+' => theme.colorScheme.tertiaryContainer,
+    'S' => theme.colorScheme.primaryContainer,
+    'A++' => theme.colorScheme.primaryContainer,
+    'A+' => theme.colorScheme.primaryContainer,
+    'A' => theme.colorScheme.primaryContainer,
+    'A-' => theme.colorScheme.primaryContainer,
+    'B+' => theme.colorScheme.secondaryContainer,
+    'B' => theme.colorScheme.secondaryContainer,
+    'C' => theme.colorScheme.surfaceContainerHighest,
+    'D' => theme.colorScheme.errorContainer,
+    _ => theme.colorScheme.surfaceContainerHighest,
+  };
+
+  return InkWell(
+    onTap: () {
+      showModalBottomSheet(
+        isScrollControlled: true,
+        context: context,
+        builder: (context) => const PublisherLeaderboardSheet(),
+      );
+    },
+    borderRadius: BorderRadius.circular(12),
+    child: Card(
+      margin: EdgeInsets.zero,
+      color: bgColor,
+      child: SizedBox(
+        height: 140,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+          child: Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(
+                          switch (overview.grade) {
+                            'S++' => Symbols.emoji_events,
+                            'S+' => Symbols.emoji_events,
+                            'S' => Symbols.star,
+                            'A++' => Symbols.trending_up,
+                            'A+' => Symbols.trending_up,
+                            'A' => Symbols.trending_up,
+                            'A-' => Symbols.trending_up,
+                            'B+' => Symbols.thumb_up,
+                            'B' => Symbols.thumb_up,
+                            'C' => Symbols.remove,
+                            'D' => Symbols.trending_down,
+                            _ => Symbols.remove,
+                          },
+                          color: textColor,
+                          size: 24,
+                        ),
+                        const Gap(8),
+                        Text(
+                          overview.grade,
+                          style: theme.textTheme.headlineSmall?.copyWith(
+                            fontWeight: FontWeight.bold,
+                            color: textColor,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const Gap(8),
+                    Text(
+                      'ratingTooltip'.tr(
+                        args: [overview.rating.toStringAsFixed(1)],
+                      ),
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        color: textColor.withOpacity(0.8),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Text(
+                    _formatRatingStatic(overview.rating),
+                    style: theme.textTheme.displaySmall?.copyWith(
+                      fontWeight: FontWeight.bold,
+                      color: textColor,
+                    ),
+                  ),
+                  const Gap(4),
+                  Text(
+                    'ratingRank'.tr(args: ['${overview.rank}']),
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: textColor.withOpacity(0.8),
+                    ),
+                  ),
+                  Text(
+                    'ratingPercentile'.tr(
+                      args: [overview.percentile.toStringAsFixed(1)],
+                    ),
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: textColor.withOpacity(0.8),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    ),
+  );
+}
+
+String _formatRatingStatic(double rating) {
+  if (rating >= 1000000) {
+    return '${(rating / 1000000).toStringAsFixed(1)}M';
+  } else if (rating >= 1000) {
+    return '${(rating / 1000).toStringAsFixed(1)}K';
+  }
+  return rating.toStringAsFixed(0);
+}
+
 class PublisherMemberState {
   final List<SnPublisherMember> members;
   final bool isLoading;
@@ -1156,9 +1317,8 @@ class _PublisherMemberListSheet extends HookConsumerWidget {
     final memberListProvider = publisherMemberListNotifierProvider(
       publisherUname,
     );
-    final memberNotifier = ref.read(
-      publisherMemberListNotifierProvider(publisherUname).notifier,
-    );
+    final memberListState = ref.watch(memberListProvider);
+    final memberNotifier = ref.read(memberListProvider.notifier);
 
     Future<void> invitePerson() async {
       final result = await showModalBottomSheet(
@@ -1191,7 +1351,7 @@ class _PublisherMemberListSheet extends HookConsumerWidget {
             child: Row(
               children: [
                 Text(
-                  'members'.plural(memberNotifier.totalCount ?? 0),
+                  'members'.plural(memberListState.value?.totalCount ?? 0),
                   style: Theme.of(context).textTheme.headlineSmall?.copyWith(
                     fontWeight: FontWeight.w600,
                     letterSpacing: -0.5,
@@ -1475,6 +1635,7 @@ class _PublisherInviteSheet extends HookConsumerWidget {
                   return ListTile(
                     leading: ProfilePictureWidget(
                       file: invite.publisher!.picture,
+                      borderRadius: invite.publisher!.type == 0 ? null : 12,
                       fallbackIcon: Symbols.group,
                     ),
                     title: Text(invite.publisher!.nick),
@@ -1675,9 +1836,8 @@ class _PublisherSubscriberSheet extends HookConsumerWidget {
     final subscriberListProvider = publisherSubscriberListNotifierProvider(
       publisherUname,
     );
-    final subscriberNotifier = ref.read(
-      publisherSubscriberListNotifierProvider(publisherUname).notifier,
-    );
+    final subscriberListState = ref.watch(subscriberListProvider);
+    final subscriberNotifier = ref.read(subscriberListProvider.notifier);
     final publisherIdentity = ref.watch(
       publisherIdentityProvider(publisherUname),
     );
@@ -1824,7 +1984,7 @@ class _PublisherSubscriberSheet extends HookConsumerWidget {
             child: Row(
               children: [
                 Text(
-                  'publisherSubscribers'.tr(),
+                  'members'.plural(subscriberListState.value?.totalCount ?? 0),
                   style: Theme.of(context).textTheme.headlineSmall?.copyWith(
                     fontWeight: FontWeight.w600,
                     letterSpacing: -0.5,

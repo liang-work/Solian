@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:dio/dio.dart';
+import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_hooks/flutter_hooks.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
@@ -9,6 +10,11 @@ import 'package:island/core/audio.dart';
 import 'package:island/core/network.dart';
 import 'package:island/core/services/notify.dart';
 import 'package:island/core/websocket.dart';
+import 'package:island/plugins/plugin_manager.dart';
+import 'package:island/shared/widgets/app_startup_progress.dart';
+import 'package:styled_widget/styled_widget.dart';
+
+const kDebugStartup = false;
 
 const kDefaultBootstrapRetryTimeouts = <Duration>[
   Duration(milliseconds: 1000),
@@ -20,12 +26,14 @@ class StartupSplashScreen extends HookConsumerWidget {
   final bool runBootstrap;
   final VoidCallback onCompleted;
   final List<Duration> retryTimeouts;
+  final bool showCompleted;
 
   const StartupSplashScreen({
     super.key,
     required this.runBootstrap,
     required this.onCompleted,
     this.retryTimeouts = kDefaultBootstrapRetryTimeouts,
+    this.showCompleted = false,
   });
 
   @override
@@ -41,21 +49,24 @@ class StartupSplashScreen extends HookConsumerWidget {
           await action(timeout);
           return;
         } catch (e, _) {
-          subtitle.value =
-              '$stageLabel retry ${idx + 1}/${retryTimeouts.length} failed.';
+          subtitle.value = 'startupRetryFailed'.tr(
+            args: [stageLabel, '${idx + 1}', '${retryTimeouts.length}'],
+          );
         }
       }
     }
 
     final subtitle = useState<String?>(null);
+    final connectivityStatus = ref.watch(connectivityStatusProvider);
+    final hasConnectivity = hasNetworkConnectivityValue(connectivityStatus);
     final stages = useMemoized(
       () => <_BootstrapStage>[
         _BootstrapStage(
-          label: 'Checking service health',
+          label: 'startupStageHealthCheck'.tr(),
           isCritical: true,
           action: () async {
             await runWithTimeoutRetries(
-              stageLabel: 'Health check',
+              stageLabel: 'startupStageHealthCheck'.tr(),
               subtitle: subtitle,
               action: (timeout) async {
                 final apiClient = ref.read(solarNetworkClientProvider);
@@ -81,7 +92,7 @@ class StartupSplashScreen extends HookConsumerWidget {
           },
         ),
         _BootstrapStage(
-          label: 'Loading account profile',
+          label: 'startupStageLoadProfile'.tr(),
           isCritical: true,
           action: () async {
             await ref
@@ -90,31 +101,34 @@ class StartupSplashScreen extends HookConsumerWidget {
           },
         ),
         _BootstrapStage(
-          label: 'Connecting realtime gateway',
+          label: 'startupStageConnectGateway'.tr(),
           isCritical: true,
           action: () async {
-            ref.read(websocketStateProvider.notifier).connect();
+            await ref.read(websocketStateProvider.notifier).connect();
           },
         ),
         _BootstrapStage(
-          label: 'Registering push notifications',
+          label: 'startupStagePushNotifications'.tr(),
           isCritical: false,
           action: () async {
             final user = await ref.read(userInfoProvider.future);
             if (!context.mounted || user == null) return;
             final apiClient = ref.read(solarNetworkClientProvider).dio;
-            await subscribePushNotification(apiClient, context: context);
+            await subscribePushNotification(
+              apiClient,
+              context: context,
+            ).timeout(const Duration(seconds: 1), onTimeout: () {});
           },
         ),
         _BootstrapStage(
-          label: 'Preparing local notifications',
+          label: 'startupStageLocalNotifications'.tr(),
           isCritical: false,
           action: () async {
             await initializeLocalNotifications(ref);
           },
         ),
         _BootstrapStage(
-          label: 'Preparing audio assets',
+          label: 'startupStageAudioAssets'.tr(),
           isCritical: false,
           action: () async {
             await ref.read(audioSessionProvider.future);
@@ -122,6 +136,23 @@ class StartupSplashScreen extends HookConsumerWidget {
             await ref.read(messageSfxProvider.future);
           },
         ),
+        _BootstrapStage(
+          label: 'Loading plugins',
+          isCritical: false,
+          action: () async {
+            final manager = PluginManager();
+            await manager.initialize();
+            await manager.loadAll();
+          },
+        ),
+        if (kDebugStartup)
+          _BootstrapStage(
+            label: 'startupStageDebugHang'.tr(),
+            isCritical: false,
+            action: () async {
+              await Completer<void>().future;
+            },
+          ),
       ],
       [],
     );
@@ -129,27 +160,41 @@ class StartupSplashScreen extends HookConsumerWidget {
     final isBusy = useState(true);
     final isErrored = useState(false);
     final isDismissable = useState(true);
+    final isWaitingForConnectivity = useState(false);
     final periodCursor = useState(0);
     final showSkip = useState(false);
     final isCurrentStageSkippable = useState(false);
     final phaseNonce = useRef(0);
     final skipCompleterRef = useRef<Completer<void>?>(null);
     final warnings = useState<List<String>>([]);
-    final unFocusColor = Theme.of(
-      context,
-    ).colorScheme.onSurface.withValues(alpha: 0.75);
+
+    final colorScheme = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
 
     Future<void> runStages() async {
       final phase = ++phaseNonce.value;
       isBusy.value = true;
       isErrored.value = false;
       isDismissable.value = true;
+      isWaitingForConnectivity.value = false;
       subtitle.value = null;
       showSkip.value = false;
       warnings.value = [];
 
       for (var idx = 0; idx < stages.length; idx++) {
         if (phaseNonce.value != phase) return;
+
+        if (!hasNetworkConnectivityValue(
+          ref.read(connectivityStatusProvider),
+        )) {
+          isBusy.value = false;
+          isErrored.value = true;
+          isDismissable.value = false;
+          isWaitingForConnectivity.value = true;
+          subtitle.value = 'startupNoInternet'.tr();
+          return;
+        }
+
         final stage = stages[idx];
         periodCursor.value = idx;
         isCurrentStageSkippable.value = !stage.isCritical;
@@ -171,13 +216,15 @@ class StartupSplashScreen extends HookConsumerWidget {
           } else {
             await Future.any([stage.action(), skipCompleterRef.value!.future]);
             if (skipCompleterRef.value!.isCompleted) {
-              subtitle.value = 'Skipped optional stage: ${stage.label}';
+              subtitle.value = 'startupSkippedStage'.tr(args: [stage.label]);
             }
           }
         } catch (_) {
-          final warning = 'Skipped "${stage.label}" after retries.';
+          final warning = 'startupStageFailedAfterRetries'.tr(
+            args: [stage.label],
+          );
           warnings.value = [...warnings.value, warning];
-          subtitle.value = '$warning App may have limited functionality.';
+          subtitle.value = '$warning ${'startupLimitedFunctionality'.tr()}';
         } finally {
           skipTimer?.cancel();
           showSkip.value = false;
@@ -192,127 +239,318 @@ class StartupSplashScreen extends HookConsumerWidget {
       } else {
         isErrored.value = true;
         isDismissable.value = true;
-        subtitle.value =
-            '${warnings.value.length} startup stage(s) were skipped due to network issues. Tap to continue.';
+        subtitle.value = 'startupStagesSkipped'.tr(
+          args: ['${warnings.value.length}'],
+        );
       }
     }
 
     useEffect(() {
+      if (showCompleted) {
+        isBusy.value = false;
+        isErrored.value = false;
+        isDismissable.value = true;
+        subtitle.value = null;
+        return null;
+      }
       if (!runBootstrap) {
         isBusy.value = false;
         subtitle.value = null;
+        return null;
+      }
+      if (!hasConnectivity) {
+        phaseNonce.value++;
+        isBusy.value = false;
+        isErrored.value = true;
+        isDismissable.value = false;
+        isWaitingForConnectivity.value = true;
+        subtitle.value = 'startupNoInternet'.tr();
         return null;
       }
       Future(() => runStages());
       return () {
         phaseNonce.value++;
       };
-    }, [runBootstrap]);
+    }, [runBootstrap, hasConnectivity, showCompleted]);
+
+    final progress = stages.isEmpty
+        ? 0.0
+        : (periodCursor.value + (isBusy.value ? 0.5 : 1.0)) / stages.length;
+    final percentage = (progress * 100).round();
 
     return Material(
-      color: Theme.of(context).colorScheme.surface,
+      color: colorScheme.surface,
       child: GestureDetector(
         onTap: () {
           if (isBusy.value) return;
           if (isDismissable.value) {
-            if (runBootstrap) {
-              onCompleted();
-            }
+            onCompleted();
           } else {
             Future(() => runStages());
           }
         },
-        child: Column(
-          mainAxisSize: MainAxisSize.max,
-          mainAxisAlignment: MainAxisAlignment.spaceAround,
-          children: [
-            SizedBox(
-              height: 280,
-              child: Align(
-                alignment: Alignment.bottomCenter,
-                child: ClipRRect(
-                  borderRadius: const BorderRadius.all(Radius.circular(16)),
-                  child: Image.asset(
-                    'assets/icons/icon.png',
-                    width: 80,
-                    height: 80,
-                  ),
-                ),
-              ),
-            ),
-            Column(
-              children: [
-                if (isErrored.value && !isDismissable.value && !isBusy.value)
-                  const Icon(Icons.cancel, size: 24),
-                if (isErrored.value && isDismissable.value && !isBusy.value)
-                  const Icon(Icons.warning, size: 24),
-                if ((isErrored.value && isDismissable.value && isBusy.value) ||
-                    isBusy.value)
-                  const SizedBox(
-                    width: 24,
-                    height: 24,
-                    child: CircularProgressIndicator(strokeWidth: 3),
-                  ),
-                if (!isBusy.value && !isErrored.value)
-                  const Icon(Icons.check_circle, size: 24, color: Colors.green),
-                const SizedBox(height: 12),
-                ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 280),
+        behavior: HitTestBehavior.opaque,
+        child: SafeArea(
+          child: Stack(
+            children: [
+              Positioned(
+                left: 0,
+                right: 0,
+                bottom: 0,
+                top: 0,
+                child: Align(
+                  alignment: Alignment.center,
                   child: Column(
+                    mainAxisSize: MainAxisSize.min,
                     children: [
-                      if (subtitle.value == null)
-                        Text(
-                          '${stages[periodCursor.value].label} (${periodCursor.value + 1}/${stages.length})',
-                          textAlign: TextAlign.center,
-                          style: TextStyle(fontSize: 13, color: unFocusColor),
-                        ),
-                      if (subtitle.value != null)
-                        Padding(
-                          padding: const EdgeInsets.only(bottom: 4),
-                          child: Text(
-                            subtitle.value!,
-                            textAlign: TextAlign.center,
-                            style: TextStyle(fontSize: 13, color: unFocusColor),
-                          ),
-                        ),
-                      if (!isBusy.value &&
-                          isErrored.value &&
-                          isDismissable.value)
-                        Padding(
-                          padding: const EdgeInsets.only(bottom: 5),
-                          child: Text(
-                            'Tap anywhere to dismiss',
-                            textAlign: TextAlign.center,
-                            style: TextStyle(fontSize: 13, color: unFocusColor),
-                          ),
-                        ),
-                      if (isBusy.value &&
-                          isCurrentStageSkippable.value &&
-                          showSkip.value)
-                        Padding(
-                          padding: const EdgeInsets.only(top: 8),
-                          child: TextButton(
-                            onPressed: () {
-                              if (skipCompleterRef.value?.isCompleted ==
-                                  false) {
-                                skipCompleterRef.value?.complete();
-                              }
-                            },
-                            child: const Text('Skip optional stage'),
-                          ),
-                        ),
-                      Text(
-                        '${DateTime.now().year} © Solsynth LLC',
-                        textAlign: TextAlign.center,
-                        style: TextStyle(fontSize: 11, color: unFocusColor),
+                      AnimatedSwitcher(
+                        duration: const Duration(milliseconds: 300),
+                        child: isBusy.value
+                            ? Text(
+                                '$percentage%',
+                                key: ValueKey(percentage),
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w600,
+                                  color: colorScheme.primary,
+                                  fontFeatures: const [
+                                    FontFeature.tabularFigures(),
+                                  ],
+                                ),
+                              )
+                            : const SizedBox(
+                                key: ValueKey('idle-progress-label'),
+                                height: 18,
+                              ),
+                      ),
+                      const SizedBox(height: 8),
+                      StartupProgressBar(
+                        progress: progress,
+                        isErrored: isErrored.value,
+                        colorScheme: colorScheme,
                       ),
                     ],
                   ),
                 ),
-              ],
+              ),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  const Spacer(flex: 3),
+                  StartupProgressIcon(
+                    isBusy: isBusy.value,
+                    isErrored: isErrored.value,
+                    isDismissable: isDismissable.value,
+                    isWaitingForConnectivity: isWaitingForConnectivity.value,
+                    colorScheme: colorScheme,
+                  ),
+                  const Spacer(flex: 2),
+                  _StageInfo(
+                    stages: stages,
+                    currentIndex: periodCursor.value,
+                    subtitle: subtitle.value,
+                    isBusy: isBusy.value,
+                    isErrored: isErrored.value,
+                    isDismissable: isDismissable.value,
+                    showSkip: showSkip.value,
+                    isCurrentStageSkippable: isCurrentStageSkippable.value,
+                    onSkip: () {
+                      if (skipCompleterRef.value?.isCompleted == false) {
+                        skipCompleterRef.value?.complete();
+                      }
+                    },
+                    textTheme: textTheme,
+                    colorScheme: colorScheme,
+                  ),
+                  const Spacer(flex: 1),
+                  Padding(
+                    padding: EdgeInsets.only(
+                      bottom: 24 + MediaQuery.paddingOf(context).bottom,
+                    ),
+                    child: Text(
+                      'startupCopyright'.tr(args: ['${DateTime.now().year}']),
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: colorScheme.onSurface.withValues(alpha: 0.4),
+                      ),
+                    ),
+                  ).center(),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _StageInfo extends StatelessWidget {
+  final List<_BootstrapStage> stages;
+  final int currentIndex;
+  final String? subtitle;
+  final bool isBusy;
+  final bool isErrored;
+  final bool isDismissable;
+  final bool showSkip;
+  final bool isCurrentStageSkippable;
+  final VoidCallback onSkip;
+  final TextTheme textTheme;
+  final ColorScheme colorScheme;
+
+  const _StageInfo({
+    required this.stages,
+    required this.currentIndex,
+    required this.subtitle,
+    required this.isBusy,
+    required this.isErrored,
+    required this.isDismissable,
+    required this.showSkip,
+    required this.isCurrentStageSkippable,
+    required this.onSkip,
+    required this.textTheme,
+    required this.colorScheme,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final mutedColor = colorScheme.onSurface.withValues(alpha: 0.5);
+    final dimColor = colorScheme.onSurface.withValues(alpha: 0.3);
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 40),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (currentIndex > 0)
+            AnimatedOpacity(
+              opacity: 0.8,
+              duration: const Duration(milliseconds: 300),
+              child: Text(
+                stages[currentIndex - 1].label,
+                textAlign: TextAlign.center,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: textTheme.bodySmall?.copyWith(
+                  color: dimColor,
+                  fontSize: 11,
+                ),
+              ),
+            ),
+          if (currentIndex > 0) const SizedBox(height: 8),
+          AnimatedSwitcher(
+            duration: const Duration(milliseconds: 350),
+            transitionBuilder: (child, animation) {
+              return FadeTransition(
+                opacity: animation,
+                child: SlideTransition(
+                  position: Tween<Offset>(
+                    begin: const Offset(0, 0.3),
+                    end: Offset.zero,
+                  ).animate(animation),
+                  child: child,
+                ),
+              );
+            },
+            child: subtitle != null
+                ? Text(
+                    key: ValueKey('subtitle-$subtitle'),
+                    subtitle!,
+                    textAlign: TextAlign.center,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: textTheme.bodyMedium?.copyWith(
+                      color: mutedColor,
+                      fontSize: 13,
+                    ),
+                  )
+                : isBusy
+                ? Column(
+                    key: ValueKey('busy-$currentIndex'),
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        stages[currentIndex].label,
+                        textAlign: TextAlign.center,
+                        style: textTheme.bodyMedium?.copyWith(
+                          color: colorScheme.onSurface,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        '${currentIndex + 1} / ${stages.length}',
+                        style: textTheme.bodySmall?.copyWith(
+                          color: mutedColor,
+                          fontSize: 12,
+                          fontFeatures: const [FontFeature.tabularFigures()],
+                        ),
+                      ),
+                    ],
+                  )
+                : isErrored && isDismissable
+                ? Column(
+                    key: const ValueKey('incomplete'),
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        'startupIncomplete'.tr(),
+                        textAlign: TextAlign.center,
+                        style: textTheme.bodyMedium?.copyWith(
+                          color: mutedColor,
+                          fontSize: 14,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        'startupTapToContinue'.tr(),
+                        textAlign: TextAlign.center,
+                        style: textTheme.bodySmall?.copyWith(
+                          color: colorScheme.primary,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ],
+                  )
+                : const SizedBox.shrink(key: ValueKey('empty')),
+          ),
+          if (currentIndex < stages.length - 1) ...[
+            const SizedBox(height: 8),
+            AnimatedOpacity(
+              opacity: isBusy ? 0.8 : 0,
+              duration: const Duration(milliseconds: 300),
+              child: Text(
+                stages[currentIndex + 1].label,
+                textAlign: TextAlign.center,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: textTheme.bodySmall?.copyWith(
+                  color: dimColor,
+                  fontSize: 11,
+                ),
+              ),
             ),
           ],
-        ),
+          if (isBusy && isCurrentStageSkippable && showSkip) ...[
+            const SizedBox(height: 12),
+            TextButton(
+              onPressed: onSkip,
+              style: TextButton.styleFrom(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 8,
+                ),
+                minimumSize: Size.zero,
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+              child: Text(
+                'startupSkipOptional'.tr(),
+                style: TextStyle(color: colorScheme.primary, fontSize: 12),
+              ),
+            ),
+          ],
+        ],
       ),
     );
   }
