@@ -16,7 +16,7 @@ publish_to: "none" # Remove this line if you wish to publish to pub.dev
 # https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
 # In Windows, build-name is used as the major, minor, and patch parts
 # of the product and file versions while build-number is used as the build suffix.
-version: 3.9.0+247
+version: 3.9.0+248
 
 environment:
   sdk: ">3.10.0"
@@ -143,7 +143,7 @@ dependencies:
   screenshot: ^3.0.0
   file_saver: ^0.4.0
   tray_manager: ^0.5.3
-  flutter_webrtc: ^1.4.0
+  flutter_webrtc: ^1.5.2
   flutter_local_notifications: ^22.0.1
   wakelock_plus: ^1.5.2
   slide_countdown: ^2.0.2
@@ -299,7 +299,7 @@ msix_config:
   publisher_display_name: Solsynth
   publisher: CN=8B500F48-CBAA-4C83-83B2-7BB79FE401EE
   identity_name: LittleSheep.Solian
-  msix_version: 0.0.0.0
+  msix_version: 3.9.0.0
   logo_path: buildtools\icon-padded.png
   output_directory: build\msix
   trim_logo: true
