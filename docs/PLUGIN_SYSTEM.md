@@ -2,6 +2,77 @@
 
 Solian supports a JavaScript-based plugin system powered by [flutter_js](https://pub.dev/packages/flutter_js) (QuickJS on Android/Linux/Windows, JavascriptCore on iOS/macOS). Plugins can hook into content creation, register commands in the command palette, show notifications, and render custom UI.
 
+## Architecture
+
+The runtime is split so the same foundation can be reused by other apps, while Solian-specific surface stays in Island.
+
+| Layer | Location | Responsibility |
+|-------|----------|----------------|
+| **Foundation** | `packages/island_plugin_foundation` | JS bridge, discovery/lifecycle, sandbox, generic APIs (`hooks`, `events`, `commands`, `ui`, `tasks`), `PluginManager`, `PluginController` |
+| **Host (Island)** | `lib/plugins/` | Solar Network network API, dashboard registration, notify/alert UI, app event bus bridge, Flutter UI renderer, settings screens |
+
+### Extension model
+
+Host apps register APIs at startup:
+
+```dart
+final controller = PluginController.instance;
+
+// Foundation APIs
+controller.registerApi('hooks', HooksApi());
+controller.registerApi('events', EventsApi());
+controller.registerApi('commands', CommandsApi());
+controller.registerApi('ui', UiApi());
+controller.registerApi('tasks', BackgroundTaskApi());
+
+// Host-only APIs (Island)
+controller.registerApi('notify', NotifyApi());
+controller.registerApi('dashboard', DashboardApi());
+controller.registerApi('network', PluginNetworkApi(prefs, apiClient));
+controller.registerApi('ws', PluginWebsocketApi());
+
+await controller.initialize();
+PluginEventBridge().activate(); // forwards Island event bus → plugins
+// Later (AppWrapper): PluginController.instance.getApi<PluginWebsocketApi>()
+//   ?.attach(websocketService);
+```
+
+Each `PluginApi` may:
+
+- `register(runtime)` — Dart handlers for `sendMessage` channels
+- `jsBindingsFor(granted)` — inject JS namespace wrappers for the plugin’s permissions
+- `onPluginUnload(pluginId)` — drop per-plugin state
+- `reset()` — full teardown
+
+`PluginController` is a listenable façade over `PluginManager` for UI and central state (e.g. Settings → Plugins uses `useListenable(controller)`).
+
+### Package layout
+
+```
+packages/island_plugin_foundation/
+  lib/
+    island_plugin_foundation.dart   # public export
+    src/
+      bridge/                       # JsBridge / JsRuntime
+      models/                       # PluginManifest, permissions, state
+      apis/                         # PluginApi + generic APIs
+      plugin_manager.dart
+      plugin_controller.dart
+      plugin_hooks.dart
+
+lib/plugins/                        # Island host integration
+  apis/
+    dashboard_api.dart              # ui.register_dashboard_item
+    network_api.dart                # internet.* + solar.*
+    notify_api.dart                 # notify / alerts
+  plugin_event_bridge.dart          # app EventBus → fireEvent
+  widgets/plugin_ui_bridge.dart     # descriptor → Flutter widgets
+  screens/                          # manager + editor UI
+  plugin.dart                       # re-exports foundation + host APIs
+```
+
+---
+
 ## Quick Start
 
 ### 1. Create a plugin folder
@@ -12,6 +83,7 @@ Each plugin is a folder containing two files:
 my_plugin/
   manifest.json    # Metadata and permissions
   main.js          # Entry point
+  assets/           # Optional plugin-owned assets
 ```
 
 ### 2. Write a manifest
@@ -28,6 +100,9 @@ my_plugin/
   "background": false
 }
 ```
+
+A runnable dashboard-item example is included at
+`assets/scripts/examples/dashboard_status/` in the source tree.
 
 | Field | Required | Description |
 |-------|----------|-------------|
@@ -72,24 +147,31 @@ function cmd_greet() {
 
 Plugins must declare which APIs they intend to use in `manifest.json`. The sandbox only exposes APIs matching the declared permissions.
 
-| Permission | APIs available |
-|------------|---------------|
-| `eventsSubscribe` | `events.*`, `hooks.*` |
-| `commandsRegister` | `commands.*` |
-| `uiRender` | `ui.*` |
-| `notify` | `notify()` |
-| `tasksSchedule` | `tasks.*` |
-| `sdkPostsRead` | *(future)* Read posts |
-| `sdkPostsCreate` | *(future)* Create posts |
-| `sdkChatRead` | *(future)* Read messages |
-| `sdkChatSend` | *(future)* Send messages |
-| `sdkDriveRead` | *(future)* Read files |
-| `sdkDriveWrite` | *(future)* Write files |
-| `sdkUserRead` | *(future)* Read user profile |
+| Permission | APIs available | Provided by |
+|------------|---------------|-------------|
+| `eventsSubscribe` | `events.*`, `hooks.*` | Foundation |
+| `commandsRegister` | `commands.*` | Foundation |
+| `uiRender` | `ui.*` (incl. dashboard registration when host registers it) | Foundation (+ Island dashboard) |
+| `networkInternet` | `internet.*` | Island host |
+| `solarNetworkApi` | `solar.*` | Island host |
+| `websocketSubscribe` | `ws.subscribe`, `ws.unsubscribe`, `ws.is_connected`, optional `on_ws_status` | Island host |
+| `websocketSend` | `ws.send` | Island host |
+| `notify` | `notify()`, `showAlert`, … | Island host |
+| `tasksSchedule` | `tasks.*` | Foundation |
+| *(none)* | `icons.*` (Material Symbols lookup) | Island host |
+| `sdkPostsRead` | *(future)* Read posts | — |
+| `sdkPostsCreate` | *(future)* Create posts | — |
+| `sdkChatRead` | *(future)* Read messages | — |
+| `sdkChatSend` | *(future)* Send messages | — |
+| `sdkDriveRead` | *(future)* Read files | — |
+| `sdkDriveWrite` | *(future)* Write files | — |
+| `sdkUserRead` | *(future)* Read user profile | — |
 
 ## API Reference
 
 ### `notify(title, body)`
+
+> Host API (Island). Requires `notify`.
 
 Show an in-app notification.
 
@@ -97,9 +179,13 @@ Show an in-app notification.
 notify("Hello", "World");
 ```
 
+Also available: `showAlert(message, title?)`, `showError(message)`, `showConfirm(message, title?)`.
+
 ---
 
 ### `commands`
+
+> Foundation API. Requires `commandsRegister`.
 
 Register commands that appear in the command palette (Ctrl/Cmd+K).
 
@@ -128,7 +214,11 @@ commands.register_command("hello", "Say hello", "cmd_hello");
 
 ### `hooks`
 
+> Foundation API. Requires `eventsSubscribe`.
+
 Intercept and modify content before it reaches the server. Each hook receives an object and must return a modified object, or `null` to cancel the operation.
+
+Default hook names (Island): `before_post_create`, `before_message_send`, `before_post_display`, `before_message_display`. Hosts can pass a custom list to `HooksApi(hookNames: ...)`.
 
 #### `hooks.before_post_create(handler)`
 
@@ -177,9 +267,13 @@ function blockSpam(data) {
 hooks.before_message_send(blockSpam);
 ```
 
+From Dart, run a chain with `PluginHooks().runBeforePostCreate(...)` / `runHook(name, data)`.
+
 ---
 
 ### `events`
+
+> Foundation API. Requires `eventsSubscribe`. Island forwards app bus events via `PluginEventBridge`.
 
 Subscribe to app events.
 
@@ -207,7 +301,134 @@ events.subscribe("message.received", "onNewMessage");
 
 ---
 
+### `ws` (WebSocket)
+
+> Host API (Island). Backed by the app's authenticated [WebSocketService]
+> (`lib/core/websocket.dart`). Plugins share the same connection as the rest of
+> the app — they do **not** open a separate socket.
+
+| Permission | Methods |
+|------------|---------|
+| `websocketSubscribe` | `ws.subscribe`, `ws.unsubscribe`, `ws.is_connected`, optional `on_ws_status` |
+| `websocketSend` | `ws.send` |
+
+Declare the permissions you need in `manifest.json`:
+
+```json
+{
+  "permissions": ["websocketSubscribe", "websocketSend", "notify"]
+}
+```
+
+#### Packet shape
+
+Packets match the app `WebSocketPacket` model:
+
+```json
+{
+  "type": "messages.new",
+  "data": { "...": "..." },
+  "endpoint": null,
+  "error_message": null
+}
+```
+
+Handlers receive a JS object with keys `type`, `data`, `endpoint`, and
+`error_message`.
+
+#### `ws.subscribe(handlerName)` / `ws.subscribe(type, handlerName)`
+
+Register a handler for incoming packets.
+
+- One argument: receive **all** packets.
+- Two arguments: only packets whose `type` equals the filter string.
+
+```javascript
+function onAnyPacket(packet) {
+  // packet.type, packet.data, packet.endpoint, packet.error_message
+  if (packet.type === "messages.new") {
+    notify("Realtime", "New chat activity");
+  }
+}
+
+function onTyping(packet) {
+  // only messages.typing (example type)
+}
+
+ws.subscribe("onAnyPacket");
+ws.subscribe("messages.typing", "onTyping");
+```
+
+Re-registering the same handler name for a plugin replaces the previous filter.
+
+#### `ws.unsubscribe(handlerName?)`
+
+Remove a handler (or all handlers for this plugin if `handlerName` is omitted).
+
+```javascript
+ws.unsubscribe("onTyping");
+ws.unsubscribe(); // clear all for this plugin
+```
+
+#### `ws.send(type, data?, endpoint?)`
+
+> Requires `websocketSend`.
+
+Send a packet on the shared app WebSocket as the signed-in user.
+
+Returns `true` if the host accepted the send (socket connected), otherwise
+`false`.
+
+**Reserved types** (blocked for plugins): `ping`, `pong`, `error`, `error.dupe`.
+
+```javascript
+// Example: emit a custom app packet (type must be understood by the server)
+ws.send("plugins.ping", { plugin_id: "com.example.demo" });
+
+// Optional endpoint field (when the protocol uses it)
+ws.send("some.action", { id: "abc" }, "sphere");
+```
+
+#### `ws.is_connected()`
+
+> Requires `websocketSubscribe`.
+
+Returns whether the app WebSocket channel is currently open.
+
+```javascript
+if (ws.is_connected()) {
+  ws.send("plugins.hello", {});
+}
+```
+
+#### Optional: `on_ws_status(status)`
+
+If a global function `on_ws_status` is defined, the host calls it when
+connection state changes:
+
+```javascript
+function on_ws_status(info) {
+  // info.status: connected | connecting | disconnected |
+  //              internet_changed | server_down | duplicate_device | error
+  // info.message: present when status === "error"
+  notify("WebSocket", info.status);
+}
+```
+
+#### Notes
+
+- The host attaches `PluginWebsocketApi` to the live `WebSocketService` during
+  app bootstrap (`AppWrapper`). Sending before attach returns `false`.
+- Prefer high-level `events.*` / `hooks.*` when they cover your use case;
+  use `ws` only when you need raw realtime packets.
+- Sending arbitrary packets can affect other clients and server state — request
+  only the permissions you need and validate `type` carefully.
+
+---
+
 ### `ui`
+
+> Foundation API (descriptors). Requires `uiRender`. Flutter rendering is host-side (`PluginUiRenderer`).
 
 Build UI descriptors that Flutter renders as widgets. All functions return a JSON string describing a widget.
 
@@ -259,9 +480,259 @@ ui.section("My Section", [ui.text("Line 1"), ui.text("Line 2")]);
 
 A horizontal divider line.
 
+#### Layout and page elements
+
+The UI API also supports `ui.page(title, child)`, `ui.row(children)`,
+`ui.column(children)`, `ui.spacing(size)`, `ui.icon(name, size, style?)`,
+`ui.link(label, url)`, `ui.input(label, hint, callback)`,
+`ui.cloud_file(file_id, fit)`, `ui.image(url, fit)`,
+`ui.audio(url, filename, autoplay)`, and `ui.video(url, aspect_ratio, autoplay)`.
+Cloud files use the app's authenticated Drive client and are rendered through
+the same media-aware surface used by the Drive UI. A page returned
+from a command opens as a separate full-screen plugin page. Input callbacks
+receive the submitted text as their first argument after the callback name.
+
+`ui.icon(name, size, style?, font?)` resolves names as follows:
+
+- **Material Symbols** (default): a **curated const map** of `Symbols.*` icons
+  (tree-shake friendly — no dynamic `IconData`). Common names like
+  `dashboard`, `chat`, `settings`, `notifications`, … Optional style suffixes
+  (`dashboard_rounded`) when that variant is in the map.
+- **Plugin font** when `font` is set (after `icons.register_font`), or via
+  shorthand `fontId:iconName` (e.g. `brand:logo`). Custom fonts render via
+  `Text` + `FontLoader`, not `IconData`, so release icon tree-shaking still works.
+
+Use `icons.search` / `icons.exists` to discover names in the curated set or a
+registered plugin font.
+
+`ui.plugin_asset(path, kind, fit)` renders a file shipped inside the plugin.
+The path is always relative to the plugin folder and is validated by the host;
+path traversal is rejected. `kind` may be `image`, `audio`, `video`, or
+`file`; when omitted it is inferred from the extension.
+
+```javascript
+function showBranding() {
+  return ui.page("Branding", ui.column([
+    ui.plugin_asset("assets/logo.png", "image", "contain"),
+    ui.plugin_asset("assets/intro.mp3", "audio"),
+    ui.plugin_asset("assets/readme.txt", "file"),
+  ]));
+}
+```
+
+```javascript
+function search(value) {
+  return ui.page("Search", ui.column([
+    ui.text("You searched for: " + value),
+    ui.link("Open documentation", "https://example.com/docs"),
+  ]));
+}
+
+function openSearch() {
+  return ui.page("Search", ui.column([
+    ui.input("Query", "Type and press Enter", "search"),
+    ui.spacing(12),
+    ui.icon("dashboard", 28),
+  ]));
+}
+
+commands.register_command("search", "Open plugin search", "openSearch");
+```
+
+#### `ui.register_dashboard_item(id, title, handler, icon)`
+
+> Host API (Island `DashboardApi`). Requires `uiRender`.
+
+Register a configurable dashboard item. The handler is called whenever the
+item is displayed and must return a `ui.*` descriptor. Registered items appear
+in Dashboard → Customize on both narrow and expanded layouts. `id` only needs
+to be unique within the plugin; the app namespaces it by plugin ID.
+
+```javascript
+function buildStatus() {
+  return ui.card(
+    "Build status",
+    "All systems are ready.",
+    [ui.button("Refresh", "buildStatus")],
+  );
+}
+
+ui.register_dashboard_item(
+  "status",
+  "Build status",
+  "buildStatus",
+  "dashboard",
+);
+```
+
+Dashboard callbacks run in the same plugin sandbox. Return another UI
+descriptor from an action callback to replace the visible item.
+
+---
+
+### `icons`
+
+> Host API (Island). Always available.
+
+Two sources:
+
+1. **Material Symbols** — curated **const** `Symbols.*` map (release tree-shake
+   safe; not the full 4k dynamic library)  
+2. **Plugin-owned icon fonts** — TTF/OTF + name→codepoint map under the plugin
+   folder (rendered without `IconData`)
+
+Custom fonts are sandboxed to the calling plugin (paths cannot escape the
+plugin directory).
+
+#### Material Symbols
+
+##### `icons.exists(name, font?)`
+
+```javascript
+if (icons.exists("dashboard")) {
+  return ui.icon("dashboard", 28);
+}
+```
+
+##### `icons.lookup(name, style?, font?)`
+
+Returns `{name, style, codePoint, found}` (Material) or
+`{name, font, pluginId, codePoint, fontFamily, loaded, found}` (custom).
+
+```javascript
+var meta = icons.lookup("chat_bubble", "rounded");
+```
+
+##### `icons.search(query, limit?, font?)`
+
+```javascript
+var hits = icons.search("notif", 10);
+// ["notifications", "notification_add", ...]
+```
+
+##### `icons.count(font?)`
+
+Without `font`, total Material map entries. With `font`, glyph count of that
+registered plugin font.
+
+#### Plugin icon fonts
+
+Ship a font and a glyph map inside the plugin:
+
+```
+my_plugin/
+  manifest.json
+  main.js
+  assets/
+    fonts/
+      MyIcons.ttf
+      my_icons.json    # optional external map
+```
+
+Glyph map JSON (names → code points as numbers or hex strings):
+
+```json
+{
+  "logo": 57345,
+  "badge": "0xe002",
+  "star": 0xe003
+}
+```
+
+##### `icons.register_font(id, fontPath, glyphs)`
+
+`glyphs` may be an inline object **or** a relative path to a JSON asset.
+Font path must be `.ttf` / `.otf` / `.ttc` under the plugin folder.
+
+```javascript
+function on_load() {
+  var result = icons.register_font(
+    "brand",
+    "assets/fonts/MyIcons.ttf",
+    {
+      logo: 0xe001,
+      badge: 0xe002,
+    }
+  );
+  // or: icons.register_font("brand", "assets/fonts/MyIcons.ttf", "assets/fonts/my_icons.json");
+  if (!result.ok) {
+    showError(result.error);
+    return;
+  }
+}
+
+function showBrand() {
+  // Explicit font argument
+  return ui.icon("logo", 32, null, "brand");
+  // Or "font:name" shorthand (also works for command/dashboard icon strings)
+  // return ui.icon("brand:logo", 32);
+}
+
+commands.register_command("brand", "Show brand icon", "showBrand", "brand:logo");
+```
+
+##### `icons.fonts()`
+
+Lists fonts registered by **this** plugin:
+
+```javascript
+// [{ id, fontFamily, glyphCount, loaded, error }]
+icons.fonts();
+```
+
+Fonts are cleared automatically when the plugin unloads.
+
+---
+
+### `internet`
+
+> Host API (Island). Requires `networkInternet`.
+
+Grants a plugin outbound HTTP(S) access. It does not include cookies, app
+credentials, or the user's Solar Network token.
+
+#### `internet.request(method, url, options, callback)`
+
+Requests run asynchronously. `callback` is the name of a function that
+receives `{ok, status, data}` on completion, or `{ok: false, error}` if the
+request could not be made. Request headers cannot override `Authorization`,
+`Cookie`, or `Host`.
+
+```javascript
+function onStatus(response) {
+  if (response.ok) notify("Status", "Request completed");
+}
+
+internet.request("GET", "https://example.com/status", null, "onStatus");
+```
+
+### `solar`
+
+> Host API (Island). Requires `solarNetworkApi`.
+
+Grants full access to the currently configured Solar Network API. Requests must
+use a relative API path; the host app attaches the current user token itself and
+never exposes it to JavaScript. This permission is separate from
+`networkInternet`.
+
+#### `solar.request(method, path, options, callback)`
+
+Uses the same asynchronous callback shape as `internet.request`.
+
+```javascript
+function onProfile(response) {
+  if (!response.ok) return;
+  notify("Solar Network", "Authenticated request completed");
+}
+
+solar.request("GET", "/sphere/accounts/me", null, "onProfile");
+```
+
 ---
 
 ### `tasks`
+
+> Foundation API. Requires `tasksSchedule`.
 
 Schedule background tasks that run periodically.
 
@@ -401,11 +872,29 @@ function on_load() {
 
 Use the **Plugin Editor** (Settings → Plugins → Plugin Editor) to write and test code inline. Errors are shown in the output panel below the editor.
 
-Check the app's log viewer (Cmd/Ctrl+K → "Log Viewer") for plugin-related log messages prefixed with `[PluginManager]`, `[JsBridge]`, or the plugin's logger name.
+Check the app's log viewer (Cmd/Ctrl+K → "Log Viewer") for plugin-related log messages prefixed with `[PluginManager]`, `[JsBridge]`, `[PluginController]`, or the plugin's logger name.
 
 ## Limitations
 
 - Runs in a sandboxed JavaScript runtime (QuickJS / JavascriptCore)
-- No filesystem or network access (fully sandboxed)
+- No filesystem access from plugins; network only with explicit permissions
 - No `import` of external modules
 - Maximum of 16 simultaneous runtimes
+- `networkInternet` and `solarNetworkApi` are powerful opt-in permissions;
+  review plugins requesting them before installation.
+- Plugins whose startup load is interrupted or fails are disabled on the next
+  launch. Re-enable them manually in Settings → Plugins after reviewing the
+  plugin or its error message.
+- Web builds compile, but JS execution is a no-op stub (`flutter_js` needs FFI).
+- **Material Symbols by name:** only a curated const set is available (so
+  release builds can tree-shake icon fonts). For full custom sets, ship a
+  plugin icon font via `icons.register_font` instead of relying on dynamic
+  Material lookup / `--no-tree-shake-icons`.
+
+## Reusing the foundation in another app
+
+1. Depend on `island_plugin_foundation` (path or published package).
+2. Register the generic APIs you need (`HooksApi`, `CommandsApi`, …).
+3. Implement host-only `PluginApi`s for your product (auth’d API client, UI chrome, domain events).
+4. Drive lifecycle through `PluginController` (or `PluginManager` for non-UI code).
+5. Optionally forward your own event bus into `PluginManager.fireEvent(...)`.

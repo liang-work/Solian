@@ -4,13 +4,13 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_hooks/flutter_hooks.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
-import 'package:island/accounts/account_pod.dart';
 import 'package:island/chat/pods/call.dart';
 import 'package:island/chat/pods/call_participants.dart';
 import 'package:island/chat/pods/native_call_bridge.dart';
 import 'package:island/chat/widgets/call_overlay.dart';
 import 'package:island/chat/widgets/call_window.dart';
 import 'package:island/chat/widgets/pending_join_sheet.dart';
+import 'package:island/core/config.dart';
 import 'package:island/core/network.dart';
 import 'package:island/shared/widgets/alert.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
@@ -98,39 +98,38 @@ class AudioCallButton extends HookConsumerWidget {
     );
     final callState = ref.watch(callProvider);
     final callNotifier = ref.read(callProvider.notifier);
-    final currentUserId = ref.watch(userInfoProvider).value?.id;
     final nativeBridge = ref.watch(nativeCallBridgeProvider);
     final isLoading = useState(false);
     final apiClient = ref.watch(apiClientProvider);
+    final useSeparateCallWindow = ref.watch(
+      desktopUseSeparateCallWindowProvider,
+    );
 
-    // ponytail: In-app calls always use Flutter. CallKit is only for system-level (push/lock screen).
-    // Also check if a CallKit call is active for this room.
+    // ponytail: UI state still comes from Flutter call state.
+    // Also check if CallKit already owns this room (lock-screen pickup / phone log path).
     final hasNativeAcceptedCall =
         nativeBridge.callKitAcceptedRoomId == room.id &&
         (nativeBridge.isConnected || nativeBridge.isAcceptedPending);
     final isInCall = callState.isConnected || hasNativeAcceptedCall;
 
-    String callKitDisplayName() {
-      if (room.name?.trim().isNotEmpty == true) return room.name!.trim();
-      final other = (room.members ?? const <SnChatMember>[])
-          .where((m) => m.accountId != currentUserId)
-          .firstOrNull;
-      return other?.nick?.trim().isNotEmpty == true
-          ? other!.nick!.trim()
-          : other?.account.nick.trim().isNotEmpty == true
-          ? other!.account.nick.trim()
-          : 'Voice Call';
-    }
-
-    Future<void> openCallScreen({bool cameraEnabled = false}) async {
+    Future<void> openCallScreen({
+      bool cameraEnabled = false,
+      bool microphoneEnabled = true,
+    }) async {
       if (!kIsWeb &&
+          useSeparateCallWindow &&
           (Platform.isMacOS || Platform.isLinux || Platform.isWindows)) {
-        await createCallWindow(room, cameraEnabled: cameraEnabled);
+        await createCallWindow(
+          room,
+          cameraEnabled: cameraEnabled,
+          microphoneEnabled: microphoneEnabled,
+        );
       } else {
         await pushCallScreenOnce(
           ref,
           room,
           cameraEnabled: cameraEnabled,
+          microphoneEnabled: microphoneEnabled,
         );
       }
     }
@@ -139,32 +138,35 @@ class AudioCallButton extends HookConsumerWidget {
       isLoading.value = true;
       try {
         // Show pending join sheet
-        final result = await showModalBottomSheet<({bool cameraEnabled})>(
-          context: context,
-          useSafeArea: true,
-          isScrollControlled: true,
-          builder: (context) => PendingJoinSheet(
-            room: room,
-            onJoin: (settings) => Navigator.pop(context, settings),
-          ),
-        );
+        final result =
+            await showModalBottomSheet<
+              ({bool cameraEnabled, bool microphoneEnabled})
+            >(
+              context: context,
+              useSafeArea: true,
+              isScrollControlled: true,
+              builder: (context) => PendingJoinSheet(
+                room: room,
+                onJoin: (settings) => Navigator.pop(context, settings),
+              ),
+            );
 
         if (result == null) {
           isLoading.value = false;
           return;
         }
 
-        if (isNativeCallAvailable) {
-          await ref.read(nativeCallBridgeProvider.notifier).startOutgoingCall(
-            roomId: room.id,
-            callerName: callKitDisplayName(),
-            hasVideo: result.cameraEnabled,
-          );
-          await ref.read(nativeCallBridgeProvider.notifier).markOutgoingConnecting();
+        if (!kIsWeb && Platform.isIOS) {
+          await ref
+              .read(nativeCallBridgeProvider.notifier)
+              .prepareInAppLiveKitAudioSession();
         }
 
         // Open call screen with camera setting
-        await openCallScreen(cameraEnabled: result.cameraEnabled);
+        await openCallScreen(
+          cameraEnabled: result.cameraEnabled,
+          microphoneEnabled: result.microphoneEnabled,
+        );
       } catch (e) {
         showErrorAlert(e);
       } finally {
@@ -228,35 +230,34 @@ class AudioCallButton extends HookConsumerWidget {
           isLoading.value = true;
           try {
             // Show pending join sheet
-            final result = await showModalBottomSheet<({bool cameraEnabled})>(
-              context: context,
-              useSafeArea: true,
-              isScrollControlled: true,
-              builder: (context) => PendingJoinSheet(
-                room: room,
-                onJoin: (settings) => Navigator.pop(context, settings),
-              ),
-            );
+            final result =
+                await showModalBottomSheet<
+                  ({bool cameraEnabled, bool microphoneEnabled})
+                >(
+                  context: context,
+                  useSafeArea: true,
+                  isScrollControlled: true,
+                  builder: (context) => PendingJoinSheet(
+                    room: room,
+                    onJoin: (settings) => Navigator.pop(context, settings),
+                  ),
+                );
 
             if (result == null) {
               isLoading.value = false;
               return;
             }
 
-            if (isNativeCallAvailable) {
+            if (!kIsWeb && Platform.isIOS) {
               await ref
                   .read(nativeCallBridgeProvider.notifier)
-                  .startOutgoingCall(
-                    roomId: room.id,
-                    callerName: callKitDisplayName(),
-                    hasVideo: result.cameraEnabled,
-                  );
-              await ref
-                  .read(nativeCallBridgeProvider.notifier)
-                  .markOutgoingConnecting();
+                  .prepareInAppLiveKitAudioSession();
             }
 
-            await openCallScreen(cameraEnabled: result.cameraEnabled);
+            await openCallScreen(
+              cameraEnabled: result.cameraEnabled,
+              microphoneEnabled: result.microphoneEnabled,
+            );
           } catch (e) {
             showErrorAlert(e);
           } finally {

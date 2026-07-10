@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_hooks/flutter_hooks.dart';
 import 'package:gap/gap.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
+import 'package:island/core/database.dart';
 import 'package:island/creators/screens/publishers_form.dart';
 import 'package:island/posts/screens/post_detail.dart';
 import 'package:island/posts/compose.dart';
@@ -15,6 +16,7 @@ import 'package:island/posts/widgets/compose/compose_attachments.dart';
 import 'package:island/posts/widgets/compose/compose_form_fields.dart';
 import 'package:island/posts/widgets/compose/compose_settings_sheet.dart';
 import 'package:island/posts/widgets/compose/compose_shared.dart';
+import 'package:island/posts/widgets/compose/compose_state_utils.dart';
 import 'package:island/posts/widgets/compose/compose_toolbar.dart';
 import 'package:island/posts/widgets/compose/publishers_modal.dart';
 import 'package:island/shared/widgets/app_scaffold.dart' hide PageBackButton;
@@ -155,6 +157,7 @@ class ArticleComposeScreen extends HookConsumerWidget {
     final colorScheme = theme.colorScheme;
 
     final publishers = ref.watch(publishersManagedProvider);
+    final database = ref.read(databaseProvider);
     final state = useMemoized(
       () => ComposeLogic.createState(
         originalPost: originalPost,
@@ -170,7 +173,7 @@ class ArticleComposeScreen extends HookConsumerWidget {
       if (originalPost == null) {
         // Only auto-save for new articles, not edits
         autoSaveTimer = Timer.periodic(const Duration(seconds: 3), (_) {
-          ComposeLogic.saveDraftWithoutUpload(ref, state);
+          ComposeLogic.saveDraftWithoutUploadWithDatabase(database, state);
         });
       }
       return () {
@@ -178,12 +181,12 @@ class ArticleComposeScreen extends HookConsumerWidget {
         state.stopAutoSave();
         // Save final draft before disposing
         if (originalPost == null) {
-          ComposeLogic.saveDraftWithoutUpload(ref, state);
+          ComposeLogic.saveDraftWithoutUploadWithDatabase(database, state);
         }
         ComposeLogic.dispose(state);
         autoSaveTimer?.cancel();
       };
-    }, [state]);
+    }, [database, state]);
 
     final showPreview = useState(false);
     final showSidebar = useState(false);
@@ -211,6 +214,9 @@ class ArticleComposeScreen extends HookConsumerWidget {
       }
       return null;
     }, [initialState]);
+
+    final stateNotifier = ComposeStateUtils.useStateNotifier(state);
+    useListenable(stateNotifier);
 
     final restorePrompted = useState(false);
 
@@ -338,7 +344,7 @@ class ArticleComposeScreen extends HookConsumerWidget {
     return PopScope(
       onPopInvoked: (_) {
         if (originalPost == null) {
-          ComposeLogic.saveDraftWithoutUpload(ref, state);
+          ComposeLogic.saveDraftWithoutUploadWithDatabase(database, state);
         }
       },
       child: AppScaffold(

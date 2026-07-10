@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io' show Platform;
 import 'package:desktop_multi_window/desktop_multi_window.dart';
@@ -51,23 +52,27 @@ class CallWindowArgs {
   final String roomId;
   final String? roomName;
   final bool cameraEnabled;
+  final bool microphoneEnabled;
 
   const CallWindowArgs({
     required this.roomId,
     this.roomName,
     this.cameraEnabled = false,
+    this.microphoneEnabled = true,
   });
 
   factory CallWindowArgs.fromJson(Map<String, dynamic> json) => CallWindowArgs(
     roomId: json['roomId'] as String,
     roomName: json['roomName'] as String?,
     cameraEnabled: json['cameraEnabled'] as bool? ?? false,
+    microphoneEnabled: json['microphoneEnabled'] as bool? ?? true,
   );
 
   Map<String, dynamic> toJson() => {
     'roomId': roomId,
     'roomName': roomName,
     'cameraEnabled': cameraEnabled,
+    'microphoneEnabled': microphoneEnabled,
   };
   String encode() => jsonEncode(toJson());
   static CallWindowArgs decode(String raw) =>
@@ -107,11 +112,13 @@ CallWindowArgs? parseCallWindowArgs(String raw) {
 Future<WindowController> createCallWindow(
   SnChatRoom room, {
   bool cameraEnabled = false,
+  bool microphoneEnabled = true,
 }) async {
   final args = CallWindowArgs(
     roomId: room.id,
     roomName: room.name,
     cameraEnabled: cameraEnabled,
+    microphoneEnabled: microphoneEnabled,
   );
   final controller = await WindowController.create(
     WindowConfiguration(hiddenAtLaunch: true, arguments: args.encode()),
@@ -202,6 +209,7 @@ class _CallWindowHome extends HookConsumerWidget {
     useEffect(() {
       () async {
         try {
+          await windowManager.setAlwaysOnTop(true);
           final resp = await apiClient.get('/messager/chat/${args.roomId}');
           var room = SnChatRoom.fromJson(resp.data);
           // Fetch members if not included
@@ -218,14 +226,18 @@ class _CallWindowHome extends HookConsumerWidget {
             } catch (_) {}
           }
           chatRoom.value = room;
-          await callNotifier.joinRoom(room, cameraEnabled: args.cameraEnabled);
+          await callNotifier.joinRoom(
+            room,
+            cameraEnabled: args.cameraEnabled,
+            microphoneEnabled: args.microphoneEnabled,
+          );
         } catch (e) {
           Logger.root.severe('[CallWindow] Failed to join: $e');
           joinError.value = e.toString();
         }
       }();
 
-      windowManager.setPreventClose(true);
+      unawaited(windowManager.setPreventClose(true));
       final listener = _CallWindowListener(
         notifier: callNotifier,
         roomId: args.roomId,
@@ -364,7 +376,18 @@ class _CallBody extends HookConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final callState = ref.watch(callProvider);
+    ref.watch(callProvider.select((state) => state.participantSyncVersion));
     final controlsVisible = useState(true);
+    final mediaQuery = MediaQuery.of(context);
+    final topOverlayInset = controlsVisible.value ? 64.0 : 0.0;
+    final bottomOverlayInset = controlsVisible.value
+        ? mediaQuery.padding.bottom + 104
+        : 0.0;
+    final toolParticipants = ref
+        .read(callProvider.notifier)
+        .participants
+        .where(isToolCallParticipant)
+        .toList();
 
     final statusText = callState.isConnected
         ? formatDuration(callState.duration)
@@ -395,11 +418,19 @@ class _CallBody extends HookConsumerWidget {
             // Content
             SafeArea(
               bottom: false,
-              child: Column(
-                children: [
-                  const SizedBox(height: 6),
-                  const Expanded(child: CallContent()),
-                ],
+              child: AnimatedPadding(
+                duration: const Duration(milliseconds: 180),
+                curve: Curves.easeOutCubic,
+                padding: EdgeInsets.only(
+                  top: topOverlayInset,
+                  bottom: bottomOverlayInset,
+                ),
+                child: Column(
+                  children: [
+                    const SizedBox(height: 6),
+                    const Expanded(child: CallContent()),
+                  ],
+                ),
               ),
             ),
             // In-call info overlay (room name + actions)
@@ -467,6 +498,27 @@ class _CallBody extends HookConsumerWidget {
                         minHeight: 36,
                       ),
                     ),
+                    if (toolParticipants.isNotEmpty)
+                      IconButton(
+                        onPressed: () => showToolParticipantsSheet(
+                          context,
+                          toolParticipants,
+                        ),
+                        tooltip: 'toolsInCall'.tr(),
+                        icon: Badge.count(
+                          count: toolParticipants.length,
+                          child: const Icon(
+                            Symbols.terminal,
+                            color: Colors.white,
+                            size: 20,
+                          ),
+                        ),
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(
+                          minWidth: 36,
+                          minHeight: 36,
+                        ),
+                      ),
                     IconButton(
                       onPressed: () => _doInvite(context, ref, chatRoom.value),
                       tooltip: 'inviteToCall'.tr(),
@@ -564,9 +616,8 @@ class _CallBody extends HookConsumerWidget {
       builder: (ctx) => SheetScaffold(
         titleText: 'inviteToCall'.tr(),
         heightFactor: 0.6,
-        child: ListView.separated(
+        child: ListView.builder(
           itemCount: candidates.length,
-          separatorBuilder: (_, _) => const Divider(height: 1),
           itemBuilder: (_, i) {
             final m = candidates[i];
             return ListTile(

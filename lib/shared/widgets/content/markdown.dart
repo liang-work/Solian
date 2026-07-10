@@ -2,6 +2,7 @@ import 'package:auto_route/auto_route.dart';
 import 'package:collection/collection.dart';
 import 'package:dismissible_page/dismissible_page.dart';
 import 'package:easy_localization/easy_localization.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_highlight/themes/a11y-dark.dart';
@@ -13,6 +14,7 @@ import 'package:island/accounts/screens/profile.dart';
 import 'package:island/core/network.dart';
 import 'package:island/core/database.dart';
 import 'package:island/shared/widgets/content/markdown_remote_image.dart';
+import 'package:island/posts/screens/post_detail.dart';
 import 'package:island/posts/screens/publisher_profile.dart';
 import 'package:island/shared/widgets/alert.dart';
 import 'package:island/drive/widgets/cloud_files.dart';
@@ -137,8 +139,16 @@ class MarkdownTextContent extends HookConsumerWidget {
         : MarkdownConfig.defaultConfig;
 
     final onMentionTap = useCallback((String type, String id) {
+      if (type == 'accounts') {
+        showAccountProfileAttentionModal(id);
+        return;
+      }
+      if (type == 'publishers') {
+        showPublisherProfileAttentionModal(id);
+        return;
+      }
       final fullPath = '/$type/$id';
-      context.router.pushPath(fullPath);
+      context.router.navigatePath(fullPath);
     }, [context]);
 
     final mentionGenerator = MentionChipGenerator(
@@ -200,9 +210,12 @@ class MarkdownTextContent extends HookConsumerWidget {
             onTap: (href) async {
               final url = Uri.tryParse(href);
               if (url != null) {
+                if (openPostDetailAttentionModalForUri(url)) {
+                  return;
+                }
                 if (url.scheme == 'solian') {
                   final fullPath = ['/', url.host, url.path].join('');
-                  context.router.pushPath(fullPath);
+                  context.router.navigatePath(fullPath);
                   return;
                 }
                 await openExternalLink(url, ref);
@@ -661,75 +674,74 @@ class SpoilerSpanNode extends SpanNode {
 
   @override
   InlineSpan build() {
-    return WidgetSpan(
-      alignment: PlaceholderAlignment.middle,
-      child: Builder(
-        builder: (context) {
-          final baseStyle = DefaultTextStyle.of(context).style;
-          final spoilerBg = Colors.black;
-          final spoilerFg = Colors.white;
-          final spoilerSize = _measureInlineTextSize(context, text, baseStyle);
+    final recognizer = TapGestureRecognizer()..onTap = onToggle;
 
-          return InkWell(
-            onTap: onToggle,
-            child: AnimatedSwitcher(
-              duration: const Duration(milliseconds: 180),
-              switchInCurve: Curves.easeOut,
-              switchOutCurve: Curves.easeIn,
-              transitionBuilder: (child, animation) => FadeTransition(
-                opacity: animation,
-                child: SlideTransition(
-                  position: Tween<Offset>(
-                    begin: const Offset(0, 0.08),
-                    end: Offset.zero,
-                  ).animate(animation),
-                  child: child,
-                ),
-              ),
-              child: revealed
-                  ? Text(text, key: const ValueKey('revealed'))
-                  : SizedBox(
-                      width: spoilerSize.width,
-                      height: spoilerSize.height,
-                      child: ColoredBox(
-                        color: spoilerBg,
-                        key: const ValueKey('hidden'),
-                        child: Center(
-                          child: FittedBox(
-                            fit: BoxFit.scaleDown,
-                            child: Text(
-                              'spoiler'.tr(),
-                              style: baseStyle.copyWith(
-                                color: spoilerFg,
-                                fontWeight: FontWeight.w600,
-                                fontSize: (baseStyle.fontSize ?? 14) * 0.82,
-                                letterSpacing: 0.2,
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-            ),
-          );
-        },
-      ),
-    );
+    return TextSpan(children: _buildSpoilerSegments(recognizer));
   }
-}
 
-Size _measureInlineTextSize(
-  BuildContext context,
-  String text,
-  TextStyle style,
-) {
-  final painter = TextPainter(
-    text: TextSpan(text: text, style: style),
-    textDirection: Directionality.of(context),
-    textScaler: MediaQuery.textScalerOf(context),
-    maxLines: 1,
-  )..layout();
-  return painter.size;
+  List<InlineSpan> _buildSpoilerSegments(TapGestureRecognizer recognizer) {
+    final parts = text.split(RegExp(r'(\s+)'));
+
+    return parts.where((part) => part.isNotEmpty).map((part) {
+      if (part.trim().isEmpty) {
+        return TextSpan(
+          text: part,
+          recognizer: recognizer,
+          style: revealed
+              ? null
+              : const TextStyle(
+                  color: Colors.transparent,
+                  backgroundColor: Colors.black,
+                ),
+        );
+      }
+
+      return WidgetSpan(
+        alignment: PlaceholderAlignment.baseline,
+        baseline: TextBaseline.alphabetic,
+        child: Builder(
+          builder: (context) {
+            final baseStyle = DefaultTextStyle.of(context).style;
+            final hiddenStyle = baseStyle.copyWith(
+              color: Colors.transparent,
+              backgroundColor: Colors.black,
+            );
+
+            return GestureDetector(
+              onTap: onToggle,
+              behavior: HitTestBehavior.opaque,
+              child: AnimatedSwitcher(
+                duration: const Duration(milliseconds: 180),
+                switchInCurve: Curves.easeOut,
+                switchOutCurve: Curves.easeIn,
+                transitionBuilder: (child, animation) => FadeTransition(
+                  opacity: animation,
+                  child: SlideTransition(
+                    position: Tween<Offset>(
+                      begin: const Offset(0, 0.08),
+                      end: Offset.zero,
+                    ).animate(animation),
+                    child: child,
+                  ),
+                ),
+                child: revealed
+                    ? Text(
+                        part,
+                        key: ValueKey('revealed-$part'),
+                        style: baseStyle,
+                      )
+                    : Text(
+                        part,
+                        key: ValueKey('hidden-$part'),
+                        style: hiddenStyle,
+                      ),
+              ),
+            );
+          },
+        ),
+      );
+    }).toList();
+  }
 }
 
 class StickerGenerator extends SpanNodeGeneratorWithTag {

@@ -2,50 +2,87 @@ import 'dart:async';
 
 import 'package:dio/dio.dart';
 import 'package:easy_localization/easy_localization.dart';
-import 'package:flutter/foundation.dart';
 import 'package:auto_route/auto_route.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_hooks/flutter_hooks.dart';
 import 'package:gap/gap.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 import 'package:island/accounts/widgets/account/account_name.dart';
-import 'package:island/accounts/widgets/account/badge.dart';
-import 'package:island/accounts/widgets/account/fortune_graph.dart';
-import 'package:island/accounts/widgets/account/leveling_progress.dart';
 import 'package:island/accounts/widgets/account/status.dart';
-import 'package:island/accounts/widgets/account/activity_presence.dart';
+import 'package:island/accounts/widgets/account/board.dart';
 import 'package:island/accounts/screens/profile_timeline.dart';
 import 'package:island/developers/models/developer.dart';
-import 'package:island/accounts/event_calendar.dart';
-import 'package:island/core/network.dart';
 import 'package:island/accounts/account_pod.dart';
+import 'package:island/core/network.dart';
 import 'package:island/core/services/responsive.dart';
-import 'package:island/core/utils/text.dart';
-import 'package:island/core/services/time.dart';
-import 'package:island/core/services/timezone/native.dart';
 import 'package:island/route.gr.dart';
 import 'package:island/shared/widgets/alert.dart';
+import 'package:island/shared/widgets/attention_modal.dart';
 import 'package:island/shared/widgets/app_scaffold.dart' hide PageBackButton;
 import 'package:island/drive/widgets/cloud_files.dart';
 import 'package:island/shared/widgets/content/markdown.dart';
+import 'package:island/shared/widgets/extended_refresh_indicator.dart';
+import 'package:island/shared/widgets/layouts/attention_modal_scaffold.dart';
 import 'package:island/tickets/widgets/ticket_fire.dart';
 import 'package:material_symbols_icons/symbols.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:styled_widget/styled_widget.dart';
-import 'package:url_launcher/url_launcher_string.dart';
 import 'package:solar_network_sdk/solar_network_sdk.dart';
 import 'package:island/accounts/screens/punishment_user_sheet.dart';
 
 part 'profile.g.dart';
+
+Future<void> showAccountProfileAttentionModal(String name) async {
+  showAttentionModal(
+    id: 'account-profile:$name',
+    replaceIfExists: true,
+    barrierDismissible: true,
+    builder: (context, dismiss) =>
+        AccountProfileAttentionModal(name: name, onDismiss: dismiss),
+  );
+}
+
+class AccountProfileAttentionModal extends StatelessWidget {
+  final String name;
+  final VoidCallback onDismiss;
+
+  const AccountProfileAttentionModal({
+    super.key,
+    required this.name,
+    required this.onDismiss,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return AttentionModalScaffold(
+      titleText: '@$name',
+      onDismiss: onDismiss,
+      actions: [
+        IconButton(
+          onPressed: () {
+            onDismiss();
+            context.router.push(AccountProfileRoute(name: name));
+          },
+          icon: const Icon(Symbols.open_in_new),
+          tooltip: 'open'.tr(),
+        ),
+      ],
+      child: AccountProfileContent(name: name),
+    );
+  }
+}
 
 class _AccountBasicInfo extends HookWidget {
   final SnAccount data;
   final String uname;
   final AsyncValue<SnDeveloper?> accountDeveloper;
 
-  const _AccountBasicInfo({required this.data, required this.uname, required this.accountDeveloper});
+  const _AccountBasicInfo({
+    required this.data,
+    required this.uname,
+    required this.accountDeveloper,
+  });
 
   String _getFirstLine(String bio) {
     final lines = bio.split('\n');
@@ -67,10 +104,15 @@ class _AccountBasicInfo extends HookWidget {
             clipBehavior: Clip.none,
             children: [
               ClipRRect(
-                borderRadius: const BorderRadius.vertical(top: Radius.circular(12)),
+                borderRadius: const BorderRadius.vertical(
+                  top: Radius.circular(12),
+                ),
                 child: AspectRatio(
                   aspectRatio: 16 / 7,
-                  child: CloudImageWidget(file: data.profile.background, fit: BoxFit.cover),
+                  child: CloudImageWidget(
+                    file: data.profile.background,
+                    fit: BoxFit.cover,
+                  ),
                 ),
               ),
               Positioned(
@@ -79,9 +121,15 @@ class _AccountBasicInfo extends HookWidget {
                 child: Container(
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
-                    border: Border.all(color: theme.colorScheme.surface, width: 3),
+                    border: Border.all(
+                      color: theme.colorScheme.surface,
+                      width: 3,
+                    ),
                   ),
-                  child: ProfilePictureWidget(file: data.profile.picture, radius: 32),
+                  child: ProfilePictureWidget(
+                    file: data.profile.picture,
+                    radius: 32,
+                  ),
                 ),
               ),
             ],
@@ -109,39 +157,64 @@ class _AccountBasicInfo extends HookWidget {
                                   Flexible(
                                     child: AccountName(
                                       account: data,
-                                      style: theme.textTheme.bodyLarge?.copyWith(fontWeight: FontWeight.bold),
+                                      style: theme.textTheme.bodyLarge
+                                          ?.copyWith(
+                                            fontWeight: FontWeight.bold,
+                                          ),
                                     ),
                                   ),
                                   Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 8,
+                                      vertical: 2,
+                                    ),
                                     decoration: BoxDecoration(
-                                      color: theme.colorScheme.surfaceContainerHighest,
+                                      color: theme
+                                          .colorScheme
+                                          .surfaceContainerHighest,
                                       borderRadius: BorderRadius.circular(12),
                                     ),
                                     child: Text(
                                       '@${data.name}',
-                                      style: theme.textTheme.bodySmall?.copyWith(
-                                        color: theme.colorScheme.onSurfaceVariant,
-                                      ),
+                                      style: theme.textTheme.bodySmall
+                                          ?.copyWith(
+                                            color: theme
+                                                .colorScheme
+                                                .onSurfaceVariant,
+                                          ),
                                     ),
                                   ),
                                 ],
                               ),
                               const Gap(4),
-                              AccountStatusWidget(uname: uname, padding: EdgeInsets.zero),
+                              AccountStatusWidget(
+                                uname: uname,
+                                padding: EdgeInsets.zero,
+                              ),
                               if (accountDeveloper.value != null) ...[
                                 const Gap(12),
                                 InkWell(
                                   borderRadius: BorderRadius.circular(12),
                                   onTap: () {
                                     context.router.push(
-                                      PublisherProfileRoute(name: accountDeveloper.value!.publisher!.name),
+                                      PublisherProfileRoute(
+                                        name: accountDeveloper
+                                            .value!
+                                            .publisher!
+                                            .name,
+                                      ),
                                     );
                                   },
                                   child: Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 12,
+                                      vertical: 8,
+                                    ),
                                     decoration: BoxDecoration(
-                                      color: theme.colorScheme.secondaryContainer.withOpacity(0.5),
+                                      color: theme
+                                          .colorScheme
+                                          .secondaryContainer
+                                          .withOpacity(0.5),
                                       borderRadius: BorderRadius.circular(12),
                                     ),
                                     child: Row(
@@ -151,13 +224,25 @@ class _AccountBasicInfo extends HookWidget {
                                         Icon(
                                           Symbols.smart_toy,
                                           size: 18,
-                                          color: theme.colorScheme.onSecondaryContainer,
+                                          color: theme
+                                              .colorScheme
+                                              .onSecondaryContainer,
                                         ),
                                         Text(
-                                          'botAutomatedBy'.tr(args: [accountDeveloper.value!.publisher!.nick]),
-                                          style: theme.textTheme.bodySmall?.copyWith(
-                                            color: theme.colorScheme.onSecondaryContainer,
+                                          'botAutomatedBy'.tr(
+                                            args: [
+                                              accountDeveloper
+                                                  .value!
+                                                  .publisher!
+                                                  .nick,
+                                            ],
                                           ),
+                                          style: theme.textTheme.bodySmall
+                                              ?.copyWith(
+                                                color: theme
+                                                    .colorScheme
+                                                    .onSecondaryContainer,
+                                              ),
                                         ),
                                       ],
                                     ),
@@ -176,9 +261,18 @@ class _AccountBasicInfo extends HookWidget {
                           ),
                           child: IconButton(
                             onPressed: () {
-                              SharePlus.instance.share(ShareParams(uri: Uri.parse('https://solian.app/@${data.name}')));
+                              SharePlus.instance.share(
+                                ShareParams(
+                                  uri: Uri.parse(
+                                    'https://solian.app/@${data.name}',
+                                  ),
+                                ),
+                              );
                             },
-                            icon: Icon(Symbols.share, color: theme.colorScheme.primary),
+                            icon: Icon(
+                              Symbols.share,
+                              color: theme.colorScheme.primary,
+                            ),
                           ),
                         ),
                       ],
@@ -203,7 +297,10 @@ class _AccountBasicInfo extends HookWidget {
                                       content: data.profile.bio,
                                       linesMargin: EdgeInsets.zero,
                                     )
-                                  : Text(_getFirstLine(data.profile.bio), key: const ValueKey('collapsed')),
+                                  : Text(
+                                      _getFirstLine(data.profile.bio),
+                                      key: const ValueKey('collapsed'),
+                                    ),
                             ).alignment(Alignment.centerLeft),
                           ),
                           InkWell(
@@ -211,10 +308,16 @@ class _AccountBasicInfo extends HookWidget {
                               isBioExpanded.value = !isBioExpanded.value;
                             },
                             child: Padding(
-                              padding: const EdgeInsets.symmetric(horizontal: 4),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 4,
+                              ),
                               child: Text(
-                                isBioExpanded.value ? 'collapse'.tr() : 'expand'.tr(),
-                                style: theme.textTheme.labelMedium?.copyWith(color: theme.colorScheme.primary),
+                                isBioExpanded.value
+                                    ? 'collapse'.tr()
+                                    : 'expand'.tr(),
+                                style: theme.textTheme.labelMedium?.copyWith(
+                                  color: theme.colorScheme.primary,
+                                ),
                               ).tr(),
                             ),
                           ),
@@ -223,495 +326,10 @@ class _AccountBasicInfo extends HookWidget {
                     ],
                   ),
                 ],
-                // Links
-                if (data.profile.links.isNotEmpty)
-                  Column(
-                    spacing: 8,
-                    children: data.profile.links
-                        .map((link) => _LinkCard(name: link.name.capitalizeEachWord(), url: link.url))
-                        .toList(),
-                  ).padding(top: 12),
               ],
             ),
           ),
         ],
-      ),
-    );
-  }
-}
-
-class _AccountProfileDetail extends StatelessWidget {
-  final SnAccount data;
-
-  const _AccountProfileDetail({required this.data});
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-
-    return Card(
-      margin: EdgeInsets.zero,
-      child: Padding(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Container(
-                  width: 36,
-                  height: 36,
-                  decoration: BoxDecoration(
-                    color: theme.colorScheme.primary.withOpacity(0.15),
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: Icon(Symbols.badge, size: 18, color: theme.colorScheme.primary),
-                ),
-                const Gap(12),
-                Text('about', style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600)).tr(),
-              ],
-            ),
-            const Gap(12),
-            Wrap(
-              spacing: 12,
-              runSpacing: 12,
-              children: [
-                _DetailChip(
-                  icon: Symbols.calendar_month,
-                  label: 'joinedAt'.tr(args: [data.createdAt.formatCustom('yyyy-MM-dd')]),
-                ),
-                if (data.profile.birthday != null)
-                  _DetailChip(
-                    icon: Symbols.cake,
-                    label:
-                        '${data.profile.birthday!.formatCustom('yyyy-MM-dd')} · ${DateTime.now().difference(data.profile.birthday!).inDays ~/ 365} yrs',
-                  ),
-                if (data.profile.firstName.isNotEmpty ||
-                    data.profile.middleName.isNotEmpty ||
-                    data.profile.lastName.isNotEmpty)
-                  _DetailChip(
-                    icon: Symbols.id_card,
-                    label: [
-                      data.profile.firstName,
-                      data.profile.middleName,
-                      data.profile.lastName,
-                    ].where((s) => s.isNotEmpty).join(' '),
-                  ),
-                _DetailChip(
-                  icon: Symbols.person,
-                  label:
-                      '${data.profile.gender.isEmpty ? 'unspecified'.tr() : data.profile.gender} · ${data.profile.pronouns.isEmpty ? 'unspecified'.tr() : data.profile.pronouns}',
-                ),
-                if (data.profile.location.isNotEmpty)
-                  _DetailChip(icon: Symbols.location_on, label: data.profile.location),
-                Tooltip(
-                  message: 'creditsStatus'.tr(),
-                  child: _DetailChip(
-                    icon: Symbols.attribution,
-                    label:
-                        '${data.profile.socialCredits.toStringAsFixed(2)} pts · ${_getCreditsLevelText(data.profile.socialCreditsLevel)}',
-                  ),
-                ),
-                _DetailChip(
-                  icon: Symbols.fingerprint,
-                  label: data.id,
-                  onTap: () {
-                    Clipboard.setData(ClipboardData(text: data.id));
-                  },
-                ),
-              ],
-            ),
-            if (data.profile.timeZone.isNotEmpty && !kIsWeb) ...[
-              const Gap(16),
-              Builder(
-                builder: (context) {
-                  try {
-                    final tzInfo = getTzInfo(data.profile.timeZone);
-                    return Container(
-                      padding: const EdgeInsets.all(16),
-                      decoration: BoxDecoration(
-                        color: theme.colorScheme.surfaceContainerHighest.withOpacity(0.3),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Row(
-                        children: [
-                          Icon(Symbols.schedule, size: 20, color: theme.colorScheme.onSurfaceVariant),
-                          const Gap(12),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  'timeZone',
-                                  style: theme.textTheme.labelSmall?.copyWith(
-                                    color: theme.colorScheme.onSurfaceVariant,
-                                  ),
-                                ).tr(),
-                                const Gap(4),
-                                Row(
-                                  spacing: 8,
-                                  children: [
-                                    Text(
-                                      data.profile.timeZone,
-                                      style: theme.textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w500),
-                                    ),
-                                    Container(
-                                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                                      decoration: BoxDecoration(
-                                        color: theme.colorScheme.primaryContainer,
-                                        borderRadius: BorderRadius.circular(8),
-                                      ),
-                                      child: Text(
-                                        tzInfo.$2.formatCustomGlobal('HH:mm'),
-                                        style: theme.textTheme.bodySmall?.copyWith(
-                                          color: theme.colorScheme.onPrimaryContainer,
-                                          fontWeight: FontWeight.w600,
-                                        ),
-                                      ),
-                                    ),
-                                    Text(
-                                      'UTC${tzInfo.$1.formatOffset()}',
-                                      style: theme.textTheme.bodySmall?.copyWith(
-                                        color: theme.colorScheme.onSurfaceVariant,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ],
-                            ),
-                          ),
-                        ],
-                      ),
-                    );
-                  } catch (e) {
-                    return const SizedBox.shrink();
-                  }
-                },
-              ),
-            ],
-          ],
-        ),
-      ),
-    );
-  }
-
-  String _getCreditsLevelText(int level) {
-    switch (level) {
-      case -1:
-        return 'socialCreditsLevelPoor'.tr();
-      case 0:
-        return 'socialCreditsLevelNormal'.tr();
-      case 1:
-        return 'socialCreditsLevelGood'.tr();
-      case 2:
-        return 'socialCreditsLevelExcellent'.tr();
-      default:
-        return 'unknown'.tr();
-    }
-  }
-}
-
-class _DetailChip extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  final VoidCallback? onTap;
-
-  const _DetailChip({required this.icon, required this.label, this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(20),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        decoration: BoxDecoration(
-          color: theme.colorScheme.surfaceContainerHighest.withOpacity(0.5),
-          borderRadius: BorderRadius.circular(20),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          spacing: 6,
-          children: [
-            Icon(icon, size: 16, color: theme.colorScheme.onSurfaceVariant),
-            Flexible(
-              child: Text(
-                label,
-                style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurface),
-                overflow: TextOverflow.ellipsis,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _LinkCard extends StatelessWidget {
-  final String name;
-  final String url;
-
-  const _LinkCard({required this.name, required this.url});
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-
-    return InkWell(
-      onTap: () {
-        if (!url.startsWith('http') && !url.contains('://')) {
-          launchUrlString('https://$url');
-        } else {
-          launchUrlString(url);
-        }
-      },
-      borderRadius: BorderRadius.circular(8),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        decoration: BoxDecoration(
-          color: theme.colorScheme.surfaceContainerHighest.withOpacity(0.3),
-          borderRadius: BorderRadius.circular(8),
-        ),
-        child: Row(
-          children: [
-            Icon(Symbols.link, size: 16, color: theme.colorScheme.primary),
-            const Gap(8),
-            Expanded(
-              child: Text(
-                name,
-                style: theme.textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w500),
-                overflow: TextOverflow.ellipsis,
-              ),
-            ),
-            Icon(Symbols.arrow_outward, size: 14, color: theme.colorScheme.onSurfaceVariant),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _AccountProfileContacts extends StatelessWidget {
-  final SnAccount data;
-
-  const _AccountProfileContacts({required this.data});
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final publicContacts = data.contacts.where((c) => c.isPublic).toList();
-    if (publicContacts.isEmpty) return const SizedBox.shrink();
-
-    return Card(
-      margin: EdgeInsets.zero,
-      child: Padding(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Container(
-                  width: 36,
-                  height: 36,
-                  decoration: BoxDecoration(
-                    color: theme.colorScheme.primary.withOpacity(0.15),
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: Icon(Symbols.contact_phone, size: 18, color: theme.colorScheme.primary),
-                ),
-                const Gap(12),
-                Text('contactMethod', style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600)).tr(),
-              ],
-            ),
-            const Gap(12),
-            Column(spacing: 8, children: publicContacts.map((contact) => _ContactCard(contact: contact)).toList()),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _ContactCard extends StatelessWidget {
-  final dynamic contact;
-
-  const _ContactCard({required this.contact});
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final iconData = switch (contact.type) {
-      0 => Symbols.mail,
-      1 => Symbols.phone,
-      _ => Symbols.home,
-    };
-    final typeLabel = switch (contact.type) {
-      0 => 'contactMethodTypeEmail'.tr(),
-      1 => 'contactMethodTypePhone'.tr(),
-      _ => 'contactMethodTypeAddress'.tr(),
-    };
-
-    return InkWell(
-      onTap: () {
-        switch (contact.type) {
-          case 0:
-            launchUrlString('mailto:${contact.content}');
-          case 1:
-            launchUrlString('tel:${contact.content}');
-          default:
-            Clipboard.setData(ClipboardData(text: contact.content));
-        }
-      },
-      borderRadius: BorderRadius.circular(12),
-      child: Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: theme.colorScheme.surfaceContainerHighest.withOpacity(0.3),
-          borderRadius: BorderRadius.circular(12),
-        ),
-        child: Row(
-          children: [
-            Container(
-              width: 40,
-              height: 40,
-              decoration: BoxDecoration(
-                color: theme.colorScheme.primaryContainer.withOpacity(0.5),
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: Icon(iconData, size: 18, color: theme.colorScheme.primary),
-            ),
-            const Gap(12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    typeLabel,
-                    style: theme.textTheme.labelSmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
-                  ),
-                  const Gap(2),
-                  Text(
-                    contact.content,
-                    style: theme.textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w500),
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ],
-              ),
-            ),
-            Icon(Symbols.chevron_right, size: 18, color: theme.colorScheme.onSurfaceVariant),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _AccountPublisherList extends StatelessWidget {
-  final List<SnPublisher> publishers;
-
-  const _AccountPublisherList({required this.publishers});
-
-  @override
-  Widget build(BuildContext context) {
-    if (publishers.isEmpty) return const SizedBox.shrink();
-
-    final theme = Theme.of(context);
-
-    return Card(
-      margin: EdgeInsets.zero,
-      child: Padding(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Container(
-                  width: 36,
-                  height: 36,
-                  decoration: BoxDecoration(
-                    color: theme.colorScheme.primary.withOpacity(0.15),
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: Icon(Symbols.verified, size: 18, color: theme.colorScheme.primary),
-                ),
-                const Gap(12),
-                Text('publishers', style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600)).tr(),
-              ],
-            ),
-            const Gap(16),
-            ...publishers.map(
-              (publisher) => Padding(
-                padding: const EdgeInsets.only(bottom: 8),
-                child: _PublisherCard(
-                  publisher: publisher,
-                  onTap: () {
-                    Navigator.pop(context, true);
-                    context.router.push(PublisherProfileRoute(name: publisher.name));
-                  },
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _PublisherCard extends StatelessWidget {
-  final SnPublisher publisher;
-  final VoidCallback onTap;
-
-  const _PublisherCard({required this.publisher, required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(12),
-      child: Container(
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          color: theme.colorScheme.surfaceContainerHighest.withOpacity(0.3),
-          borderRadius: BorderRadius.circular(12),
-        ),
-        child: Row(
-          children: [
-            Container(
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                border: Border.all(color: theme.colorScheme.outline.withOpacity(0.2)),
-              ),
-              child: ProfilePictureWidget(file: publisher.picture, radius: 24),
-            ),
-            const Gap(12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(publisher.nick, style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600)),
-                  const Gap(2),
-                  Text(
-                    publisher.bio.isNotEmpty
-                        ? publisher.bio.split('\n').where((line) => line.trim().isNotEmpty).join('\n')
-                        : 'descriptionNone'.tr(),
-                    style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ],
-              ),
-            ),
-            Icon(Symbols.chevron_right, size: 18, color: theme.colorScheme.onSurfaceVariant),
-          ],
-        ),
       ),
     );
   }
@@ -743,7 +361,11 @@ class _AccountPunishment extends StatelessWidget {
                   color: theme.colorScheme.errorContainer,
                   borderRadius: BorderRadius.circular(10),
                 ),
-                child: Icon(Symbols.warning, color: theme.colorScheme.onErrorContainer, size: 20),
+                child: Icon(
+                  Symbols.warning,
+                  color: theme.colorScheme.onErrorContainer,
+                  size: 20,
+                ),
               ),
               const Gap(12),
               Expanded(
@@ -752,17 +374,24 @@ class _AccountPunishment extends StatelessWidget {
                   children: [
                     Text(
                       'accountRestrictions'.tr(),
-                      style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600),
+                      style: theme.textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
                     const Gap(2),
                     Text(
                       'tapToViewDetails'.tr(),
-                      style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
                     ),
                   ],
                 ),
               ),
-              Icon(Symbols.chevron_right, color: theme.colorScheme.onSurfaceVariant),
+              Icon(
+                Symbols.chevron_right,
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
             ],
           ),
         ),
@@ -791,8 +420,12 @@ class _AccountAction extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final isBlocked = accountRelationship.value != null && accountRelationship.value!.status <= -100;
-    final isFriend = accountRelationship.value != null && accountRelationship.value!.status > -100;
+    final isBlocked =
+        accountRelationship.value != null &&
+        accountRelationship.value!.status <= -100;
+    final isFriend =
+        accountRelationship.value != null &&
+        accountRelationship.value!.status > -100;
 
     return Card(
       margin: EdgeInsets.zero,
@@ -811,7 +444,10 @@ class _AccountAction extends StatelessWidget {
                           child: Row(
                             mainAxisAlignment: MainAxisAlignment.center,
                             spacing: 6,
-                            children: [const Icon(Symbols.person_check, size: 18), Text('added').tr()],
+                            children: [
+                              const Icon(Symbols.person_check, size: 18),
+                              Text('added').tr(),
+                            ],
                           ),
                         )
                       : FilledButton.tonal(
@@ -819,7 +455,10 @@ class _AccountAction extends StatelessWidget {
                           child: Row(
                             mainAxisAlignment: MainAxisAlignment.center,
                             spacing: 6,
-                            children: [const Icon(Symbols.person_add, size: 18), Text('addFriendShort').tr()],
+                            children: [
+                              const Icon(Symbols.person_add, size: 18),
+                              Text('addFriendShort').tr(),
+                            ],
                           ),
                         ),
                 ),
@@ -830,7 +469,10 @@ class _AccountAction extends StatelessWidget {
                           child: Row(
                             mainAxisAlignment: MainAxisAlignment.center,
                             spacing: 6,
-                            children: [const Icon(Symbols.person_cancel, size: 18), Text('unblockUser').tr()],
+                            children: [
+                              const Icon(Symbols.person_cancel, size: 18),
+                              Text('unblockUser').tr(),
+                            ],
                           ),
                         )
                       : OutlinedButton(
@@ -838,7 +480,10 @@ class _AccountAction extends StatelessWidget {
                           child: Row(
                             mainAxisAlignment: MainAxisAlignment.center,
                             spacing: 6,
-                            children: [const Icon(Symbols.block, size: 18), Text('blockUser').tr()],
+                            children: [
+                              const Icon(Symbols.block, size: 18),
+                              Text('blockUser').tr(),
+                            ],
                           ),
                         ),
                 ),
@@ -856,16 +501,26 @@ class _AccountAction extends StatelessWidget {
                       spacing: 6,
                       children: [
                         const Icon(Symbols.chat, size: 18),
-                        Text(accountChat.value == null ? 'createDirectMessage' : 'gotoDirectMessage', maxLines: 1).tr(),
+                        Text(
+                          accountChat.value == null
+                              ? 'createDirectMessage'
+                              : 'gotoDirectMessage',
+                          maxLines: 1,
+                        ).tr(),
                       ],
                     ),
                   ),
                 ),
                 Container(
-                  decoration: BoxDecoration(borderRadius: BorderRadius.circular(12)),
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
                   child: IconButton.filled(
                     onPressed: () {
-                      showAbuseReportSheet(context, resourceIdentifier: 'account/${data.id}');
+                      showAbuseReportSheet(
+                        context,
+                        resourceIdentifier: 'account/${data.id}',
+                      );
                     },
                     icon: const Icon(Symbols.flag, size: 18),
                     style: IconButton.styleFrom(
@@ -932,7 +587,9 @@ Future<SnDeveloper?> accountBotDeveloper(Ref ref, String uname) async {
   if (account.automatedId == null) return null;
   final apiClient = ref.watch(apiClientProvider);
   try {
-    final resp = await apiClient.get("/develop/bots/${account.automatedId}/developer");
+    final resp = await apiClient.get(
+      "/develop/bots/${account.automatedId}/developer",
+    );
     return SnDeveloper.fromJson(resp.data);
   } catch (err) {
     if (err is DioException && err.response?.statusCode == 404) {
@@ -953,10 +610,15 @@ Future<List<SnPublisher>> accountPublishers(Ref ref, String id) async {
 }
 
 @riverpod
-Future<SnAccountPunishment?> accountPunishmentOverview(Ref ref, String uname) async {
+Future<SnAccountPunishment?> accountPunishmentOverview(
+  Ref ref,
+  String uname,
+) async {
   final client = ref.watch(solarNetworkClientProvider);
   try {
-    final response = await client.dio.get('/padlock/accounts/$uname/punishments/overview');
+    final response = await client.dio.get(
+      '/padlock/accounts/$uname/punishments/overview',
+    );
     if (response.data == null) return null;
     return SnAccountPunishment.fromJson(response.data);
   } catch (err) {
@@ -965,9 +627,14 @@ Future<SnAccountPunishment?> accountPunishmentOverview(Ref ref, String uname) as
 }
 
 final accountTimelineProvider = AsyncNotifierProvider.autoDispose
-    .family<AccountTimelineNotifier, PaginationState<SnAccountTimelineItem>, String>(AccountTimelineNotifier.new);
+    .family<
+      AccountTimelineNotifier,
+      PaginationState<SnAccountTimelineItem>,
+      String
+    >(AccountTimelineNotifier.new);
 
-class AccountTimelineNotifier extends AsyncNotifier<PaginationState<SnAccountTimelineItem>>
+class AccountTimelineNotifier
+    extends AsyncNotifier<PaginationState<SnAccountTimelineItem>>
     with AsyncPaginationController<SnAccountTimelineItem> {
   static const int pageSize = 20;
 
@@ -992,7 +659,11 @@ class AccountTimelineNotifier extends AsyncNotifier<PaginationState<SnAccountTim
   Future<List<SnAccountTimelineItem>> fetch() async {
     final client = ref.read(solarNetworkClientProvider);
 
-    final result = await client.accounts.getAccountTimeline(username: arg, offset: fetchedCount, take: pageSize);
+    final result = await client.accounts.getAccountTimeline(
+      username: arg,
+      offset: fetchedCount,
+      take: pageSize,
+    );
 
     totalCount = result.totalCount;
     return result.items;
@@ -1003,27 +674,53 @@ class AccountTimelineNotifier extends AsyncNotifier<PaginationState<SnAccountTim
 class AccountProfileScreen extends HookConsumerWidget {
   final String name;
 
-  const AccountProfileScreen({super.key, @PathParam("name") required this.name});
+  const AccountProfileScreen({
+    super.key,
+    @PathParam("name") required this.name,
+  });
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final now = DateTime.now();
-
     final account = ref.watch(accountProvider(name));
-    final accountEvents = ref.watch(
-      eventCalendarProvider(EventCalendarQuery(uname: name, year: now.year, month: now.month)),
+
+    return AppScaffold(
+      isNoBackground: false,
+      appBar: AppBar(
+        leading: const AutoLeadingButton(),
+        title: Text(account.value?.nick ?? '@$name'),
+      ),
+      body: AccountProfileContent(name: name),
     );
+  }
+}
+
+class AccountProfileContent extends HookConsumerWidget {
+  final String name;
+
+  const AccountProfileContent({
+    super.key,
+    required this.name,
+  });
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final account = ref.watch(accountProvider(name));
     final accountChat = ref.watch(accountDirectChatProvider(name));
     final accountRelationship = ref.watch(accountRelationshipProvider(name));
     final accountDeveloper = ref.watch(accountBotDeveloperProvider(name));
-    final accountPunishment = ref.watch(accountPunishmentOverviewProvider(name));
+    final accountPunishment = ref.watch(
+      accountPunishmentOverviewProvider(name),
+    );
 
     void showPunishmentSheet() {
       showModalBottomSheet(
         context: context,
         isScrollControlled: true,
         useRootNavigator: true,
-        builder: (context) => UserPunishmentsSheet(username: name, initialOverview: accountPunishment.value),
+        builder: (context) => UserPunishmentsSheet(
+          username: name,
+          initialOverview: accountPunishment.value,
+        ),
       );
     }
 
@@ -1061,7 +758,7 @@ class AccountProfileScreen extends HookConsumerWidget {
     Future<void> directMessageAction() async {
       if (!account.hasValue) return;
       if (accountChat.value != null) {
-        context.router.push(ChatRoomRoute(id: accountChat.value!.id));
+        context.router.navigate(ChatRoomRoute(id: accountChat.value!.id));
         return;
       }
       showLoadingModal(context);
@@ -1080,145 +777,239 @@ class AccountProfileScreen extends HookConsumerWidget {
     }
 
     final user = ref.watch(userInfoProvider);
-    final isCurrentUser = useMemoized(() => user.value?.id == account.value?.id, [user, account]);
+    final isCurrentUser = useMemoized(
+      () => user.value?.id == account.value?.id,
+      [user, account],
+    );
 
-    return account.when(
-      data: (data) {
-        final accountPublishers = ref.watch(accountPublishersProvider(data.id));
-        return AppScaffold(
-          isNoBackground: false,
-          appBar: isWideScreen(context) ? AppBar(leading: AutoLeadingButton(), title: Text(data.nick)) : null,
-          body: isWideScreen(context)
-              ? Row(
-                  spacing: 12,
-                  children: [
-                    Flexible(
-                      flex: 4,
-                      child: CustomScrollView(
-                        slivers: [
-                          SliverGap(16),
-                          AccountTimelineList(uname: name),
-                          SliverGap(MediaQuery.of(context).padding.bottom + 16),
-                        ],
-                      ),
+    Future<void> refreshProfile() async {
+      ref.invalidate(accountProvider(name));
+      ref.invalidate(accountBotDeveloperProvider(name));
+      ref.invalidate(accountPunishmentOverviewProvider(name));
+      ref.invalidate(accountTimelineProvider(name));
+      ref.invalidate(boardWidgetAppsProvider);
+
+      if (account.value != null) {
+        ref.invalidate(accountPublishersProvider(account.value!.id));
+      }
+      if (user.value != null) {
+        ref.invalidate(accountDirectChatProvider(name));
+        ref.invalidate(accountRelationshipProvider(name));
+      }
+      if (isCurrentUser) {
+        ref.invalidate(myAccountBoardProvider);
+      }
+
+      final futures = <Future<dynamic>>[
+        ref.read(accountProvider(name).future),
+        ref.read(accountBotDeveloperProvider(name).future),
+        ref.read(accountPunishmentOverviewProvider(name).future),
+        ref.read(boardWidgetAppsProvider.future),
+      ];
+      if (account.value != null) {
+        futures.add(ref.read(accountPublishersProvider(account.value!.id).future));
+      }
+      if (user.value != null) {
+        futures.add(ref.read(accountDirectChatProvider(name).future));
+        futures.add(ref.read(accountRelationshipProvider(name).future));
+      }
+      if (isCurrentUser) {
+        futures.add(ref.read(myAccountBoardProvider.future));
+      }
+      await Future.wait(futures);
+    }
+
+    return DefaultTabController(
+      length: 2,
+      child: account.when(
+        data: (data) {
+          final accountPublishers = ref.watch(
+            accountPublishersProvider(data.id),
+          );
+          final theme = Theme.of(context);
+          final accountBoard = isCurrentUser
+              ? ref.watch(myAccountBoardProvider).asData?.value ??
+                    AccountBoard.defaultBoard()
+              : AccountBoard.defaultBoard();
+
+          final showActions = user.value != null && !isCurrentUser;
+
+          final boardContent = ExtendedRefreshIndicator(
+            onRefresh: refreshProfile,
+            child: SingleChildScrollView(
+              physics: const AlwaysScrollableScrollPhysics(),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              child: Column(
+                spacing: 12,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  _AccountBasicInfo(
+                    data: data,
+                    uname: name,
+                    accountDeveloper: accountDeveloper,
+                  ),
+                  if (showActions)
+                    _AccountAction(
+                      data: data,
+                      accountRelationship: accountRelationship,
+                      accountChat: accountChat,
+                      relationshipAction: relationshipAction,
+                      blockAction: blockAction,
+                      directMessageAction: directMessageAction,
                     ),
-                    Flexible(
-                      flex: 3,
-                      child: Align(
-                        alignment: Alignment.topLeft,
-                        child: SingleChildScrollView(
-                          padding: const EdgeInsets.symmetric(vertical: 12),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.stretch,
-                            spacing: 12,
-                            children: [
-                              _AccountBasicInfo(data: data, uname: name, accountDeveloper: accountDeveloper),
-                              ActivityPresenceWidget(uname: name, isCompact: false),
-                              if (data.badges.isNotEmpty)
-                                Card(
-                                  margin: EdgeInsets.zero,
-                                  child: Padding(
-                                    padding: const EdgeInsets.all(20),
-                                    child: BadgeList(badges: data.badges),
-                                  ),
-                                ),
-                              Column(
-                                spacing: 12,
-                                children: [
-                                  LevelingProgressCard(
-                                    level: data.profile.level,
-                                    experience: data.profile.experience,
-                                    progress: data.profile.levelingProgress,
-                                  ),
-                                  if (data.profile.verification != null)
-                                    Card(
-                                      margin: EdgeInsets.zero,
-                                      child: VerificationStatusCard(mark: data.profile.verification!),
-                                    ),
-                                ],
-                              ),
-                              if (data.contacts.any((c) => c.isPublic)) _AccountProfileContacts(data: data),
-                              _AccountProfileDetail(data: data),
-                              _AccountPublisherList(publishers: accountPublishers.value ?? []),
-                              ?accountPunishment.whenOrNull(
-                                data: (data) => data != null
-                                    ? _AccountPunishment(punishment: data, onTap: showPunishmentSheet)
-                                    : null,
-                              ),
-                              if (user.value != null && !isCurrentUser)
-                                _AccountAction(
-                                  data: data,
-                                  accountRelationship: accountRelationship,
-                                  accountChat: accountChat,
-                                  relationshipAction: relationshipAction,
-                                  blockAction: blockAction,
-                                  directMessageAction: directMessageAction,
-                                ).padding(horizontal: 4),
-                              Card(
-                                margin: EdgeInsets.zero,
-                                child: FortuneGraphWidget(
-                                  events: accountEvents,
-                                  eventCalandarUser: data.name,
-                                  margin: EdgeInsets.zero,
-                                ),
-                              ),
-                            ],
-                          ),
+                  AccountBoard(
+                    account: data,
+                    items: accountBoard,
+                    uname: name,
+                    publishers: accountPublishers.value ?? [],
+                  ),
+                  ?accountPunishment.whenOrNull(
+                    data: (punishmentData) => punishmentData != null
+                        ? _AccountPunishment(
+                            punishment: punishmentData,
+                            onTap: showPunishmentSheet,
+                          )
+                        : null,
+                  ),
+                ],
+              ),
+            ),
+          );
+
+          final boardContentNoHeader = ExtendedRefreshIndicator(
+            onRefresh: refreshProfile,
+            child: SingleChildScrollView(
+              physics: const AlwaysScrollableScrollPhysics(),
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              child: Column(
+                spacing: 12,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  AccountBoard(
+                    account: data,
+                    items: accountBoard,
+                    uname: name,
+                    publishers: accountPublishers.value ?? [],
+                  ),
+                ],
+              ),
+            ),
+          );
+
+          final timelineContent = ExtendedRefreshIndicator(
+            onRefresh: refreshProfile,
+            child: CustomScrollView(
+              physics: const AlwaysScrollableScrollPhysics(),
+              slivers: [
+                SliverPadding(
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  sliver: AccountTimelineList(uname: name),
+                ),
+                SliverGap(MediaQuery.of(context).padding.bottom + 16),
+              ],
+            ),
+          );
+
+          return LayoutBuilder(
+            builder: (context, constraints) {
+              final useWide =
+                  isWideScreen(context) && constraints.maxWidth >= 900;
+
+              final tabBar = Material(
+                color: theme.colorScheme.surface,
+                elevation: 0,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 8),
+                  child: TabBar(
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    indicator: BoxDecoration(
+                      color: theme.colorScheme.secondaryContainer,
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    indicatorSize: TabBarIndicatorSize.tab,
+                    dividerHeight: 0,
+                    labelColor: theme.colorScheme.onSecondaryContainer,
+                    unselectedLabelColor: theme.colorScheme.onSurfaceVariant,
+                    splashBorderRadius: BorderRadius.circular(20),
+                    labelStyle: theme.textTheme.labelLarge?.copyWith(
+                      fontWeight: FontWeight.w600,
+                    ),
+                    tabs: [
+                      Tab(
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 4),
+                          child: Text('board'.tr()),
                         ),
+                      ),
+                      Tab(
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 4),
+                          child: Text('timeline'.tr()),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              );
+
+              if (!useWide) {
+                return Column(
+                  children: [
+                    tabBar,
+                    Expanded(
+                      child: TabBarView(
+                        children: [boardContent, timelineContent],
                       ),
                     ),
                   ],
-                ).padding(horizontal: 12)
-              : CustomScrollView(
-                  slivers: [
-                    SliverAppBar(
-                      pinned: true,
-                      leading: AutoLeadingButton(),
-                      title: Text(data.nick),
-                      flexibleSpace: Stack(
+                );
+              }
+
+              return Row(
+                spacing: 8,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Flexible(
+                    flex: 4,
+                    child: Padding(
+                      padding: const EdgeInsets.only(left: 12),
+                      child: Column(
                         children: [
-                          Positioned.fill(child: Container(color: Theme.of(context).appBarTheme.backgroundColor)),
+                          tabBar,
+                          Expanded(
+                            child: TabBarView(
+                              children: [boardContentNoHeader, timelineContent],
+                            ),
+                          ),
                         ],
                       ),
                     ),
-                    SliverToBoxAdapter(
+                  ),
+                  Flexible(
+                    flex: 3,
+                    child: SingleChildScrollView(
+                      padding: const EdgeInsets.symmetric(
+                        vertical: 8,
+                        horizontal: 12,
+                      ),
                       child: Column(
                         spacing: 12,
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
-                          _AccountBasicInfo(data: data, uname: name, accountDeveloper: accountDeveloper),
-                          ActivityPresenceWidget(uname: name, isCompact: false),
-                          if (data.badges.isNotEmpty)
-                            Card(
-                              margin: EdgeInsets.zero,
-                              child: Padding(
-                                padding: const EdgeInsets.all(20),
-                                child: BadgeList(badges: data.badges),
-                              ),
-                            ),
-                          Column(
-                            spacing: 12,
-                            children: [
-                              LevelingProgressCard(
-                                level: data.profile.level,
-                                experience: data.profile.experience,
-                                progress: data.profile.levelingProgress,
-                              ),
-                              if (data.profile.verification != null)
-                                Card(
-                                  margin: EdgeInsets.zero,
-                                  child: VerificationStatusCard(mark: data.profile.verification!),
-                                ),
-                            ],
+                          _AccountBasicInfo(
+                            data: data,
+                            uname: name,
+                            accountDeveloper: accountDeveloper,
                           ),
-                          if (data.contacts.any((c) => c.isPublic)) _AccountProfileContacts(data: data),
-                          _AccountPublisherList(publishers: accountPublishers.value ?? []),
-                          _AccountProfileDetail(data: data),
                           ?accountPunishment.whenOrNull(
-                            data: (data) =>
-                                data != null ? _AccountPunishment(punishment: data, onTap: showPunishmentSheet) : null,
+                            data: (punishmentData) => punishmentData != null
+                                ? _AccountPunishment(
+                                    punishment: punishmentData,
+                                    onTap: showPunishmentSheet,
+                                  )
+                                : null,
                           ),
-                          if (user.value != null && !isCurrentUser)
+                          if (showActions)
                             _AccountAction(
                               data: data,
                               accountRelationship: accountRelationship,
@@ -1227,31 +1018,17 @@ class AccountProfileScreen extends HookConsumerWidget {
                               blockAction: blockAction,
                               directMessageAction: directMessageAction,
                             ),
-                          Card(
-                            margin: EdgeInsets.zero,
-                            child: Padding(
-                              padding: const EdgeInsets.all(20),
-                              child: FortuneGraphWidget(events: accountEvents, eventCalandarUser: data.name),
-                            ),
-                          ),
                         ],
-                      ).padding(vertical: 8, horizontal: 8),
+                      ),
                     ),
-                    SliverPadding(
-                      padding: const EdgeInsets.symmetric(horizontal: 8),
-                      sliver: AccountTimelineList(uname: name),
-                    ),
-                  ],
-                ),
-        );
-      },
-      error: (error, stackTrace) => AppScaffold(
-        appBar: AppBar(leading: const AutoLeadingButton()),
-        body: Center(child: Text(error.toString())),
-      ),
-      loading: () => AppScaffold(
-        appBar: AppBar(leading: const AutoLeadingButton()),
-        body: Center(child: CircularProgressIndicator()),
+                  ),
+                ],
+              );
+            },
+          );
+        },
+        error: (error, stackTrace) => Center(child: Text(error.toString())),
+        loading: () => const Center(child: CircularProgressIndicator()),
       ),
     );
   }

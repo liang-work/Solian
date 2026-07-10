@@ -83,7 +83,7 @@ void main(List<String> args) async {
           await windowManager.ensureInitialized();
           final callPrefs = await SharedPreferences.getInstance();
           final savedSize = callPrefs.getString('callWindowSize');
-          Size initialSize = const Size(280, 160);
+          Size initialSize = const Size(1100, 760);
           if (savedSize != null) {
             try {
               final parts = savedSize.split(',');
@@ -97,8 +97,9 @@ void main(List<String> args) async {
           }
           WindowOptions windowOptions = WindowOptions(
             size: initialSize,
-            minimumSize: const Size(200, 120),
+            minimumSize: const Size(720, 520),
             maximumSize: const Size(1200, 900),
+            alwaysOnTop: true,
             center: true,
             backgroundColor: Colors.transparent,
             skipTaskbar: false,
@@ -108,6 +109,7 @@ void main(List<String> args) async {
           await windowManager.waitUntilReadyToShow(windowOptions, () async {
             await windowManager.show();
             await windowManager.focus();
+            await windowManager.setAlwaysOnTop(true);
             await windowManager.setResizable(true);
             // ponytail: prevent maximize — call window should stay compact
             await windowManager.setMaximizable(false);
@@ -146,6 +148,8 @@ void main(List<String> args) async {
   }
 
   Future<void> appRunner() async {
+    final prefs = await SharedPreferences.getInstance();
+
     try {
       await EasyLocalization.ensureInitialized();
       EasyLocalization.logger.enableBuildModes = [];
@@ -205,24 +209,38 @@ void main(List<String> args) async {
 
     try {
       Logger.root.info("[Plugin] Initializing plugin system...");
-      final manager = PluginManager();
       // Clear stale state from previous hot restart
-      manager.dispose();
-      manager.registerApi('hooks', HooksApi());
-      manager.registerApi('events', EventsApi());
-      manager.registerApi('commands', CommandsApi());
-      manager.registerApi('notify', NotifyApi());
-      manager.registerApi('ui', UiApi());
-      await manager.initialize();
+      PluginController.resetInstance();
+      PluginManager().dispose();
+
+      final controller = PluginController.instance;
+      // Foundation APIs
+      controller.registerApi('hooks', HooksApi());
+      controller.registerApi('events', EventsApi());
+      controller.registerApi('commands', CommandsApi());
+      controller.registerApi('ui', UiApi());
+      controller.registerApi('tasks', BackgroundTaskApi());
+      // Host-specific APIs (dashboard, Solar Network, notify UI, icons)
+      controller.registerApi('notify', NotifyApi());
+      controller.registerApi('icons', IconsApi());
+      controller.registerApi('dashboard', DashboardApi());
+      final pluginNetworkScope = ProviderContainer(
+        overrides: [sharedPreferencesProvider.overrideWithValue(prefs)],
+      );
+      controller.registerApi(
+        'network',
+        PluginNetworkApi(prefs, pluginNetworkScope.read(apiClientProvider)),
+      );
+      controller.registerApi('ws', PluginWebsocketApi());
+      await controller.initialize();
       PluginEventBridge().activate();
       Logger.root.info(
-        "[Plugin] Plugin system ready with ${manager.plugins.length} plugins",
+        "[Plugin] Plugin system ready with ${controller.plugins.length} plugins",
       );
     } catch (err) {
       Logger.root.severe("[Plugin] Failed to initialize plugin system...", err);
     }
 
-    final prefs = await SharedPreferences.getInstance();
     HttpOverrides.global = createAppHttpOverridesFromPrefs(prefs);
 
     if (!kIsWeb &&
@@ -378,8 +396,10 @@ class IslandApp extends HookConsumerWidget {
 
     final theme = ref.watch(themeProvider);
     final settings = ref.watch(appSettingsProvider);
+    final router = ref.watch(routerProvider);
 
     IslandUIFoundation.configureOverlay(globalOverlay);
+    IslandUIFoundation.configureNavigator(router.navigatorKey);
     IslandUIFoundation.configureHaptic(() => settings.notifyWithHaptic);
 
     ThemeMode getThemeMode() {
@@ -455,8 +475,6 @@ class IslandApp extends HookConsumerWidget {
       });
       return null;
     }, []);
-
-    final router = ref.watch(routerProvider);
 
     return MaterialApp.router(
       title: 'Solar Network',

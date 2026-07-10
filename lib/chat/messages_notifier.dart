@@ -1,6 +1,7 @@
 import "dart:async";
 import "package:dio/dio.dart";
 import "package:easy_localization/easy_localization.dart";
+import 'package:flutter/widgets.dart';
 import "package:flutter_cache_manager/flutter_cache_manager.dart";
 import "package:hooks_riverpod/hooks_riverpod.dart";
 import "package:island/chat/pods/chat_room.dart";
@@ -18,13 +19,15 @@ import "package:island/core/database.dart";
 import "package:island/core/network.dart";
 import "package:island/core/services/event_bus.dart";
 import "package:island/core/services/ios_share_suggestions.dart";
+import "package:island/core/lifecycle.dart";
+import 'package:island/core/websocket.dart';
 import "package:island/chat/e2ee_message_service.dart";
 import "package:island/e2ee/e2ee.dart";
 import "package:island/accounts/account_pod.dart";
 import "package:island/accounts/screens/profile.dart";
 import "package:logging/logging.dart";
 import "package:island/shared/widgets/alert.dart";
-import "package:island/plugins/plugin_hooks.dart";
+import "package:island_plugin_foundation/island_plugin_foundation.dart";
 import "package:riverpod_annotation/riverpod_annotation.dart";
 import "package:uuid/uuid.dart";
 import 'package:solar_network_sdk/solar_network_sdk.dart';
@@ -54,6 +57,7 @@ class MessagesNotifier extends _$MessagesNotifier {
   bool _isJumping = false;
   bool _hasPendingRealtimeRefresh = false;
   bool _isUpdatingState = false;
+  List<LocalChatMessage> _messages = [];
   bool _isLoadingInitial = false;
   bool _isLoadingMore = false;
   bool _allRemoteMessagesFetched = false;
@@ -77,6 +81,9 @@ class MessagesNotifier extends _$MessagesNotifier {
   Future<void>? _syncOperation;
   Future<void>? _loadInitialOperation;
   bool _isInitializing = false;
+  Timer? _weakInternetPollTimer;
+
+  static const Duration _weakInternetPollInterval = Duration(seconds: 30);
 
   Future<void> _runDeduped({
     required Future<void>? operation,
@@ -95,6 +102,15 @@ class MessagesNotifier extends _$MessagesNotifier {
       await created;
     } finally {
       setOperation(null);
+    }
+  }
+
+  Future<T> _keepAliveWhileSending<T>(Future<T> Function() task) async {
+    final keepAliveLink = ref.keepAlive();
+    try {
+      return await task();
+    } finally {
+      keepAliveLink.close();
     }
   }
 
@@ -533,6 +549,8 @@ class MessagesNotifier extends _$MessagesNotifier {
 
     ref.onDispose(() {
       disposed = true;
+      _weakInternetPollTimer?.cancel();
+      _weakInternetPollTimer = null;
       _realtime.stopListening();
       e2eeStartSub?.cancel();
       e2eeCompleteSub?.cancel();
@@ -624,6 +642,12 @@ class MessagesNotifier extends _$MessagesNotifier {
     }
 
     Logger.root.info('MessagesNotifier built for room $roomId');
+
+    _syncWeakInternetPolling(ref.read(weakInternetModeProvider));
+    ref.listen<bool>(weakInternetModeProvider, (previous, next) {
+      if (previous == next) return;
+      _syncWeakInternetPolling(next);
+    });
 
     _realtime.startListening();
 
@@ -717,7 +741,7 @@ class MessagesNotifier extends _$MessagesNotifier {
       (previous, next) {
         if (previous == next) return;
         if (_isJumping || _isLoadingInitial || !ref.mounted) return;
-        unawaited(loadInitial(forceRemoteRefresh: false));
+        _emitMessages(_currentMessages);
       },
     );
 
@@ -732,9 +756,16 @@ class MessagesNotifier extends _$MessagesNotifier {
       });
     });
 
-    return _normalizeMessageMembers(
-      await _loadInitialMessages(forceRemoteRefresh: false),
+    final initial = _dedupeMessages(
+      _sortMessages(
+        _normalizeMessageMembers(
+          await _loadInitialMessages(forceRemoteRefresh: false),
+        ),
+      ),
     );
+    _messages = initial;
+    _refreshLatestObservedRoomSequence(initial);
+    return _filterActiveMessages(initial);
   }
 
   bool _upsertMember(SnChatMember? member) {
@@ -839,6 +870,7 @@ class MessagesNotifier extends _$MessagesNotifier {
           uniqueMessages.add(message);
         }
       }
+      _messages = uniqueMessages;
       _refreshLatestObservedRoomSequence(uniqueMessages);
       if (ref.mounted) {
         state = AsyncValue.data(_filterActiveMessages(uniqueMessages));
@@ -848,17 +880,52 @@ class MessagesNotifier extends _$MessagesNotifier {
     }
   }
 
-  List<LocalChatMessage> get _currentMessages =>
-      (ref.mounted ? state.value : null) ?? [];
+  List<LocalChatMessage> get _currentMessages => _messages;
 
   void _setGlobalSyncing(bool value) {
     if (!ref.mounted) return;
     Future.microtask(() => ref.read(chatSyncingProvider.notifier).set(value));
   }
 
+  List<LocalChatMessage> _dedupeMessages(List<LocalChatMessage> messages) {
+    final result = <LocalChatMessage>[];
+    final indexById = <String, int>{};
+    final indexByClientId = <String, int>{};
+
+    for (final message in messages) {
+      final clientMessageId = message.clientMessageId;
+      final existingIndex =
+          indexById[message.id] ??
+          (clientMessageId == null ? null : indexByClientId[clientMessageId]);
+
+      if (existingIndex == null) {
+        indexById[message.id] = result.length;
+        if (clientMessageId != null) {
+          indexByClientId[clientMessageId] = result.length;
+        }
+        result.add(message);
+        continue;
+      }
+
+      if (result[existingIndex].status != MessageStatus.sent &&
+          message.status == MessageStatus.sent) {
+        result[existingIndex] = message;
+        indexById[message.id] = existingIndex;
+        if (clientMessageId != null) {
+          indexByClientId[clientMessageId] = existingIndex;
+        }
+      }
+    }
+
+    return result;
+  }
+
   void _emitMessages(List<LocalChatMessage> messages) {
     if (!ref.mounted) return;
-    final normalized = _sortMessages(_normalizeMessageMembers(messages));
+    final normalized = _dedupeMessages(
+      _sortMessages(_normalizeMessageMembers(messages)),
+    );
+    _messages = normalized;
     _refreshLatestObservedRoomSequence(normalized);
     state = AsyncValue.data(_filterActiveMessages(normalized));
   }
@@ -1142,6 +1209,45 @@ class MessagesNotifier extends _$MessagesNotifier {
     }
   }
 
+  void _syncWeakInternetPolling(bool enabled) {
+    _weakInternetPollTimer?.cancel();
+    _weakInternetPollTimer = null;
+
+    if (!enabled || !ref.mounted) return;
+
+    Logger.root.info('Weak internet mode active for room $roomId');
+    Future.microtask(() => _pollForWeakInternetUpdates());
+    _weakInternetPollTimer = Timer.periodic(_weakInternetPollInterval, (_) {
+      unawaited(_pollForWeakInternetUpdates());
+    });
+  }
+
+  Future<void> _pollForWeakInternetUpdates() async {
+    if (!ref.mounted || _isLoadingInitial || _isSyncing || _isJumping) return;
+
+    final lifecycle = ref.read(appLifecycleStateProvider).value;
+    if (lifecycle != null && lifecycle != AppLifecycleState.resumed) return;
+
+    final hasConnectivity = hasNetworkConnectivityValue(
+      ref.read(connectivityStatusProvider),
+    );
+    if (!hasConnectivity) return;
+
+    final weakInternetMode = ref.read(weakInternetModeProvider);
+    if (!weakInternetMode) return;
+
+    Logger.root.info('Polling messages for room $roomId due to weak internet');
+    try {
+      await loadInitial(forceRemoteRefresh: true);
+    } catch (err, stackTrace) {
+      Logger.root.info(
+        'Weak internet polling failed for room $roomId',
+        err,
+        stackTrace,
+      );
+    }
+  }
+
   void _upsertReceivedMessageInState(LocalChatMessage localMessage) {
     final isMessageUpdate =
         localMessage.type == 'messages.update' ||
@@ -1152,7 +1258,7 @@ class MessagesNotifier extends _$MessagesNotifier {
     final shouldShowEditTrail =
         chatMode != kChatEventMessageModeNone && isMessageUpdate;
 
-    final currentMessages = (ref.mounted ? state.value : null) ?? [];
+    final currentMessages = _currentMessages;
     final existingIndex = currentMessages.indexWhere(
       (m) =>
           m.id == localMessage.id ||
@@ -1222,99 +1328,101 @@ class MessagesNotifier extends _$MessagesNotifier {
     SnChatMessage? replyingTo,
     Function(String, Map<int, double?>)? onProgress,
   }) async {
-    if (content.trim().isEmpty &&
-        attachments.isEmpty &&
-        (embeds == null || embeds.isEmpty)) {
-      return;
-    }
-
-    // Run plugin hooks before sending
-    final hookResult = PluginHooks().runBeforeMessageSend(content);
-    if (hookResult.cancelled) {
-      showSnackBar('Message blocked by plugin: ${hookResult.cancelledBy}');
-      return;
-    }
-    final effectiveContent = hookResult.data ?? content;
-
-    String? pendingMessageId;
-    final result = await _sender.sendTextMessage(
-      content: effectiveContent,
-      attachments: attachments,
-      sender: _identity,
-      editingTo: editingTo,
-      replyingTo: replyingTo,
-      forwardingTo: forwardingTo,
-      embeds: embeds,
-      onPending: editingTo == null
-          ? (pending) {
-              pendingMessageId = pending.id;
-              _pendingMessages[pending.id] = pending;
-              _emitMessages([pending, ..._currentMessages]);
-            }
-          : null,
-      onProgress: onProgress,
-    );
-
-    if (!result.success || result.message == null) {
-      if (pendingMessageId != null) {
-        final pending = _pendingMessages[pendingMessageId!];
-        if (pending != null) {
-          pending.status = MessageStatus.failed;
-          _replaceMessage(pending.id, pending);
-        }
+    await _keepAliveWhileSending(() async {
+      if (content.trim().isEmpty &&
+          attachments.isEmpty &&
+          (embeds == null || embeds.isEmpty)) {
+        return;
       }
-      showErrorAlert(result.error ?? 'Failed to send message');
-      return;
-    }
 
-    final sentMessage = result.message!;
-    final room = await ref.read(chatRoomProvider(roomId).future);
-    final currentUserId = await ref
-        .read(userInfoProvider.future)
-        .then((account) => account?.id);
-    if (room != null) {
-      unawaited(
-        IosShareSuggestionsService.instance.donateChatRoom(
-          room,
-          currentUserId: currentUserId,
-        ),
+      // Run plugin hooks before sending
+      final hookResult = PluginHooks().runBeforeMessageSend(content);
+      if (hookResult.cancelled) {
+        showSnackBar('Message blocked by plugin: ${hookResult.cancelledBy}');
+        return;
+      }
+      final effectiveContent = hookResult.data ?? content;
+
+      String? pendingMessageId;
+      final result = await _sender.sendTextMessage(
+        content: effectiveContent,
+        attachments: attachments,
+        sender: _identity,
+        editingTo: editingTo,
+        replyingTo: replyingTo,
+        forwardingTo: forwardingTo,
+        embeds: embeds,
+        onPending: editingTo == null
+            ? (pending) {
+                pendingMessageId = pending.id;
+                _pendingMessages[pending.id] = pending;
+                _emitMessages([pending, ..._currentMessages]);
+              }
+            : null,
+        onProgress: onProgress,
       );
-    }
-    if (pendingMessageId != null) {
-      _pendingMessages.remove(pendingMessageId);
-    }
 
-    if (editingTo != null) {
-      var replaced = false;
-      final updated = _currentMessages.map((message) {
-        if (message.id != sentMessage.id) return message;
-        replaced = true;
-        return sentMessage;
-      }).toList();
-
-      if (!replaced) {
-        updated.add(sentMessage);
+      if (!result.success || result.message == null) {
+        if (pendingMessageId != null) {
+          final pending = _pendingMessages[pendingMessageId!];
+          if (pending != null) {
+            pending.status = MessageStatus.failed;
+            _replaceMessage(pending.id, pending);
+          }
+        }
+        showErrorAlert(result.error ?? 'Failed to send message');
+        return;
       }
 
-      final eventMessage = result.eventMessage;
-      if (eventMessage != null &&
-          _shouldIncludeInActiveList(eventMessage) &&
-          !updated.any((message) => message.id == eventMessage.id)) {
-        updated.add(eventMessage);
+      final sentMessage = result.message!;
+      final room = await ref.read(chatRoomProvider(roomId).future);
+      final currentUserId = await ref
+          .read(userInfoProvider.future)
+          .then((account) => account?.id);
+      if (room != null) {
+        unawaited(
+          IosShareSuggestionsService.instance.donateChatRoom(
+            room,
+            currentUserId: currentUserId,
+          ),
+        );
+      }
+      if (pendingMessageId != null) {
+        _pendingMessages.remove(pendingMessageId);
       }
 
-      _emitMessages(updated);
-      return;
-    }
+      if (editingTo != null) {
+        var replaced = false;
+        final updated = _currentMessages.map((message) {
+          if (message.id != sentMessage.id) return message;
+          replaced = true;
+          return sentMessage;
+        }).toList();
 
-    if (pendingMessageId != null) {
-      ref
-          .read(chatRoomStateProvider(roomId).notifier)
-          .updateAttachmentProgress(pendingMessageId!, null);
-      _replaceMessage(pendingMessageId!, sentMessage);
-    } else {
-      _emitMessages([sentMessage, ..._currentMessages]);
-    }
+        if (!replaced) {
+          updated.add(sentMessage);
+        }
+
+        final eventMessage = result.eventMessage;
+        if (eventMessage != null &&
+            _shouldIncludeInActiveList(eventMessage) &&
+            !updated.any((message) => message.id == eventMessage.id)) {
+          updated.add(eventMessage);
+        }
+
+        _emitMessages(updated);
+        return;
+      }
+
+      if (pendingMessageId != null) {
+        ref
+            .read(chatRoomStateProvider(roomId).notifier)
+            .updateAttachmentProgress(pendingMessageId!, null);
+        _replaceMessage(pendingMessageId!, sentMessage);
+      } else {
+        _emitMessages([sentMessage, ..._currentMessages]);
+      }
+    });
   }
 
   Future<void> sendVoiceMessage(
@@ -1323,38 +1431,42 @@ class MessagesNotifier extends _$MessagesNotifier {
     SnChatMessage? forwardingTo,
     SnChatMessage? replyingTo,
   }) async {
-    final result = await _sender.sendVoiceMessage(
-      filePath: filePath,
-      sender: _identity,
-      durationMs: durationMs,
-      forwardingTo: forwardingTo,
-      replyingTo: replyingTo,
-    );
+    await _keepAliveWhileSending(() async {
+      final result = await _sender.sendVoiceMessage(
+        filePath: filePath,
+        sender: _identity,
+        durationMs: durationMs,
+        forwardingTo: forwardingTo,
+        replyingTo: replyingTo,
+      );
 
-    if (!result.success || result.message == null) {
-      showErrorAlert(result.error ?? 'Failed to send voice message');
-      return;
-    }
+      if (!result.success || result.message == null) {
+        showErrorAlert(result.error ?? 'Failed to send voice message');
+        return;
+      }
 
-    _emitMessages([result.message!, ..._currentMessages]);
+      _emitMessages([result.message!, ..._currentMessages]);
+    });
   }
 
   Future<void> retryMessage(String pendingMessageId) async {
-    final result = await _sender.retryMessage(
-      pendingMessageId,
-      sender: _identity,
-    );
+    await _keepAliveWhileSending(() async {
+      final result = await _sender.retryMessage(
+        pendingMessageId,
+        sender: _identity,
+      );
 
-    if (!result.success || result.message == null) {
-      showErrorAlert(result.error ?? 'Failed to retry message');
-      return;
-    }
+      if (!result.success || result.message == null) {
+        showErrorAlert(result.error ?? 'Failed to retry message');
+        return;
+      }
 
-    final updated = _currentMessages.map((m) {
-      if (m.id == pendingMessageId) return result.message!;
-      return m;
-    }).toList();
-    _emitMessages(updated);
+      final updated = _currentMessages.map((m) {
+        if (m.id == pendingMessageId) return result.message!;
+        return m;
+      }).toList();
+      _emitMessages(updated);
+    });
   }
 
   Future<void> receiveMessage(
@@ -1394,7 +1506,7 @@ class MessagesNotifier extends _$MessagesNotifier {
       _pendingMessages.remove(messageId);
       await _repository.deleteMessage(messageId);
 
-      final currentMessages = (ref.mounted ? state.value : null) ?? [];
+      final currentMessages = _currentMessages;
       final newMessages = currentMessages
           .where((m) => m.id != messageId)
           .toList();

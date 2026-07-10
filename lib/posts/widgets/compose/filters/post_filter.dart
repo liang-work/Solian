@@ -31,7 +31,9 @@ class PostFilterWidget extends HookConsumerWidget {
         initialQuery.periodEnd != null ||
         initialQuery.order != null;
 
-    final includeReplies = useState<bool?>(initialQuery.includeReplies);
+    final includeReplies = useState<bool?>(
+      initialQuery.includeReplies ?? false,
+    );
     final mediaOnly = useState<bool>(initialQuery.mediaOnly ?? false);
     final queryTerm = useState<String?>(initialQuery.queryTerm);
     final searchEngine = useState<String?>(initialQuery.searchEngine);
@@ -94,7 +96,7 @@ class PostFilterWidget extends HookConsumerWidget {
     ].where((it) => it).length;
 
     useEffect(() {
-      includeReplies.value = initialQuery.includeReplies;
+      includeReplies.value = initialQuery.includeReplies ?? false;
       mediaOnly.value = initialQuery.mediaOnly ?? false;
       queryTerm.value = initialQuery.queryTerm;
       searchEngine.value = initialQuery.searchEngine;
@@ -125,7 +127,7 @@ class PostFilterWidget extends HookConsumerWidget {
       return () => categoryTabController.removeListener(onTabChanged);
     }, [categoryTabController]);
 
-    return Card(
+    return Card.outlined(
       margin: EdgeInsets.zero,
       clipBehavior: Clip.antiAlias,
       child: Column(
@@ -167,9 +169,9 @@ class PostFilterWidget extends HookConsumerWidget {
                       emphasized: includeReplies.value != null,
                       onTap: () {
                         includeReplies.value = switch (includeReplies.value) {
-                          false => true,
-                          true => null,
-                          null => false,
+                          false => null,
+                          null => true,
+                          true => false,
                         };
                         updateQuery();
                       },

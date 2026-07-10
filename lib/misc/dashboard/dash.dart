@@ -1,17 +1,14 @@
-import 'dart:math' as math;
 import 'dart:async';
-import 'dart:ui';
 
 import 'package:auto_route/auto_route.dart';
 import 'package:desktop_drop/desktop_drop.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_hooks/flutter_hooks.dart';
+import 'package:flutter_staggered_grid_view/flutter_staggered_grid_view.dart';
 import 'package:gap/gap.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
-import 'package:island_ui_foundation/island_ui_foundation.dart'
-    show HoverEdgeAction;
 import 'package:island/accounts/widgets/account/account_name.dart';
 import 'package:island/accounts/widgets/account/friends_overview.dart';
 import 'package:island/chat/pods/chat_room.dart';
@@ -36,7 +33,12 @@ import 'package:island/sharing/share_sheet.dart';
 import 'package:slide_countdown/slide_countdown.dart';
 import 'package:styled_widget/styled_widget.dart';
 import 'package:island/misc/dashboard/dash_customize.dart';
+import 'package:island/misc/dashboard/dashboard_layout.dart';
+import 'package:island/misc/dashboard/weather.dart';
 import 'package:island/core/config.dart';
+import 'package:island/plugins/apis/dashboard_api.dart';
+import 'package:island/plugins/widgets/plugin_ui_bridge.dart';
+import 'package:island_plugin_foundation/island_plugin_foundation.dart';
 import 'package:solar_network_sdk/solar_network_sdk.dart';
 
 @RoutePage()
@@ -56,6 +58,10 @@ class DashboardScreen extends HookConsumerWidget {
 class DashboardRenderer {
   // Map individual card IDs to widgets
   static Widget buildCard(String cardId, WidgetRef ref) {
+    final pluginItem = PluginManager().getApi<DashboardApi>()?.itemForLayoutId(
+      cardId,
+    );
+    if (pluginItem != null) return _PluginDashboardItem(item: pluginItem);
     switch (cardId) {
       case 'checkIn':
         return CheckInWidget(margin: EdgeInsets.zero);
@@ -74,56 +80,8 @@ class DashboardRenderer {
         return NotificationsCard();
       case 'chatList':
         return ChatListCard();
-      default:
-        return const SizedBox.shrink();
-    }
-  }
-
-  // Map column group IDs to column widgets
-  static Widget buildColumn(String columnId, WidgetRef ref) {
-    switch (columnId) {
-      case 'activityColumn':
-        return SizedBox(
-          width: 400,
-          child: Column(
-            spacing: 16,
-            children: [
-              CheckInWidget(margin: EdgeInsets.zero),
-              const TodayOracleCard(),
-              Expanded(child: FortuneCard()),
-            ],
-          ),
-        );
-      case 'postsColumn':
-        return SizedBox(
-          width: 400,
-          child: LayoutBuilder(
-            builder: (context, constraints) {
-              return PostFeaturedList(
-                collapsable: false,
-                maxHeight: constraints.maxHeight,
-              );
-            },
-          ),
-        );
-      case 'socialColumn':
-        return SizedBox(
-          width: 400,
-          child: SingleChildScrollView(
-            child: Column(
-              spacing: 16,
-              children: [FriendsOverviewWidget(), NotificationsCard()],
-            ),
-          ),
-        );
-      case 'chatsColumn':
-        return SizedBox(
-          width: 400,
-          child: Column(
-            spacing: 16,
-            children: [Expanded(child: ChatListCard())],
-          ),
-        );
+      case 'weather':
+        return const WeatherCard();
       default:
         return const SizedBox.shrink();
     }
@@ -163,89 +121,53 @@ class DashboardGrid extends HookConsumerWidget {
       child: Stack(
         children: [
           Container(
-            constraints: BoxConstraints(
-              maxHeight: isWide
-                  ? math.min(640, MediaQuery.sizeOf(context).height * 0.65)
-                  : MediaQuery.sizeOf(context).height,
-            ),
             padding: isAuthenticated
-                ? (isWide
-                      ? EdgeInsets.only(top: devicePadding.top)
-                      : EdgeInsets.only(top: 24 + devicePadding.top))
+                ? EdgeInsets.only(top: devicePadding.top + (isWide ? 16 : 24))
                 : EdgeInsets.zero,
             child: isAuthenticated
-                ? Column(
-                    spacing: 16,
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      // Clock card spans full width (only if enabled in settings)
-                      if (isWide &&
-                          (appSettings.dashboardConfig?.showClockAndCountdown ??
-                              true))
-                        ClockCard().padding(horizontal: 24)
-                      else if (!isWide)
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
+                ? (isWide
+                      // Desktop: one scroll so a half-viewport spacer can
+                      // rest the search bar near vertical center by default.
+                      ? const _DashboardGridWide()
+                      : Column(
+                          spacing: 16,
+                          mainAxisAlignment: MainAxisAlignment.start,
                           children: [
-                            const Gap(8),
-                            if (appSettings
-                                    .dashboardConfig
-                                    ?.showClockAndCountdown ??
-                                true)
-                              Expanded(child: ClockCard(compact: true)),
-                            if (appSettings.dashboardConfig?.showSearchBar ??
-                                true)
-                              IconButton(
-                                onPressed: () {
-                                  eventBus.fire(CommandPaletteTriggerEvent());
-                                },
-                                icon: const Icon(Symbols.search),
-                                tooltip: 'searchAnything'.tr(),
-                              ),
-                          ],
-                        ).padding(horizontal: 24),
-                      // Row with two cards side by side (only if enabled in settings)
-                      if (isWide &&
-                          (appSettings.dashboardConfig?.showSearchBar ?? true))
-                        Padding(
-                          padding: EdgeInsets.symmetric(
-                            horizontal: isWide ? 24 : 16,
-                          ),
-                          child: SearchBar(
-                            hintText: 'searchAnything'.tr(),
-                            constraints: const BoxConstraints(minHeight: 56),
-                            leading: const Icon(
-                              Symbols.search,
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                const Gap(8),
+                                if (appSettings
+                                        .dashboardConfig
+                                        ?.showClockAndCountdown ??
+                                    true)
+                                  Expanded(child: ClockCard(compact: true)),
+                                if (appSettings
+                                        .dashboardConfig
+                                        ?.showSearchBar ??
+                                    true)
+                                  IconButton(
+                                    onPressed: () {
+                                      eventBus.fire(
+                                        CommandPaletteTriggerEvent(),
+                                      );
+                                    },
+                                    icon: const Icon(Symbols.search),
+                                    tooltip: 'searchAnything'.tr(),
+                                  ),
+                              ],
                             ).padding(horizontal: 24),
-                            readOnly: true,
-                            onTap: () {
-                              eventBus.fire(CommandPaletteTriggerEvent());
-                            },
-                          ),
-                        ),
-                      Expanded(
-                        child:
-                            (isWide
-                                    ? _HoverHorizontalScrollArea(
-                                        padding: const EdgeInsets.symmetric(
-                                          horizontal: 24,
-                                        ),
-                                        child: _DashboardGridWide(),
-                                      )
-                                    : SingleChildScrollView(
-                                        padding: const EdgeInsets.symmetric(
-                                          horizontal: 16,
-                                        ),
-                                        scrollDirection: Axis.vertical,
-                                        child: _DashboardGridNarrow(),
-                                      ))
-                                .clipRRect(
-                                  topLeft: isWide ? 0 : 12,
-                                  topRight: isWide ? 0 : 12,
+                            Expanded(
+                              child: SingleChildScrollView(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 16,
                                 ),
-                      ),
-                    ],
-                  )
+                                scrollDirection: Axis.vertical,
+                                child: _DashboardGridNarrow(),
+                              ).clipRRect(topLeft: 12, topRight: 12),
+                            ),
+                          ],
+                        ))
                 : Center(child: _UnauthorizedCard(isWide: isWide)),
           ),
           // Customize button (positioned for wide screens only)
@@ -280,7 +202,7 @@ class DashboardGrid extends HookConsumerWidget {
                     vertical: 8,
                   ),
                   shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(20),
+                    borderRadius: BorderRadius.circular(8),
                   ),
                 ),
               ),
@@ -303,11 +225,10 @@ class DashboardGrid extends HookConsumerWidget {
                       const Gap(16),
                       Text(
                         'dropToShare'.tr(),
-                        style: Theme.of(context).textTheme.headlineMedium
-                            ?.copyWith(
-                              color: Theme.of(context).colorScheme.primary,
-                              fontWeight: FontWeight.bold,
-                            ),
+                        style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                          color: Theme.of(context).colorScheme.primary,
+                          fontWeight: FontWeight.bold,
+                        ),
                       ),
                     ],
                   ),
@@ -327,139 +248,158 @@ class _DashboardGridWide extends HookConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final userInfo = ref.watch(userInfoProvider);
     final appSettings = ref.watch(appSettingsProvider);
+    final scrollController = useScrollController();
+    final canScrollDown = useState(false);
 
-    final List<Widget> children = [];
+    final showClock =
+        appSettings.dashboardConfig?.showClockAndCountdown ?? true;
+    final showSearch = appSettings.dashboardConfig?.showSearchBar ?? true;
+
+    final List<Widget> cards = [];
 
     // Always include account unactivated card if user is not activated
     if (userInfo.value != null && userInfo.value?.activatedAt == null) {
-      children.add(SizedBox(width: 400, child: AccountUnactivatedCard()));
+      cards.add(const AccountUnactivatedCard());
     }
 
-    // Add configured columns in the specified order
-    final horizontalLayouts =
-        appSettings.dashboardConfig?.horizontalLayouts ??
-        ['activityColumn', 'postsColumn', 'socialColumn', 'chatsColumn'];
+    // Desktop waterfall: individual cards from horizontalLayouts (migrated).
+    final cardIds = DashboardLayout.resolveCardLayouts(
+      appSettings.dashboardConfig?.horizontalLayouts,
+    );
 
-    for (final columnId in horizontalLayouts) {
-      children.add(DashboardRenderer.buildColumn(columnId, ref));
+    for (final cardId in cardIds) {
+      cards.add(DashboardRenderer.buildCard(cardId, ref));
     }
 
-    // If no children, add a SizedBox.expand to maintain width
-    if (children.isEmpty) {
-      children.add(SizedBox(width: MediaQuery.sizeOf(context).width));
-    }
+    final screenHeight = MediaQuery.sizeOf(context).height;
+    // One-fifth viewport so the search/clock block sits slightly lower by default.
+    final topSpacerHeight = screenHeight * 0.2;
 
-    return Row(spacing: 16, children: children);
-  }
-}
-
-class _HoverHorizontalScrollArea extends HookWidget {
-  final Widget child;
-  final EdgeInsetsGeometry? padding;
-
-  const _HoverHorizontalScrollArea({required this.child, this.padding});
-
-  @override
-  Widget build(BuildContext context) {
-    final controller = useScrollController();
-    final isHovered = useState(false);
-    final canScrollLeft = useState(false);
-    final canScrollRight = useState(false);
-
-    void updateScrollState() {
-      if (!controller.hasClients) {
-        canScrollLeft.value = false;
-        canScrollRight.value = false;
+    void updateScrollHint() {
+      if (!scrollController.hasClients) {
+        canScrollDown.value = false;
         return;
       }
-
-      final position = controller.position;
-      canScrollLeft.value = position.pixels > 0;
-      canScrollRight.value = position.pixels < position.maxScrollExtent;
+      final position = scrollController.position;
+      // More content below the viewport (with a small threshold).
+      canScrollDown.value =
+          position.maxScrollExtent > 0 &&
+          position.pixels < position.maxScrollExtent - 4;
     }
 
     useEffect(() {
-      void listener() => updateScrollState();
+      void listener() => updateScrollHint();
+      scrollController.addListener(listener);
+      WidgetsBinding.instance.addPostFrameCallback((_) => updateScrollHint());
+      return () => scrollController.removeListener(listener);
+    }, [scrollController]);
 
-      controller.addListener(listener);
-      WidgetsBinding.instance.addPostFrameCallback((_) => updateScrollState());
+    final theme = Theme.of(context);
+    final fadeColor = theme.scaffoldBackgroundColor;
 
-      return () => controller.removeListener(listener);
-    }, [controller, child, padding]);
+    return Stack(
+      children: [
+        NotificationListener<ScrollMetricsNotification>(
+          onNotification: (_) {
+            updateScrollHint();
+            return false;
+          },
+          child: CustomScrollView(
+            controller: scrollController,
+            primary: false,
+            slivers: [
+              // Push clock + search lower in the viewport by default.
+              SliverToBoxAdapter(child: SizedBox(height: topSpacerHeight)),
+              if (showClock)
+                SliverToBoxAdapter(
+                  child: ClockCard().padding(horizontal: 24, bottom: 16),
+                ),
+              if (showSearch)
+                SliverToBoxAdapter(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 24),
+                    child: SearchBar(
+                      hintText: 'searchAnything'.tr(),
+                      constraints: const BoxConstraints(minHeight: 56),
+                      leading: const Icon(
+                        Symbols.search,
+                      ).padding(horizontal: 24),
+                      readOnly: true,
+                      onTap: () {
+                        eventBus.fire(CommandPaletteTriggerEvent());
+                      },
+                    ),
+                  ),
+                ),
+              if (showClock || showSearch)
+                const SliverToBoxAdapter(child: SizedBox(height: 24)),
+              // Waterfall of section cards, centered on ultra-wide monitors.
+              if (cards.isNotEmpty)
+                SliverLayoutBuilder(
+                  builder: (context, constraints) {
+                    const maxContentWidth = 1400.0;
+                    const horizontalPadding = 24.0;
+                    final available = constraints.crossAxisExtent;
+                    final sideInset = available > maxContentWidth
+                        ? (available - maxContentWidth) / 2
+                        : 0.0;
 
-    Future<void> scrollBy(double direction) async {
-      if (!controller.hasClients) return;
-      final position = controller.position;
-      final delta = math.max(position.viewportDimension * 0.8, 280.0);
-      final target = (position.pixels + delta * direction).clamp(
-        0.0,
-        position.maxScrollExtent,
-      );
-      await controller.animateTo(
-        target,
-        duration: const Duration(milliseconds: 220),
-        curve: Curves.easeOutCubic,
-      );
-    }
-
-    final scrollBehavior = ScrollConfiguration.of(context).copyWith(
-      dragDevices: {PointerDeviceKind.touch, PointerDeviceKind.trackpad},
-    );
-
-    return MouseRegion(
-      onEnter: (_) => isHovered.value = true,
-      onExit: (_) => isHovered.value = false,
-      child: Stack(
-        children: [
-          Positioned.fill(
-            child: ScrollConfiguration(
-              behavior: scrollBehavior,
-              child: SingleChildScrollView(
-                controller: controller,
-                padding: padding,
-                scrollDirection: Axis.horizontal,
-                child: child,
-              ),
-            ),
+                    return SliverPadding(
+                      padding: EdgeInsets.fromLTRB(
+                        horizontalPadding + sideInset,
+                        0,
+                        horizontalPadding + sideInset,
+                        0,
+                      ),
+                      sliver: SliverMasonryGrid(
+                        gridDelegate:
+                            const SliverSimpleGridDelegateWithMaxCrossAxisExtent(
+                              maxCrossAxisExtent: 400,
+                            ),
+                        mainAxisSpacing: 16,
+                        crossAxisSpacing: 16,
+                        delegate: SliverChildBuilderDelegate(
+                          (context, index) => cards[index],
+                          childCount: cards.length,
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              // Match the top spacer so content can settle with the same breathing room.
+              SliverToBoxAdapter(child: SizedBox(height: topSpacerHeight)),
+            ],
           ),
-          Positioned(
-            left: 12,
-            top: 0,
-            bottom: 0,
-            child: Center(
-              child: HoverEdgeAction(
-                axis: Axis.horizontal,
-                leading: true,
-                isVisible: isHovered.value && canScrollLeft.value,
-                onTap: () => scrollBy(-1),
-                child: const Icon(
-                  Symbols.chevron_left,
-                  color: Colors.white,
-                  size: 20,
+        ),
+        // Fade at the bottom when more content is scrollable below.
+        Positioned(
+          left: 0,
+          right: 0,
+          bottom: 0,
+          height: 80,
+          child: IgnorePointer(
+            child: AnimatedOpacity(
+              opacity: canScrollDown.value ? 1 : 0,
+              duration: const Duration(milliseconds: 180),
+              curve: Curves.easeOut,
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [
+                      fadeColor.withOpacity(0),
+                      fadeColor.withOpacity(0.72),
+                      fadeColor.withOpacity(0.95),
+                    ],
+                    stops: const [0.0, 0.55, 1.0],
+                  ),
                 ),
               ),
             ),
           ),
-          Positioned(
-            right: 12,
-            top: 0,
-            bottom: 0,
-            child: Center(
-              child: HoverEdgeAction(
-                axis: Axis.horizontal,
-                leading: false,
-                isVisible: isHovered.value && canScrollRight.value,
-                onTap: () => scrollBy(1),
-                child: const Icon(
-                  Symbols.chevron_right,
-                  color: Colors.white,
-                  size: 20,
-                ),
-              ),
-            ),
-          ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 }
@@ -479,20 +419,12 @@ class _DashboardGridNarrow extends HookConsumerWidget {
       children.add(AccountUnactivatedCard());
     }
 
-    // Add configured cards in the specified order
-    final verticalLayouts =
-        appSettings.dashboardConfig?.verticalLayouts ??
-        [
-          'checkIn',
-          'fortuneCard',
-          'postFeatured',
-          'friendsOverview',
-          'notifications',
-          'chatList',
-          'fortuneGraph',
-        ];
+    // Mobile single-column: individual cards from verticalLayouts.
+    final cardIds = DashboardLayout.resolveCardLayouts(
+      appSettings.dashboardConfig?.verticalLayouts,
+    );
 
-    for (final cardId in verticalLayouts) {
+    for (final cardId in cardIds) {
       children.add(DashboardRenderer.buildCard(cardId, ref));
     }
 
@@ -523,14 +455,61 @@ class _DashboardGridNarrow extends HookConsumerWidget {
             backgroundColor: Theme.of(context).colorScheme.surface,
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
             shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(20),
+              borderRadius: BorderRadius.circular(8),
             ),
           ),
         ).padding(bottom: 80),
       ),
     );
 
-    return Column(spacing: 16, children: children);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      spacing: 16,
+      children: children,
+    );
+  }
+}
+
+class _PluginDashboardItem extends StatefulWidget {
+  final PluginDashboardItem item;
+
+  const _PluginDashboardItem({required this.item});
+
+  @override
+  State<_PluginDashboardItem> createState() => _PluginDashboardItemState();
+}
+
+class _PluginDashboardItemState extends State<_PluginDashboardItem> {
+  PluginUiDescriptor? _descriptor;
+
+  @override
+  void initState() {
+    super.initState();
+    _buildItem();
+  }
+
+  void _buildItem([String? callback, String? value]) {
+    final runtime = PluginManager().plugins[widget.item.pluginId]?.runtime;
+    if (runtime == null) return;
+    final result = runtime.callFunction(
+      callback ?? widget.item.handlerName,
+      value == null ? null : [value],
+    );
+    final descriptor = switch (result) {
+      String value => PluginUiRenderer.parse(value),
+      Map value when value['type'] is String => PluginUiDescriptor(
+        type: value['type'] as String,
+        data: value.map((key, value) => MapEntry(key.toString(), value)),
+      ),
+      _ => null,
+    };
+    if (mounted) setState(() => _descriptor = descriptor);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_descriptor == null) return const SizedBox.shrink();
+    return PluginUiRenderer(descriptor: _descriptor!, onCallback: _buildItem);
   }
 }
 
@@ -823,6 +802,7 @@ class ChatListCard extends HookConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final chatRooms = ref.watch(chatRoomJoinedProvider);
+    final chatSummaries = ref.watch(chatSummaryProvider);
     final chatUnreadCount = ref.watch(chatUnreadCountProvider);
 
     return Card(
@@ -872,8 +852,18 @@ class ChatListCard extends HookConsumerWidget {
                 if (rooms.isEmpty) {
                   return Center(child: Text('noChatRoomsAvailable'.tr()));
                 }
-                // Take only the first 5 rooms
-                final recentRooms = rooms.take(5).toList();
+                // Sort rooms by last message time (most recent first), then take top 5
+                final summaries = chatSummaries.asData?.value ?? {};
+                final sortedRooms = List<SnChatRoom>.from(rooms)
+                  ..sort((a, b) {
+                    final aTime = summaries[a.id]?.lastMessage?.createdAt;
+                    final bTime = summaries[b.id]?.lastMessage?.createdAt;
+                    if (aTime == null && bTime == null) return 0;
+                    if (aTime == null) return 1;
+                    if (bTime == null) return -1;
+                    return bTime.compareTo(aTime);
+                  });
+                final recentRooms = sortedRooms.take(5).toList();
                 return Column(
                   children: recentRooms.map((room) {
                     return ChatRoomListTile(

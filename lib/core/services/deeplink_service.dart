@@ -150,6 +150,87 @@ String? parseAuthQrChallengeId(String rawValue) {
   return null;
 }
 
+String? parseWalletOrderId(String rawValue) {
+  final value = rawValue.trim();
+  if (value.isEmpty) return null;
+
+  final uri = Uri.tryParse(value);
+  if (uri == null) return null;
+
+  final segments = uri.pathSegments;
+  final isSolianOrder =
+      uri.scheme == 'solian' &&
+      (uri.host == 'orders' || uri.host == 'order') &&
+      segments.length == 1;
+  final isWebOrder =
+      (uri.host == 'solian.app' || uri.host.endsWith('.solian.app')) &&
+      segments.length >= 2 &&
+      segments[0] == 'orders';
+
+  if (isSolianOrder) {
+    final id = segments[0].trim();
+    return id.isEmpty ? null : id;
+  }
+
+  if (isWebOrder) {
+    final id = segments[1].trim();
+    return id.isEmpty ? null : id;
+  }
+
+  return null;
+}
+
+class PhysicalPassportDeepLink {
+  final String? tagId;
+  final Map<String, String>? queryParameters;
+
+  const PhysicalPassportDeepLink({this.tagId, this.queryParameters});
+
+  bool get isPathBased => tagId != null;
+  bool get isQueryBased =>
+      queryParameters != null && queryParameters!.isNotEmpty;
+}
+
+PhysicalPassportDeepLink? parsePhysicalPassportDeepLink(String rawValue) {
+  final value = rawValue.trim();
+  if (value.isEmpty) return null;
+
+  final uri = Uri.tryParse(value);
+  if (uri == null) return null;
+
+  final isSolianPhpass = uri.scheme == 'solian' && uri.host == 'phpass';
+  final isWebPhpass =
+      (uri.host == 'solian.app' || uri.host.endsWith('.solian.app')) &&
+      uri.pathSegments.isNotEmpty &&
+      uri.pathSegments[0] == 'phpass';
+
+  if (isSolianPhpass) {
+    if (uri.pathSegments.isNotEmpty) {
+      final tagId = uri.pathSegments.first.trim();
+      if (tagId.isNotEmpty) {
+        return PhysicalPassportDeepLink(tagId: tagId);
+      }
+    }
+    if (uri.queryParameters.isNotEmpty) {
+      return PhysicalPassportDeepLink(queryParameters: uri.queryParameters);
+    }
+  }
+
+  if (isWebPhpass) {
+    if (uri.pathSegments.length >= 2) {
+      final tagId = uri.pathSegments[1].trim();
+      if (tagId.isNotEmpty) {
+        return PhysicalPassportDeepLink(tagId: tagId);
+      }
+    }
+    if (uri.queryParameters.isNotEmpty) {
+      return PhysicalPassportDeepLink(queryParameters: uri.queryParameters);
+    }
+  }
+
+  return null;
+}
+
 class _ProtocolListener implements ProtocolListener {
   final void Function(String) _onProtocolUrlReceived;
 

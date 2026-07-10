@@ -351,12 +351,7 @@ class PostActionableItem extends HookConsumerWidget {
           );
 
     final widgetItem = ContextMenuWidget(
-      previewBuilder: (_, child) {
-        return Material(
-          color: Theme.of(context).colorScheme.onSurface,
-          child: child,
-        );
-      },
+      previewBuilder: contextMenuPreviewBuilder,
       menuProvider: (_) {
         return Menu(
           children: [
@@ -649,6 +644,18 @@ class PostItem extends HookConsumerWidget {
             item: item,
             renderingPadding: renderingPadding,
             onPostTap: onPostTap,
+          ),
+        if (item.sponsored)
+          Padding(
+            padding: EdgeInsets.only(
+              left: renderingPadding.horizontal,
+              right: renderingPadding.horizontal,
+              bottom: 6,
+            ),
+            child: const Align(
+              alignment: Alignment.centerLeft,
+              child: SponsoredBadge(),
+            ),
           ),
         PostHeader(
           item: item,

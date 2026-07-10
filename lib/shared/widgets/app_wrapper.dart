@@ -5,6 +5,7 @@ import 'dart:convert';
 import 'dart:ui';
 import 'package:auto_route/auto_route.dart';
 import 'package:dio/dio.dart';
+import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_hooks/flutter_hooks.dart';
@@ -29,6 +30,7 @@ import 'package:island/chat/widgets/call_window.dart';
 import 'package:island/chat/widgets/pending_join_sheet.dart';
 import 'package:island/notifications/notification.dart';
 import 'package:island/posts/widgets/compose/compose_dialog.dart';
+import 'package:island/payments/payment_overlay.dart';
 import 'package:island/route.dart';
 import 'package:island/route.gr.dart';
 import 'package:island/shared/widgets/app_onboarding_sheet.dart';
@@ -45,10 +47,16 @@ import 'package:island/core/audio.dart';
 import 'package:island/core/config.dart';
 import 'package:island/core/network.dart';
 import 'package:island/core/websocket.dart';
+import 'package:island/plugins/plugin.dart';
 import 'package:island/auth/login_content.dart';
 import 'package:island/misc/tray_manager.dart';
 import 'package:island/core/services/notify.dart';
 import 'package:island/core/services/sharing_intent.dart';
+import 'package:island/accounts/screens/physical_passport.dart';
+import 'package:island/accounts/widgets/account/account_nameplate.dart';
+import 'package:island/shared/widgets/layouts/sheet_scaffold.dart';
+import 'package:island/shared/widgets/response.dart';
+import 'package:gap/gap.dart';
 import 'package:island/core/services/update_service.dart';
 import 'package:island/core/widgets/content/network_status_sheet.dart';
 import 'package:island/core/tour/tour.dart';
@@ -106,13 +114,23 @@ class AppWrapper extends HookConsumerWidget {
     final recentlyHandledInvites = useRef(<String, DateTime>{});
     final lastHandledAcceptedRoomId = useRef<String?>(null);
 
+    // Attach the app WebSocket to the plugin host API so plugins can
+    // subscribe / send packets (see PluginWebsocketApi).
+    useEffect(() {
+      final service = ref.read(websocketProvider);
+      final wsApi = PluginController.instance.getApi<PluginWebsocketApi>();
+      wsApi?.attach(service);
+      return null;
+    }, const []);
+
     void kickCallKitMicrophone(String reason) {
       if (kIsWeb || !Platform.isIOS) return;
       final callState = ref.read(callProvider);
       final nativeState = ref.read(nativeCallBridgeProvider);
       if (!callState.isConnected ||
           !nativeState.isAudioSessionActive ||
-          nativeState.callKitAcceptedRoomId == null) {
+          nativeState.callUuid == null ||
+          nativeState.roomId == null) {
         return;
       }
       Logger.root.info(
@@ -202,6 +220,32 @@ class AppWrapper extends HookConsumerWidget {
         );
       }
 
+      BuildContext? resolveInviteModalContext() {
+        final router = ref.read(routerProvider);
+        final navigatorState = router.navigatorKey.currentState;
+        final overlayContext = navigatorState?.overlay?.context;
+        if (overlayContext != null && overlayContext.mounted) {
+          return overlayContext;
+        }
+
+        final navigatorContext = router.navigatorKey.currentContext;
+        if (navigatorContext != null && navigatorContext.mounted) {
+          return navigatorContext;
+        }
+
+        return null;
+      }
+
+      Future<BuildContext?> waitForInviteModalContext([int retry = 0]) async {
+        final context = resolveInviteModalContext();
+        if (context != null) return context;
+        if (retry >= 16) return null;
+
+        await WidgetsBinding.instance.endOfFrame;
+        await Future<void>.delayed(const Duration(milliseconds: 16));
+        return waitForInviteModalContext(retry + 1);
+      }
+
       bool shouldSuppressInvite(IncomingCallInvite invite) {
         final callState = ref.read(callProvider);
         final callNotifier = ref.read(callProvider.notifier);
@@ -229,34 +273,54 @@ class AppWrapper extends HookConsumerWidget {
           return;
         }
 
-        final router = ref.read(routerProvider);
-        final navigatorContext = router.navigatorKey.currentContext;
-        if (navigatorContext == null || !navigatorContext.mounted) {
+        final modalContext = await waitForInviteModalContext();
+        if (modalContext == null) {
+          Logger.root.warning(
+            '[AppWrapper] Invite sheet aborted: navigator context unavailable for ${invite.dedupeKey}',
+          );
           return;
         }
 
         activeInviteKey.value = invite.dedupeKey;
-        await playCallInvitedSfxLoop(ref);
-        if (!navigatorContext.mounted) return;
-        final shouldJoin = await showModalBottomSheet<bool>(
-          context: navigatorContext,
-          useRootNavigator: true,
-          useSafeArea: true,
-          isScrollControlled: true,
-          builder: (context) => IncomingCallInviteSheet(
-            invite: invite,
-            onJoin: () => Navigator.pop(context, true),
-            onDismiss: () => Navigator.pop(context, false),
-          ),
-        ).whenComplete(() => stopCallInvitedSfxLoop(ref));
-        activeInviteKey.value = null;
+        bool shouldRecordInvite = false;
+        bool shouldJoin = false;
+        try {
+          await playCallInvitedSfxLoop(ref);
+          if (!modalContext.mounted) return;
+
+          shouldJoin =
+              await showModalBottomSheet<bool>(
+                context: modalContext,
+                useRootNavigator: true,
+                useSafeArea: true,
+                isScrollControlled: true,
+                builder: (context) => IncomingCallInviteSheet(
+                  invite: invite,
+                  onJoin: () => Navigator.pop(context, true),
+                  onDismiss: () => Navigator.pop(context, false),
+                ),
+              ) ==
+              true;
+          shouldRecordInvite = true;
+        } catch (err, st) {
+          Logger.root.severe(
+            '[AppWrapper] Failed to present incoming call invite for ${invite.dedupeKey}',
+            err,
+            st,
+          );
+        } finally {
+          activeInviteKey.value = null;
+          await stopCallInvitedSfxLoop(ref);
+        }
 
         final now = DateTime.now();
-        recentlyHandledInvites.value[invite.dedupeKey] = shouldJoin == true
-            ? now.add(const Duration(minutes: 2))
-            : now.add(const Duration(seconds: 30));
+        if (shouldRecordInvite) {
+          recentlyHandledInvites.value[invite.dedupeKey] = shouldJoin
+              ? now.add(const Duration(minutes: 2))
+              : now.add(const Duration(seconds: 30));
+        }
 
-        if (shouldJoin == true) {
+        if (shouldJoin) {
           await _navigateToCallScreen(
             ref,
             invite.roomId,
@@ -287,9 +351,9 @@ class AppWrapper extends HookConsumerWidget {
     useEffect(() {
       if (!isNativeCallAvailable) return null;
 
-      final sub = ref.listenManual(nativeCallBridgeProvider, (
-        previous,
-        current,
+      void handleNativeCallState(
+        NativeCallState? previous,
+        NativeCallState current,
       ) {
         Logger.root.info(
           '[AppWrapper] Native call state changed '
@@ -332,16 +396,6 @@ class AppWrapper extends HookConsumerWidget {
           return;
         }
 
-        if (!kIsWeb &&
-            Platform.isIOS &&
-            current.isAcceptedPending &&
-            !current.isAudioSessionActive) {
-          Logger.root.info(
-            '[AppWrapper] Waiting for CallKit audio session before joining room=$currRoomId',
-          );
-          return;
-        }
-
         if (currRoomId != lastHandledAcceptedRoomId.value &&
             (current.isAcceptedPending || current.isConnected)) {
           lastHandledAcceptedRoomId.value = currRoomId;
@@ -362,7 +416,16 @@ class AppWrapper extends HookConsumerWidget {
             }
           }());
         }
-      });
+      }
+
+      final sub = ref.listenManual(
+        nativeCallBridgeProvider,
+        handleNativeCallState,
+      );
+      unawaited(() async {
+        await ref.read(nativeCallBridgeProvider.notifier).ensureInitialized();
+        handleNativeCallState(null, ref.read(nativeCallBridgeProvider));
+      }());
       return sub.close;
     }, []);
 
@@ -385,7 +448,8 @@ class AppWrapper extends HookConsumerWidget {
           if (!kIsWeb && Platform.isIOS) {
             final nativeState = ref.read(nativeCallBridgeProvider);
             if (nativeState.isAudioSessionActive &&
-                nativeState.callKitAcceptedRoomId != null) {
+                nativeState.callUuid != null &&
+                nativeState.roomId != null) {
               kickCallKitMicrophone('call connected');
             }
           }
@@ -852,6 +916,7 @@ class AppWrapper extends HookConsumerWidget {
   void _handleDeepLink(Uri uri, WidgetRef ref, BuildContext context) async {
     String path = '/${uri.host}${uri.path}';
     final transferRequestId = parseWalletTransferRequestId(uri.toString());
+    final orderId = parseWalletOrderId(uri.toString());
 
     if (transferRequestId != null) {
       try {
@@ -860,6 +925,20 @@ class AppWrapper extends HookConsumerWidget {
           ref: ref,
           requestId: transferRequestId,
         );
+      } catch (err) {
+        showErrorAlert(err);
+      }
+
+      if (!kIsWeb &&
+          (Platform.isWindows || Platform.isLinux || Platform.isMacOS)) {
+        windowManager.show();
+      }
+      return;
+    }
+
+    if (orderId != null) {
+      try {
+        await _handleWalletOrderDeepLink(context, ref, orderId);
       } catch (err) {
         showErrorAlert(err);
       }
@@ -935,12 +1014,14 @@ class AppWrapper extends HookConsumerWidget {
       return;
     }
 
-    if (path.startsWith('/phpass/')) {
-      final tagId = path.substring('/phpass/'.length);
-      if (tagId.isNotEmpty) {
-        context.router.navigate(PhysicalPassportRoute());
-        return;
-      }
+    final passportDeepLink = parsePhysicalPassportDeepLink(uri.toString());
+    if (passportDeepLink != null) {
+      await _handlePhysicalPassportDeepLink(
+        context,
+        ref,
+        passportDeepLink,
+      );
+      return;
     }
 
     if (path == '/dashboard') {
@@ -968,6 +1049,180 @@ class AppWrapper extends HookConsumerWidget {
         (Platform.isWindows || Platform.isLinux || Platform.isMacOS)) {
       windowManager.show();
     }
+  }
+
+  Future<void> _handleWalletOrderDeepLink(
+    BuildContext context,
+    WidgetRef ref,
+    String orderId,
+  ) async {
+    showLoadingModal(context);
+    try {
+      final client = ref.read(solarNetworkClientProvider);
+      final response = await client.dio.get('/wallet/orders/$orderId');
+      final data = Map<String, dynamic>.from(response.data as Map);
+      final order = SnWalletOrder.fromJson(data);
+      final orderInfo = PaymentOverlayOrderInfo.fromJson(data);
+
+      if (context.mounted) {
+        hideLoadingModal(context);
+      }
+      if (!context.mounted) return;
+
+      if (order.status == 0 && !order.expiredAt.isBefore(DateTime.now())) {
+        final paidOrder = await PaymentOverlay.show(
+          context: context,
+          order: order,
+          orderInfo: orderInfo,
+        );
+        if (paidOrder != null) {
+          ref.invalidate(walletCurrentProvider);
+          ref.invalidate(walletListProvider);
+          ref.invalidate(walletStatsProvider);
+          showSnackBar('paymentSuccess'.tr());
+        }
+        return;
+      }
+
+      if (order.status == 1) {
+        showSnackBar('paymentSuccess'.tr());
+      } else if (order.status == 2) {
+        showSnackBar('completed'.tr());
+      } else if (order.status == 3) {
+        showSnackBar('cancelled'.tr());
+      } else {
+        showSnackBar('expired'.tr());
+      }
+    } finally {
+      if (context.mounted) {
+        hideLoadingModal(context);
+      }
+    }
+  }
+
+  Future<void> _handlePhysicalPassportDeepLink(
+    BuildContext context,
+    WidgetRef ref,
+    PhysicalPassportDeepLink link,
+  ) async {
+    final navigatorContext =
+        ref.read(routerProvider).navigatorKey.currentContext ?? context;
+
+    showModalBottomSheet(
+      context: navigatorContext,
+      isScrollControlled: true,
+      useRootNavigator: true,
+      builder: (sheetContext) {
+        return Consumer(
+          builder: (context, sheetRef, child) {
+            if (link.isPathBased) {
+              final asyncData = sheetRef.watch(
+                scanPhysicalPassportProvider(link.tagId!),
+              );
+              return _buildPassportScanSheet(sheetContext, asyncData);
+            } else {
+              final asyncData = sheetRef.watch(
+                scanPhysicalPassportByParamsProvider(
+                  link.queryParameters!,
+                ),
+              );
+              return _buildPassportScanSheet(sheetContext, asyncData);
+            }
+          },
+        );
+      },
+    );
+  }
+
+  Widget _buildPassportScanSheet(
+    BuildContext context,
+    AsyncValue<SnScanResult> asyncData,
+  ) {
+    return SheetScaffold(
+      heightFactor: 0.5,
+      titleText: 'scanPhysicalPassport'.tr(),
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.all(24),
+        child: asyncData.when(
+          data: (result) => _buildScanResultCard(context, result),
+          error: (error, _) => ResponseErrorWidget(
+            error: error,
+            onRetry: () => Navigator.of(context).pop(),
+          ),
+          loading: () => const ResponseLoadingWidget(),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildScanResultCard(BuildContext context, SnScanResult result) {
+    final colorScheme = Theme.of(context).colorScheme;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (result.account != null)
+          Card(
+            margin: EdgeInsets.zero,
+            child: InkWell(
+              child: AccountNameplate(
+                name: result.account!.name,
+                isOutlined: false,
+              ),
+              onTap: () {
+                context.router.push(
+                  AccountProfileRoute(name: result.account!.name),
+                );
+              },
+            ),
+          )
+        else
+          Card(
+            elevation: 0,
+            margin: EdgeInsets.zero,
+            color: colorScheme.primaryContainer,
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Icon(
+                        Symbols.check_circle,
+                        color: colorScheme.primary,
+                        size: 20,
+                      ),
+                      const Gap(8),
+                      Text(
+                        'physicalPassportScanned'.tr(),
+                        style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                          color: colorScheme.primary,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const Gap(12),
+                  Text(
+                    'ID: ${result.id}',
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      fontFamily: 'monospace',
+                    ),
+                  ),
+                  const Gap(12),
+                  Text('tagNotClaimed'.tr()),
+                ],
+              ),
+            ),
+          ),
+        const Gap(24),
+        FilledButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: Text('done').tr(),
+        ),
+      ],
+    );
   }
 
   Future<void> _handleProtocolWebAuth(
@@ -1122,7 +1377,17 @@ class AppWrapper extends HookConsumerWidget {
         '[AppWrapper] Navigating to CallScreen for room=$roomId',
       );
       final router = ref.read(routerProvider);
-      final ctx = router.navigatorKey.currentContext;
+      Future<BuildContext?> waitForNavigatorContext([int retry = 0]) async {
+        final ctx = router.navigatorKey.currentContext;
+        if (ctx != null && ctx.mounted) return ctx;
+        if (retry >= 16) return null;
+
+        await WidgetsBinding.instance.endOfFrame;
+        await Future<void>.delayed(const Duration(milliseconds: 16));
+        return waitForNavigatorContext(retry + 1);
+      }
+
+      final ctx = await waitForNavigatorContext();
       if (ctx == null || !ctx.mounted) {
         Logger.root.warning(
           '[AppWrapper] Navigation aborted: navigator context unavailable for room=$roomId',
